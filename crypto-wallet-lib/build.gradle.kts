@@ -17,15 +17,17 @@ kotlin {
         }
         publishLibraryVariants("release", "debug")
     }
-    
-    val xcf = XCFramework()
+
+    val xcframeworkName = "crypto-wallet-lib"
+    val xcf = XCFramework(xcframeworkName)
     listOf(
         iosX64(),
         iosArm64(),
         iosSimulatorArm64()
     ).forEach {
         it.binaries.framework {
-            baseName = "crypto-wallet-lib"
+            baseName = xcframeworkName
+            binaryOption("bundleId", "org.lybia.${xcframeworkName}")
             xcf.add(this)
             isStatic = true
         }
