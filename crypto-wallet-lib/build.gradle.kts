@@ -61,8 +61,10 @@ kotlin {
             implementation("org.web3j:core:4.8.9-android")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
             implementation("io.ktor:ktor-client-okhttp:$ktor_version")
+            implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
 
             implementation("com.github.kotlin-graphics:kotlin-unsigned:v2.1")
+            implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22")
             implementation("co.nstant.in:cbor:0.9")
             implementation("com.madgag.spongycastle:core:1.58.0.0")
             implementation("com.madgag.spongycastle:prov:1.58.0.0")
@@ -105,7 +107,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.innfocus",
         artifactId = "crypto-wallet-lib",
-        version = "1.0.2-alpha.2"
+        version = "1.0.2-alpha.3"
     )
 
     // Configure POM metadata for the published artifact
