@@ -1,4 +1,5 @@
 import com.vanniktech.maven.publish.SonatypeHost
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 
 plugins {
@@ -11,8 +12,10 @@ plugins {
 kotlin {
     androidTarget {
         compilations.all {
-            kotlinOptions {
-                jvmTarget = "1.8"
+            compileTaskProvider.configure {
+                compilerOptions{
+                    jvmTarget.set(JvmTarget.JVM_1_8)
+                }
             }
         }
         publishLibraryVariants("release", "debug")
@@ -46,6 +49,7 @@ kotlin {
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.ktor.client.logging)
             implementation("com.squareup.okio:okio:3.9.0")
+
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -57,6 +61,23 @@ kotlin {
             implementation("org.web3j:core:4.8.9-android")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
             implementation("io.ktor:ktor-client-okhttp:$ktor_version")
+
+            implementation("com.github.kotlin-graphics:kotlin-unsigned:v2.1")
+            implementation("co.nstant.in:cbor:0.9")
+            implementation("com.madgag.spongycastle:core:1.58.0.0")
+            implementation("com.madgag.spongycastle:prov:1.58.0.0")
+            implementation("org.whispersystems:curve25519-android:0.5.0")
+            implementation("com.google.guava:guava:32.1.3-android")
+
+            implementation("io.reactivex.rxjava2:rxjava:2.2.21")
+            implementation("io.reactivex.rxjava2:rxandroid:2.1.1")
+            implementation("io.reactivex.rxjava2:rxkotlin:2.4.0")
+
+            implementation("com.google.code.gson:gson:2.10.1")
+            implementation("com.squareup.retrofit2:retrofit:2.11.0")
+            implementation("com.squareup.retrofit2:converter-gson:2.11.0")
+            implementation("com.squareup.okhttp3:okhttp:5.0.0-alpha.14")
+            implementation("com.squareup.retrofit2:adapter-rxjava2:2.11.0")
         }
 
         iosMain.dependencies {
@@ -84,7 +105,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.innfocus",
         artifactId = "crypto-wallet-lib",
-        version = "1.0.2-alpha.1"
+        version = "1.0.2-alpha.2"
     )
 
     // Configure POM metadata for the published artifact

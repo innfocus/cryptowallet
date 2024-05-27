@@ -32,15 +32,11 @@ Use Xcode to add the project (**File -> Add Package Dependencies**)
     import com.lybia.cryptowallet.CoinNetwork
     import com.lybia.cryptowallet.enums.NetworkName
 
-    private var coinNetwork = CoinNetwork(NetworkName,
-                                'infuraURL',
-                                'infuraTestNetURL',
-                                'explorerNetworkUrl',
-                                'explorerTestNetUrl',
-                                'owlRacleUrl',
-                                'explorerAPIKEY',
-                                'infuraAPIKey',
-                                'owlAPIKey'
+    private var coinNetwork = CoinNetwork(
+                                name = NetworkName,
+                                apiKeyExplorer = "explorerAPIKey",
+                                apiKeyInfura = "infuraAPIKey",
+
     )
 ```
 
@@ -50,13 +46,28 @@ Use Xcode to add the project (**File -> Add Package Dependencies**)
         import crypto_wallet_lib
 
         static let arbitrumCoinNetwork = CoinNetwork(name: NetworkName,
-                                                 infuraApiUrl: "",
-                                                 infuraTestNetUrl: "",
-                                                 explorerUrl: "",
-                                                 explorerTestNetUrl: "",
-                                                 owlRacleUrl: "",
                                                  apiKeyExplorer: "",
                                                  apiKeyInfura: "",
                                                  apiKeyOwlRacle: ""
                                                  )
 ```
+
+## Build Ios XCFramework
+
+### Export XCFramework to binary file
+
+```
+    ./gradlew :crypto-wallet-lib:assembleCrypto-wallet-libReleaseXCFramework
+```
+
+After export XCFramework, zip the folder exported from **crypto-wallet-lib -> build -> XCFramework -> release -> crypto_wallet_lib.xcframework** and storage (Github Release)
+
+### Calculate Checksum and run cmd
+
+Calculate checksum the zip file and run the command below
+
+```
+    swift package compute-checksum crypto_wallet_lib.xcframework.zip
+```
+
+Update link binary XCFramework and checksum to Package.swift
