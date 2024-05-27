@@ -14,7 +14,7 @@ class OwlRacleService {
         val shared: OwlRacleService = OwlRacleService()
     }
     suspend fun getAllGasPrice(coin: CoinNetwork): GasPrice?{
-        val response = HttpClientService.INSTANCE.client.get(coin.owlRacleUrl){
+        val response = HttpClientService.INSTANCE.client.get(coin.getOwlRacleUrl()){
             url{
                 parameters.append("apikey",coin.apiKeyOwlRacle)
                 parameters.append("blocks","200")
