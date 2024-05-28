@@ -3,9 +3,6 @@ import PackageDescription
 
 let package = Package(
    name: "crypto-wallet-lib",
-   platforms: [
-     .iOS(.v13),
-   ],
    products: [
       .library(name: "crypto-wallet-lib", targets: ["crypto-wallet-lib"])
    ],
