@@ -1,122 +1,116 @@
-package com.lybia.cryptowallet.coinkits.hdwallet.core.helpers;
+package com.lybia.cryptowallet.coinkits.hdwallet.core.helpers
+
+import java.util.Arrays
 
 
-import java.util.Arrays;
-
-public class Base58 {
-
-    public enum Base58Type {
-        Basic,
-        Ripple;
-
-        public char[] ALPHABET() {
-            char[] rs = new char[128];
-            switch (this) {
-                case Basic:
-                    return "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".toCharArray();
-                case Ripple:
-                    return "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz".toCharArray();
-            }
-            return rs;
-        }
-
-        public char ENCODED_ZERO() {
-            return ALPHABET()[0];
-        }
-
-        public int[] INDEXES() {
-            int[] rs = new int[128];
-            Arrays.fill(rs, -1);
-            for (int i = 0; i < ALPHABET().length; i++) {
-                rs[ALPHABET()[i]] = i;
-            }
-            return rs;
-        }
-    }
-
-    public static String encode(byte[] input) {
-        return encode(input, Base58Type.Basic);
-    }
-
-    public static String encode(byte[] input, Base58Type type) {
-        if (input.length == 0) {
-            return "";
+object Base58 {
+    @JvmOverloads
+    fun encode(input: ByteArray, type: Base58Type = Base58Type.Basic): String {
+        var input = input
+        if (input.size == 0) {
+            return ""
         }
         // Count leading zeros.
-        int zeros = 0;
-        while (zeros < input.length && input[zeros] == 0) {
-            ++zeros;
+        var zeros = 0
+        while (zeros < input.size && input[zeros].toInt() == 0) {
+            ++zeros
         }
         // Convert base-256 digits to base-58 digits (plus conversion to ASCII characters)
-        input = Arrays.copyOf(input, input.length); // since we modify it in-place
-        char[] encoded = new char[input.length * 2]; // upper bound
-        int outputStart = encoded.length;
-        for (int inputStart = zeros; inputStart < input.length; ) {
-            encoded[--outputStart] = type.ALPHABET()[divmod(input, inputStart, 256, 58)];
-            if (input[inputStart] == 0) {
-                ++inputStart; // optimization - skip leading zeros
+        input = input.copyOf(input.size) // since we modify it in-place
+        val encoded = CharArray(input.size * 2) // upper bound
+        var outputStart = encoded.size
+        var inputStart = zeros
+        while (inputStart < input.size) {
+            encoded[--outputStart] = type.ALPHABET()[divmod(input, inputStart, 256, 58).toInt()]
+            if (input[inputStart].toInt() == 0) {
+                ++inputStart // optimization - skip leading zeros
             }
         }
         // Preserve exactly as many leading encoded zeros in output as there were leading zeros in input.
-        while (outputStart < encoded.length && encoded[outputStart] == type.ENCODED_ZERO()) {
-            ++outputStart;
+        while (outputStart < encoded.size && encoded[outputStart] == type.ENCODED_ZERO()) {
+            ++outputStart
         }
         while (--zeros >= 0) {
-            encoded[--outputStart] = type.ENCODED_ZERO();
+            encoded[--outputStart] = type.ENCODED_ZERO()
         }
         // Return encoded string (including encoded leading zeros).
-        return new String(encoded, outputStart, encoded.length - outputStart);
+        return String(encoded, outputStart, encoded.size - outputStart)
     }
 
-    public static byte[] decode(String input){
-        return  decode(input, Base58Type.Basic);
-    }
-
-    public static byte[] decode(String input, Base58Type type) {
-        if (input.length() == 0) {
-            return new byte[0];
+    @JvmOverloads
+    fun decode(input: String, type: Base58Type = Base58Type.Basic): ByteArray {
+        if (input.length == 0) {
+            return ByteArray(0)
         }
         // Convert the base58-encoded ASCII chars to a base58 byte sequence (base58 digits).
-        byte[] input58 = new byte[input.length()];
-        for (int i = 0; i < input.length(); ++i) {
-            char c = input.charAt(i);
-            int digit = c < 128 ? type.INDEXES()[c] : -1;
+        val input58 = ByteArray(input.length)
+        for (i in 0 until input.length) {
+            val c = input[i]
+            val digit = if (c.code < 128) type.INDEXES()[c.code] else -1
             if (digit < 0) {
-                return new byte[0];
+                return ByteArray(0)
             }
-            input58[i] = (byte) digit;
+            input58[i] = digit.toByte()
         }
         // Count leading zeros.
-        int zeros = 0;
-        while (zeros < input58.length && input58[zeros] == 0) {
-            ++zeros;
+        var zeros = 0
+        while (zeros < input58.size && input58[zeros].toInt() == 0) {
+            ++zeros
         }
         // Convert base-58 digits to base-256 digits.
-        byte[] decoded = new byte[input.length()];
-        int outputStart = decoded.length;
-        for (int inputStart = zeros; inputStart < input58.length; ) {
-            decoded[--outputStart] = divmod(input58, inputStart, 58, 256);
-            if (input58[inputStart] == 0) {
-                ++inputStart; // optimization - skip leading zeros
+        val decoded = ByteArray(input.length)
+        var outputStart = decoded.size
+        var inputStart = zeros
+        while (inputStart < input58.size) {
+            decoded[--outputStart] = divmod(input58, inputStart, 58, 256)
+            if (input58[inputStart].toInt() == 0) {
+                ++inputStart // optimization - skip leading zeros
             }
         }
         // Ignore extra leading zeroes that were added during the calculation.
-        while (outputStart < decoded.length && decoded[outputStart] == 0) {
-            ++outputStart;
+        while (outputStart < decoded.size && decoded[outputStart].toInt() == 0) {
+            ++outputStart
         }
         // Return decoded data (including original number of leading zeros).
-        return Arrays.copyOfRange(decoded, outputStart - zeros, decoded.length);
+        return Arrays.copyOfRange(decoded, outputStart - zeros, decoded.size)
     }
 
-    private static byte divmod(byte[] number, int firstDigit, int base, int divisor) {
+    private fun divmod(number: ByteArray, firstDigit: Int, base: Int, divisor: Int): Byte {
         // this is just long division which accounts for the base of the input digits
-        int remainder = 0;
-        for (int i = firstDigit; i < number.length; i++) {
-            int digit = (int) number[i] & 0xFF;
-            int temp = remainder * base + digit;
-            number[i] = (byte) (temp / divisor);
-            remainder = temp % divisor;
+        var remainder = 0
+        for (i in firstDigit until number.size) {
+            val digit = number[i].toInt() and 0xFF
+            val temp = remainder * base + digit
+            number[i] = (temp / divisor).toByte()
+            remainder = temp % divisor
         }
-        return (byte) remainder;
+        return remainder.toByte()
+    }
+
+    enum class Base58Type {
+        Basic,
+        Ripple;
+
+        fun ALPHABET(): CharArray {
+            val rs = CharArray(128)
+            return when (this) {
+                Basic -> "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".toCharArray()
+                Ripple -> "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz".toCharArray()
+            }
+            return rs
+        }
+
+        fun ENCODED_ZERO(): Char {
+            return ALPHABET()[0]
+        }
+
+        fun INDEXES(): IntArray {
+            val rs = IntArray(128)
+            Arrays.fill(rs, -1)
+            for (i in ALPHABET().indices) {
+                rs[ALPHABET()[i].code] = i
+            }
+            return rs
+        }
     }
 }

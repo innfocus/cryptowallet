@@ -1,231 +1,192 @@
-package com.lybia.cryptowallet.coinkits.hdwallet.core.helpers;
+package com.lybia.cryptowallet.coinkits.hdwallet.core.helpers
+
+import java.io.ByteArrayOutputStream
+import java.util.Locale
 
 
-import java.io.ByteArrayOutputStream;
-import java.util.Arrays;
+object Bech32 {
+    const val CHARSET: String = "qpzry9x8gf2tvdw0s3jn54khce6mua7l"
+    const val SEPARATOR: Char = 0x31.toChar() // '1'
 
-public class Bech32 {
+    fun bech32Encode(hrp: ByteArray, data: ByteArray): String {
+        val chk = createChecksum(hrp, data)
+        val combined = ByteArray(chk.size + data.size)
 
-    public static final String CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
-    public static final char SEPARATOR = (char) 0x31;    // '1'
+        System.arraycopy(data, 0, combined, 0, data.size)
+        System.arraycopy(chk, 0, combined, data.size, chk.size)
 
-    private Bech32() {
+        val xlat = ByteArray(combined.size)
+        for (i in combined.indices) {
+            xlat[i] = CHARSET[combined[i].toInt()].code.toByte()
+        }
+
+        val ret = ByteArray(hrp.size + xlat.size + 1)
+        System.arraycopy(hrp, 0, ret, 0, hrp.size)
+        System.arraycopy(byteArrayOf(0x31), 0, ret, hrp.size, 1)
+        System.arraycopy(xlat, 0, ret, hrp.size + 1, xlat.size)
+
+        return String(ret)
     }
 
-    public static String bech32Encode(byte[] hrp, byte[] data) {
+    fun bech32Decode(bech: String): HrpAndData {
+        var bech = bech
+        require(!(bech != bech.lowercase(Locale.getDefault()) && bech != bech.uppercase(Locale.getDefault()))) { "bech32 cannot mix upper and lower case" }
 
-        byte[] chk = createChecksum(hrp, data);
-        byte[] combined = new byte[chk.length + data.length];
-
-        System.arraycopy(data, 0, combined, 0, data.length);
-        System.arraycopy(chk, 0, combined, data.length, chk.length);
-
-        byte[] xlat = new byte[combined.length];
-        for (int i = 0; i < combined.length; i++) {
-            xlat[i] = (byte) CHARSET.charAt(combined[i]);
+        val buffer = bech.toByteArray()
+        for (b in buffer) {
+            require(!(b < 0x21 || b > 0x7e)) { "bech32 characters out of range" }
         }
 
-        byte[] ret = new byte[hrp.length + xlat.length + 1];
-        System.arraycopy(hrp, 0, ret, 0, hrp.length);
-        System.arraycopy(new byte[]{0x31}, 0, ret, hrp.length, 1);
-        System.arraycopy(xlat, 0, ret, hrp.length + 1, xlat.length);
+        bech = bech.lowercase(Locale.getDefault())
+        val pos = bech.lastIndexOf("1")
+        require(pos >= 1) { "bech32 missing separator" }
+        require(pos + 7 <= bech.length) { "bech32 separator misplaced" }
 
-        return new String(ret);
+        val s = bech.substring(pos + 1)
+        for (i in 0 until s.length) {
+            require(CHARSET.indexOf(s[i]) != -1) { "bech32 characters  out of range" }
+        }
+
+        val hrp = bech.substring(0, pos).toByteArray()
+
+        val data = ByteArray(bech.length - pos - 1)
+        var j = 0
+        var i = pos + 1
+        while (i < bech.length) {
+            data[j] = CHARSET.indexOf(bech[i]).toByte()
+            i++
+            j++
+        }
+
+        require(verifyChecksum(hrp, data)) { "invalid bech32 checksum" }
+
+        val ret = ByteArray(data.size - 6)
+        System.arraycopy(data, 0, ret, 0, data.size - 6)
+
+        return HrpAndData(hrp, ret)
     }
 
-    public static HrpAndData bech32Decode(String bech) {
+    private fun polymod(values: ByteArray): Int {
+        val GENERATORS = intArrayOf(0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3)
 
-        if (!bech.equals(bech.toLowerCase()) && !bech.equals(bech.toUpperCase())) {
-            throw new IllegalArgumentException("bech32 cannot mix upper and lower case");
-        }
+        var chk = 1
 
-        byte[] buffer = bech.getBytes();
-        for (byte b : buffer) {
-            if (b < 0x21 || b > 0x7e)
-                throw new IllegalArgumentException("bech32 characters out of range");
-        }
-
-        bech = bech.toLowerCase();
-        int pos = bech.lastIndexOf("1");
-        if (pos < 1) {
-            throw new IllegalArgumentException("bech32 missing separator");
-        } else if (pos + 7 > bech.length()) {
-            throw new IllegalArgumentException("bech32 separator misplaced");
-        } else if (bech.length() < 8) {
-            throw new IllegalArgumentException("bech32 input too short");
-        }
-
-        String s = bech.substring(pos + 1);
-        for (int i = 0; i < s.length(); i++) {
-            if (CHARSET.indexOf(s.charAt(i)) == -1) {
-                throw new IllegalArgumentException("bech32 characters  out of range");
+        for (b in values) {
+            val top = (chk shr 0x19).toByte()
+            chk = b.toInt() xor ((chk and 0x1ffffff) shl 5)
+            for (i in 0..4) {
+                chk = chk xor if (((top.toInt() shr i) and 1) == 1) GENERATORS[i] else 0
             }
         }
 
-        byte[] hrp = bech.substring(0, pos).getBytes();
-
-        byte[] data = new byte[bech.length() - pos - 1];
-        for (int j = 0, i = pos + 1; i < bech.length(); i++, j++) {
-            data[j] = (byte) CHARSET.indexOf(bech.charAt(i));
-        }
-
-        if (!verifyChecksum(hrp, data)) {
-            throw new IllegalArgumentException("invalid bech32 checksum");
-        }
-
-        byte[] ret = new byte[data.length - 6];
-        System.arraycopy(data, 0, ret, 0, data.length - 6);
-
-        return new HrpAndData(hrp, ret);
+        return chk
     }
 
-    private static int polymod(byte[] values) {
+    private fun hrpExpand(hrp: ByteArray): ByteArray {
+        val buf1 = ByteArray(hrp.size)
+        val buf2 = ByteArray(hrp.size)
+        val mid = ByteArray(1)
 
-        final int[] GENERATORS = {0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3};
-
-        int chk = 1;
-
-        for (byte b : values) {
-            byte top = (byte) (chk >> 0x19);
-            chk = b ^ ((chk & 0x1ffffff) << 5);
-            for (int i = 0; i < 5; i++) {
-                chk ^= ((top >> i) & 1) == 1 ? GENERATORS[i] : 0;
-            }
+        for (i in hrp.indices) {
+            buf1[i] = (hrp[i].toInt() shr 5).toByte()
+        }
+        mid[0] = 0x00
+        for (i in hrp.indices) {
+            buf2[i] = (hrp[i].toInt() and 0x1f).toByte()
         }
 
-        return chk;
+        val ret = ByteArray((hrp.size * 2) + 1)
+        System.arraycopy(buf1, 0, ret, 0, buf1.size)
+        System.arraycopy(mid, 0, ret, buf1.size, mid.size)
+        System.arraycopy(buf2, 0, ret, buf1.size + mid.size, buf2.size)
+
+        return ret
     }
 
-    private static byte[] hrpExpand(byte[] hrp) {
+    private fun verifyChecksum(hrp: ByteArray, data: ByteArray): Boolean {
+        val exp = hrpExpand(hrp)
 
-        byte[] buf1 = new byte[hrp.length];
-        byte[] buf2 = new byte[hrp.length];
-        byte[] mid = new byte[1];
+        val values = ByteArray(exp.size + data.size)
+        System.arraycopy(exp, 0, values, 0, exp.size)
+        System.arraycopy(data, 0, values, exp.size, data.size)
 
-        for (int i = 0; i < hrp.length; i++) {
-            buf1[i] = (byte) (hrp[i] >> 5);
-        }
-        mid[0] = 0x00;
-        for (int i = 0; i < hrp.length; i++) {
-            buf2[i] = (byte) (hrp[i] & 0x1f);
-        }
-
-        byte[] ret = new byte[(hrp.length * 2) + 1];
-        System.arraycopy(buf1, 0, ret, 0, buf1.length);
-        System.arraycopy(mid, 0, ret, buf1.length, mid.length);
-        System.arraycopy(buf2, 0, ret, buf1.length + mid.length, buf2.length);
-
-        return ret;
+        return (1 == polymod(values))
     }
 
-    private static boolean verifyChecksum(byte[] hrp, byte[] data) {
+    private fun createChecksum(hrp: ByteArray, data: ByteArray): ByteArray {
+        val zeroes = byteArrayOf(0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
+        val expanded = hrpExpand(hrp)
+        val values = ByteArray(zeroes.size + expanded.size + data.size)
 
-        byte[] exp = hrpExpand(hrp);
+        System.arraycopy(expanded, 0, values, 0, expanded.size)
+        System.arraycopy(data, 0, values, expanded.size, data.size)
+        System.arraycopy(zeroes, 0, values, expanded.size + data.size, zeroes.size)
 
-        byte[] values = new byte[exp.length + data.length];
-        System.arraycopy(exp, 0, values, 0, exp.length);
-        System.arraycopy(data, 0, values, exp.length, data.length);
-
-        return (1 == polymod(values));
-    }
-
-    private static byte[] createChecksum(byte[] hrp, byte[] data) {
-
-        byte[] zeroes = new byte[]{0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-        byte[] expanded = hrpExpand(hrp);
-        byte[] values = new byte[zeroes.length + expanded.length + data.length];
-
-        System.arraycopy(expanded, 0, values, 0, expanded.length);
-        System.arraycopy(data, 0, values, expanded.length, data.length);
-        System.arraycopy(zeroes, 0, values, expanded.length + data.length, zeroes.length);
-
-        int polymod = polymod(values) ^ 1;
-        byte[] ret = new byte[6];
-        for (int i = 0; i < ret.length; i++) {
-            ret[i] = (byte) ((polymod >> 5 * (5 - i)) & 0x1f);
+        val polymod = polymod(values) xor 1
+        val ret = ByteArray(6)
+        for (i in ret.indices) {
+            ret[i] = ((polymod shr 5 * (5 - i)) and 0x1f).toByte()
         }
 
-        return ret;
-    }
-
-    public static class HrpAndData {
-
-        public byte[] hrp;
-        public byte[] data;
-
-        public HrpAndData(byte[] hrp, byte[] data) {
-            this.hrp = hrp;
-            this.data = data;
-        }
-
-        public byte[] getHrp() {
-            return this.hrp;
-        }
-
-        public byte[] getData() {
-            return this.data;
-        }
-
-        @Override
-        public String toString() {
-            return "HrpAndData [hrp=" + Arrays.toString(hrp) + ", data=" + Arrays.toString(data) + "]";
-        }
-
-        @Override
-        public int hashCode() {
-            final int prime = 31;
-            int result = 1;
-            result = prime * result + Arrays.hashCode(data);
-            result = prime * result + Arrays.hashCode(hrp);
-            return result;
-        }
-
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj)
-                return true;
-            if (obj == null)
-                return false;
-            if (getClass() != obj.getClass())
-                return false;
-            HrpAndData other = (HrpAndData) obj;
-            if (!Arrays.equals(data, other.data))
-                return false;
-            if (!Arrays.equals(hrp, other.hrp))
-                return false;
-            return true;
-        }
+        return ret
     }
 
     /**
      * Helper for re-arranging bits into groups.
      */
-    public static byte[] convertBits(final byte[] in, final int inStart, final int inLen, final int fromBits,
-                                     final int toBits, final boolean pad) throws AddressFormatException {
-        int acc = 0;
-        int bits = 0;
-        ByteArrayOutputStream out = new ByteArrayOutputStream(64);
-        final int maxv = (1 << toBits) - 1;
-        final int max_acc = (1 << (fromBits + toBits - 1)) - 1;
-        for (int i = 0; i < inLen; i++) {
-            int value = in[i + inStart] & 0xff;
-            if ((value >>> fromBits) != 0) {
-                throw new AddressFormatException(
-                        String.format("Input value '%X' exceeds '%d' bit size", value, fromBits));
+    @Throws(AddressFormatException::class)
+    fun convertBits(
+        `in`: ByteArray, inStart: Int, inLen: Int, fromBits: Int,
+        toBits: Int, pad: Boolean
+    ): ByteArray {
+        var acc = 0
+        var bits = 0
+        val out = ByteArrayOutputStream(64)
+        val maxv = (1 shl toBits) - 1
+        val max_acc = (1 shl (fromBits + toBits - 1)) - 1
+        for (i in 0 until inLen) {
+            val value = `in`[i + inStart].toInt() and 0xff
+            if ((value ushr fromBits) != 0) {
+                throw AddressFormatException(
+                    String.format("Input value '%X' exceeds '%d' bit size", value, fromBits)
+                )
             }
-            acc = ((acc << fromBits) | value) & max_acc;
-            bits += fromBits;
+            acc = ((acc shl fromBits) or value) and max_acc
+            bits += fromBits
             while (bits >= toBits) {
-                bits -= toBits;
-                out.write((acc >>> bits) & maxv);
+                bits -= toBits
+                out.write((acc ushr bits) and maxv)
             }
         }
         if (pad) {
-            if (bits > 0)
-                out.write((acc << (toBits - bits)) & maxv);
-        } else if (bits >= fromBits || ((acc << (toBits - bits)) & maxv) != 0) {
-            throw new AddressFormatException("Could not convert bits, invalid padding");
+            if (bits > 0) out.write((acc shl (toBits - bits)) and maxv)
+        } else if (bits >= fromBits || ((acc shl (toBits - bits)) and maxv) != 0) {
+            throw AddressFormatException("Could not convert bits, invalid padding")
         }
-        return out.toByteArray();
+        return out.toByteArray()
+    }
+
+    class HrpAndData(var hrp: ByteArray, var data: ByteArray) {
+        override fun toString(): String {
+            return "HrpAndData [hrp=" + hrp.contentToString() + ", data=" + data.contentToString() + "]"
+        }
+
+        override fun hashCode(): Int {
+            val prime = 31
+            var result = 1
+            result = prime * result + data.contentHashCode()
+            result = prime * result + hrp.contentHashCode()
+            return result
+        }
+
+        override fun equals(obj: Any?): Boolean {
+            if (this === obj) return true
+            if (obj == null) return false
+            if (javaClass != obj.javaClass) return false
+            val other = obj as HrpAndData
+            if (!data.contentEquals(other.data)) return false
+            if (!hrp.contentEquals(other.hrp)) return false
+            return true
+        }
     }
 }
