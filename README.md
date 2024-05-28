@@ -11,7 +11,7 @@ Android: Requires a min SDK version of 24
 
 ```groovy
 dependencies {
-    implementation 'io.github.innfocus:crypto-wallet-lib-android:1.0.1'
+    implementation 'io.github.innfocus:crypto-wallet-lib-android:1.0.2'
 }
 ```
 
