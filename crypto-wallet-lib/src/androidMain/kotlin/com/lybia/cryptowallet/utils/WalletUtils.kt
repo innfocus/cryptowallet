@@ -58,8 +58,9 @@ class WalletsUtils(private val coinNetwork: CoinNetwork) {
                 credentials.address,
                 nonce,
                 gasPrice,
-                DefaultGasProvider.GAS_LIMIT,
+                BigInteger.ZERO,
                 toAddress,
+                Convert.toWei(amount, Convert.Unit.ETHER).toBigInteger(),
                 ""
             )
             val gasLimit: BigInteger = web3j.ethEstimateGas(transaction).send().amountUsed
@@ -107,6 +108,7 @@ class WalletsUtils(private val coinNetwork: CoinNetwork) {
                 gasPrice,
                 DefaultGasProvider.GAS_LIMIT,
                 contract,
+                Convert.toWei(amount, Convert.Unit.ETHER).toBigInteger(),
                 encodeData
             )
             val estimatedGasLimit: BigInteger = web3j.ethEstimateGas(transaction).send().amountUsed
