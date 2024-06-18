@@ -41,6 +41,7 @@ kotlin {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)
 
+
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.cio)
             implementation(libs.ktor.client.serialization)
@@ -56,8 +57,8 @@ kotlin {
         }
 
         androidMain.dependencies {
-            val ktor_version  : String by project
-            implementation ("org.web3j:core:4.8.9")
+            val ktor_version: String by project
+            implementation("org.web3j:core:4.8.9")
             implementation("org.web3j:core:4.8.9-android")
             implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
             implementation("io.ktor:ktor-client-okhttp:$ktor_version")
@@ -80,6 +81,9 @@ kotlin {
             implementation("com.squareup.retrofit2:converter-gson:2.11.0")
             implementation("com.squareup.okhttp3:okhttp:5.0.0-alpha.14")
             implementation("com.squareup.retrofit2:adapter-rxjava2:2.11.0")
+
+            implementation(libs.mockito.core)
+            implementation(libs.kotlin.test)
         }
 
         iosMain.dependencies {
@@ -107,7 +111,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.innfocus",
         artifactId = "crypto-wallet-lib",
-        version = "1.0.3-alpha.1"
+        version = "1.0.3-alpha.2"
     )
 
     // Configure POM metadata for the published artifact

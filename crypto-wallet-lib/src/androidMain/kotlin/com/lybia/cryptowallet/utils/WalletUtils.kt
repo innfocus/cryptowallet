@@ -2,6 +2,7 @@ package com.lybia.cryptowallet.utils
 
 
 import com.lybia.cryptowallet.CoinNetwork
+import com.lybia.cryptowallet.enums.NetworkName
 import org.web3j.abi.FunctionEncoder
 import org.web3j.abi.TypeReference
 import org.web3j.abi.datatypes.Address
@@ -35,7 +36,7 @@ class WalletsUtils(private val coinNetwork: CoinNetwork) {
         return WalletUtils.loadBip39Credentials(null, mnemonic)
     }
 
-    private fun getBip44Credentials(mnemonic: String?): Credentials {
+    fun getBip44Credentials(mnemonic: String?): Credentials {
         return Bip44WalletUtils.loadBip44Credentials(null, mnemonic)
     }
 
@@ -111,8 +112,15 @@ class WalletsUtils(private val coinNetwork: CoinNetwork) {
                 Convert.toWei(amount, Convert.Unit.ETHER).toBigInteger(),
                 encodeData
             )
-            val estimatedGasLimit: BigInteger = web3j.ethEstimateGas(transaction).send().amountUsed
-            val gasLimit = estimatedGasLimit.add(BigInteger.valueOf(10000)) // Buffer for contract
+
+            var gasLimit : BigInteger = BigInteger.ZERO
+            if(coinNetwork.name == NetworkName.ETHEREUM){
+                gasLimit = BigInteger.valueOf(120000)
+            }else{
+                val estimatedGasLimit: BigInteger = web3j.ethEstimateGas(transaction).send().amountUsed
+                gasLimit = estimatedGasLimit.add(BigInteger.valueOf(10000)) // Buffer for contract
+            }
+
 
             val rawTransaction = RawTransaction.createTransaction(
                 nonce,
