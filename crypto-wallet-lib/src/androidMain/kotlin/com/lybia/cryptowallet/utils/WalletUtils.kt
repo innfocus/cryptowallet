@@ -84,9 +84,10 @@ class WalletsUtils(private val coinNetwork: CoinNetwork) {
 
     fun signTokenTransaction(
         mnemonic: String?,
-        amount: BigDecimal?,
+        amount: BigDecimal,
         toAddress: String?,
-        contract: String?
+        contract: String?,
+        decimals: Int
     ): String? {
         val credentials = getBip44Credentials(mnemonic)
         try {
@@ -97,7 +98,7 @@ class WalletsUtils(private val coinNetwork: CoinNetwork) {
 
             val function = encodeTransferDataFunction(
                 toAddress,
-                Convert.toWei(amount, Convert.Unit.ETHER).toBigInteger()
+                BigInteger.valueOf(amount.multiply(BigDecimal.TEN.pow(decimals)).toLong())
             )
 
             val encodeData = FunctionEncoder.encode(function)
@@ -109,7 +110,7 @@ class WalletsUtils(private val coinNetwork: CoinNetwork) {
                 gasPrice,
                 DefaultGasProvider.GAS_LIMIT,
                 contract,
-                Convert.toWei(amount, Convert.Unit.ETHER).toBigInteger(),
+                BigInteger.valueOf(amount.multiply(BigDecimal.TEN.pow(decimals)).toLong()),
                 encodeData
             )
 
