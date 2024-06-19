@@ -76,19 +76,18 @@ kotlin {
             implementation("io.reactivex.rxjava2:rxandroid:2.1.1")
             implementation("io.reactivex.rxjava2:rxkotlin:2.4.0")
 
-            implementation("com.google.code.gson:gson:2.10.1")
-            implementation("com.squareup.retrofit2:retrofit:2.11.0")
-            implementation("com.squareup.retrofit2:converter-gson:2.11.0")
-            implementation("com.squareup.okhttp3:okhttp:5.0.0-alpha.14")
-            implementation("com.squareup.retrofit2:adapter-rxjava2:2.11.0")
+            implementation(libs.gson)
+            implementation(libs.retrofit)
+            implementation(libs.converter.gson)
+            implementation(libs.okhttp)
+            implementation(libs.adapter.rxjava2)
 
             implementation(libs.mockito.core)
             implementation(libs.kotlin.test)
         }
 
         iosMain.dependencies {
-            val ktor_version  : String by project
-            implementation("io.ktor:ktor-client-darwin:$ktor_version")
+            implementation(libs.ktor.client.darwin)
         }
     }
 }
@@ -111,7 +110,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.innfocus",
         artifactId = "crypto-wallet-lib",
-        version = "1.0.3-alpha.3"
+        version = "1.0.3-alpha.4"
     )
 
     // Configure POM metadata for the published artifact
