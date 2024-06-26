@@ -1,5 +1,5 @@
 [versions]
-agp = "8.3.2"
+agp = "8.5.0"
 cbor = "0.9"
 web3j-core-android = "4.8.9-android"
 coreVersion = "1.58.0.0"
