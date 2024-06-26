@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidLibrary)
     id("com.vanniktech.maven.publish") version "0.28.0"
-    kotlin("plugin.serialization").version("1.9.10")
+    kotlin("plugin.serialization").version("2.0.0")
 }
 
 kotlin {
@@ -49,7 +49,7 @@ kotlin {
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.ktor.client.logging)
-            implementation("com.squareup.okio:okio:3.9.0")
+            implementation(libs.okio)
 
         }
         commonTest.dependencies {
@@ -58,23 +58,22 @@ kotlin {
 
         androidMain.dependencies {
             val ktor_version: String by project
-            implementation("org.web3j:core:4.8.9")
-            implementation("org.web3j:core:4.8.9-android")
-            implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
+            implementation(libs.web3j.core.android)
+            implementation(libs.kotlinx.coroutines.android)
             implementation("io.ktor:ktor-client-okhttp:$ktor_version")
             implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
 
-            implementation("com.github.kotlin-graphics:kotlin-unsigned:v2.1")
-            implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.22")
-            implementation("co.nstant.in:cbor:0.9")
-            implementation("com.madgag.spongycastle:core:1.58.0.0")
-            implementation("com.madgag.spongycastle:prov:1.58.0.0")
-            implementation("org.whispersystems:curve25519-android:0.5.0")
-            implementation("com.google.guava:guava:32.1.3-android")
+            implementation(libs.kotlin.unsigned)
+            implementation(libs.kotlin.stdlib.jdk8)
+            implementation(libs.cbor)
+            implementation(libs.spongycastle.core)
+            implementation(libs.prov)
+            implementation(libs.curve25519.android)
+            implementation(libs.guava)
 
-            implementation("io.reactivex.rxjava2:rxjava:2.2.21")
-            implementation("io.reactivex.rxjava2:rxandroid:2.1.1")
-            implementation("io.reactivex.rxjava2:rxkotlin:2.4.0")
+            implementation(libs.rxjava)
+            implementation(libs.rxandroid)
+            implementation(libs.rxkotlin)
 
             implementation(libs.gson)
             implementation(libs.retrofit)
@@ -94,13 +93,13 @@ kotlin {
 
 android {
     namespace = "com.lybia.cryptowallet"
-    compileSdk = 34
+    compileSdk = 35
     defaultConfig {
-        minSdk = 24
+        minSdk = 26
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_11
+        targetCompatibility = JavaVersion.VERSION_11
     }
 }
 
@@ -110,7 +109,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.innfocus",
         artifactId = "crypto-wallet-lib",
-        version = "1.0.3-alpha.4"
+        version = "1.0.3-alpha.5"
     )
 
     // Configure POM metadata for the published artifact

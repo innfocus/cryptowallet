@@ -5,7 +5,7 @@ A Kotlin multiplatform library support web3j and endpoint related with crypto wa
 ## Requirements
 
 iOS: Requires a min iOS version of 13
-Android: Requires a min SDK version of 24
+Android: Requires a min SDK version of 26
 
 ## Setup on Android
 
