@@ -9,7 +9,9 @@ plugins {
     kotlin("plugin.serialization").version("2.0.0")
 }
 
+
 kotlin {
+
     androidTarget {
         compilations.all {
             compileTaskProvider.configure {
@@ -51,9 +53,15 @@ kotlin {
             implementation(libs.ktor.client.logging)
             implementation(libs.okio)
 
+            implementation("com.soywiz.korlibs.krypto:krypto:4.0.10")
+            implementation("fr.acinq.bitcoin:bitcoin-kmp:0.19.0")
+
+            api("fr.acinq.secp256k1:secp256k1-kmp:0.15.0")
+
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
+            implementation(libs.kotlinx.coroutines.test)
         }
 
         androidMain.dependencies {
@@ -82,12 +90,17 @@ kotlin {
             implementation(libs.adapter.rxjava2)
 
             implementation(libs.mockito.core)
-            implementation(libs.kotlin.test)
+
+            implementation(kotlin("stdlib"))
+            implementation("fr.acinq.secp256k1:secp256k1-kmp-jni-android:0.15.0")
+            implementation("fr.acinq.secp256k1:secp256k1-kmp-jni-jvm:0.15.0")
         }
 
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
+
         }
+
     }
 }
 
@@ -152,5 +165,8 @@ task("testClasses") {
     doLast {
         println("Hello from testClasses")
     }
+}
+dependencies {
+    testImplementation(libs.testng)
 }
 

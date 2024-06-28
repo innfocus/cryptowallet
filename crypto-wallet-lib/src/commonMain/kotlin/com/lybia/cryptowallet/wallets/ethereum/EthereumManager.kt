@@ -30,14 +30,18 @@ class EthereumManager : BaseCoinManager(), ITransactionFee, ITokenAndNFT {
         return "Arbitrum Address"
     }
 
-    override suspend fun getBalance(address: String, coinNetwork: CoinNetwork): Double {
+    override suspend fun getBalance(address: String?, coinNetwork: CoinNetwork?): Double {
+        require(!address.isNullOrEmpty()) { "Address is null" }
+        require(coinNetwork != null) { "CoinNetwork is null" }
         val balance = InfuraRpcService.shared.getBalance(coinNetwork, address)
         return Utils.convertHexStringToDouble(balance, 18)
     }
 
     override suspend fun getTransactionHistory(
-        address: String, coinNetwork: CoinNetwork
+        address: String?, coinNetwork: CoinNetwork?
     ): ExplorerModel<List<Transaction>>? {
+        require(!address.isNullOrEmpty()) { "Address is null" }
+        require(coinNetwork != null) { "CoinNetwork is null" }
         val response = ExplorerRpcService.INSTANCE.getTransactionHistory(coinNetwork, address)
         if(response?.status =="1"){
             response.result = response.result.filter { it.value != "0" }

@@ -5,11 +5,13 @@ import com.lybia.cryptowallet.enums.NetworkName
 
 class CoinNetwork(
     var name: NetworkName,
-    var apiKeyExplorer: String,
-    private var apiKeyInfura: String,
-    var apiKeyOwlRacle: String
+    var apiKeyExplorer: String? = null,
+    private var apiKeyInfura: String? = null,
+    var apiKeyOwlRacle: String? = null
 ) {
+
     fun getInfuraRpcUrl(): String {
+        require(apiKeyInfura != null) { "API key Infura is null" }
         return when (Config.shared.getNetwork()) {
             Network.MAINNET -> {
                 when(name){
@@ -29,6 +31,7 @@ class CoinNetwork(
     }
 
     fun getExplorerEndpoint(): String {
+        require(apiKeyExplorer != null) { "API KEY Explorer is null"}
         return when (Config.shared.getNetwork()) {
             Network.MAINNET -> {
                 when(name){
