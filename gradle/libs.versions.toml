@@ -24,6 +24,8 @@ testng = "6.9.6"
 adapter-rxjava2 = { module = "com.squareup.retrofit2:adapter-rxjava2", version.ref = "retrofit" }
 cbor = { module = "co.nstant.in:cbor", version.ref = "cbor" }
 converter-gson = { module = "com.squareup.retrofit2:converter-gson", version.ref = "retrofit" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
+ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
 web3j-core-android = { module = "org.web3j:core", version.ref = "web3j-core-android" }
 curve25519-android = { module = "org.whispersystems:curve25519-android", version.ref = "curve25519Android" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }

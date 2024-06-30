@@ -62,13 +62,13 @@ kotlin {
         commonTest.dependencies {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.ktor.client.mock)
         }
 
         androidMain.dependencies {
-            val ktor_version: String by project
             implementation(libs.web3j.core.android)
             implementation(libs.kotlinx.coroutines.android)
-            implementation("io.ktor:ktor-client-okhttp:$ktor_version")
+            implementation(libs.ktor.client.okhttp)
             implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
 
             implementation(libs.kotlin.unsigned)
