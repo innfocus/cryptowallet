@@ -86,7 +86,7 @@ data class BTCApiModel (
         val preference: String,
 
         @SerialName("relayed_by")
-        val relayedBy: String,
+        val relayedBy: String? = null,
 
         val confirmed: String,
         val received: String,
@@ -115,7 +115,7 @@ data class BTCApiModel (
         @SerialName("output_index")
         val outputIndex: Long,
 
-        val script: String,
+        val script: String? = null,
 
         @SerialName("output_value")
         val outputValue: Long,
