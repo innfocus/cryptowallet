@@ -3,8 +3,8 @@ package com.lybia.walletapp.responses
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class VerificationResponse(
+data class BaseApiResponse(
     val success: Boolean,
     val message: String,
-    val code: Int
+    val code: Int? = null
 )

@@ -1,39 +1,37 @@
 package com.lybia.walletapp.services
 
-import io.ktor.client.HttpClient
-import io.ktor.client.engine.mock.MockEngine
-import io.ktor.client.engine.mock.respond
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.http.ContentType
-import io.ktor.http.HttpStatusCode
-import io.ktor.http.fullPath
-import io.ktor.http.headersOf
-import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.test.runTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 
 class WalletAppServiceTest {
-    private val mockEngine = MockEngine { request ->
-        when (request.url.fullPath) {
-            "/api/v2/verifications" -> {
-                respond(
-                    content = """
-                        {
-                            "success": true,
-                            "message": "Success",
-                            "code": 200
-                        }
-                    """.trimIndent(),
-                    status = HttpStatusCode.OK,
-                    headers = headersOf("Content-Type" to listOf(ContentType.Application.Json.toString()))
-                )
-            }
-            else -> error("Unhandled ${request.url.fullPath}")
-        }
+
+    @Test
+    fun testSendOtpSuccess() = runTest {
+        val serverUrl = "https://staging-api.ai-staking.io"
+        val walletAppService = WalletAppService(serverUrl)
+
+        // Call the method to test
+        val response = walletAppService.sendOtp("test@gmail.com")
+
+        // Assertions
+        assertEquals(true, response.success)
+        assertEquals("Success", response.message)
+        assertEquals(200, response.code)
     }
 
-    private val mockClient = HttpClient(mockEngine) {
-        install(ContentNegotiation) {
-            json()
-//            serializer = KotlinxSerializer()
-        }
+    @Test
+    fun testCheckOtpSuccess() = runTest {
+        val serverUrl = "https://staging-api.ai-staking.io"
+        val walletAppService = WalletAppService(serverUrl)
+
+        // Call the method to test
+        val response = walletAppService.verifyOtp("test@gmail.com", "0000")
+
+        // Assertions
+        assertEquals(true, response.success)
+        assertEquals("Success", response.message)
+        assertNotNull(response.authToken)
     }
 }
