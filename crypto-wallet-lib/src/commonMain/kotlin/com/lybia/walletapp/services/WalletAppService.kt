@@ -1,6 +1,7 @@
 package com.lybia.walletapp.services
 
 import com.lybia.cryptowallet.services.HttpClientService
+import com.lybia.walletapp.exceptions.RequestException
 import com.lybia.walletapp.requests.CheckEmailVerificationRequest
 import com.lybia.walletapp.requests.SendConsultationRequest
 import com.lybia.walletapp.requests.SendEmailVerificationRequest
@@ -15,6 +16,7 @@ import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 
 class WalletAppService(
@@ -36,6 +38,9 @@ class WalletAppService(
             setBody(SendEmailVerificationRequest(email))
         }
 
+        if (response.status != HttpStatusCode.OK)
+            throw RequestException(response.status.value, response.body<BaseApiResponse>().message)
+
         val data = response.body<BaseApiResponse>()
         return data
     }
@@ -46,6 +51,9 @@ class WalletAppService(
             setBody(CheckEmailVerificationRequest(email, code))
         }
 
+        if (response.status != HttpStatusCode.OK)
+            throw RequestException(response.status.value, response.body<BaseApiResponse>().message)
+
         val data = response.body<CheckEmailVerificationResponse>()
         return data
     }
@@ -55,6 +63,9 @@ class WalletAppService(
             addAuthorizationHeader()
             contentType(ContentType.Application.Json)
         }
+
+        if(response.status != HttpStatusCode.OK)
+            throw RequestException(response.status.value, response.body<BaseApiResponse>().message)
 
         val data = response.body<UserResponse>()
         return data
