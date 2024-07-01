@@ -6,8 +6,10 @@ import com.lybia.walletapp.requests.SendConsultationRequest
 import com.lybia.walletapp.requests.SendEmailVerificationRequest
 import com.lybia.walletapp.responses.BaseApiResponse
 import com.lybia.walletapp.responses.CheckEmailVerificationResponse
+import com.lybia.walletapp.responses.UserResponse
 import io.ktor.client.call.body
 import io.ktor.client.request.HttpRequestBuilder
+import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -45,6 +47,16 @@ class WalletAppService(
         }
 
         val data = response.body<CheckEmailVerificationResponse>()
+        return data
+    }
+
+    suspend fun getProfile(): UserResponse {
+        val response: HttpResponse = client.get("$serverUrl/api/v1/users/me") {
+            addAuthorizationHeader()
+            contentType(ContentType.Application.Json)
+        }
+
+        val data = response.body<UserResponse>()
         return data
     }
 
