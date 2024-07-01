@@ -1,6 +1,9 @@
 [versions]
 agp = "8.5.0"
+bitcoinKmp = "0.19.0"
 cbor = "0.9"
+krypto = "4.0.10"
+secp256k1Kmp = "0.15.0"
 web3j-core-android = "4.8.9-android"
 coreVersion = "1.58.0.0"
 curve25519Android = "0.5.0"
@@ -22,10 +25,15 @@ testng = "6.9.6"
 
 [libraries]
 adapter-rxjava2 = { module = "com.squareup.retrofit2:adapter-rxjava2", version.ref = "retrofit" }
+bitcoin-kmp = { module = "fr.acinq.bitcoin:bitcoin-kmp", version.ref = "bitcoinKmp" }
 cbor = { module = "co.nstant.in:cbor", version.ref = "cbor" }
 converter-gson = { module = "com.squareup.retrofit2:converter-gson", version.ref = "retrofit" }
+krypto = { module = "com.soywiz.korlibs.krypto:krypto", version.ref = "krypto" }
 ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
+secp256k1-kmp = { module = "fr.acinq.secp256k1:secp256k1-kmp", version.ref = "secp256k1Kmp" }
+secp256k1-kmp-jni-android = { module = "fr.acinq.secp256k1:secp256k1-kmp-jni-android", version.ref = "secp256k1Kmp" }
+secp256k1-kmp-jni-jvm = { module = "fr.acinq.secp256k1:secp256k1-kmp-jni-jvm", version.ref = "secp256k1Kmp" }
 web3j-core-android = { module = "org.web3j:core", version.ref = "web3j-core-android" }
 curve25519-android = { module = "org.whispersystems:curve25519-android", version.ref = "curve25519Android" }
 gson = { module = "com.google.code.gson:gson", version.ref = "gson" }

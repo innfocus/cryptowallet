@@ -53,10 +53,10 @@ kotlin {
             implementation(libs.ktor.client.logging)
             implementation(libs.okio)
 
-            implementation("com.soywiz.korlibs.krypto:krypto:4.0.10")
-            implementation("fr.acinq.bitcoin:bitcoin-kmp:0.19.0")
+            implementation(libs.krypto)
+            implementation(libs.bitcoin.kmp)
 
-            api("fr.acinq.secp256k1:secp256k1-kmp:0.15.0")
+            api(libs.secp256k1.kmp)
 
         }
         commonTest.dependencies {
@@ -92,8 +92,8 @@ kotlin {
             implementation(libs.mockito.core)
 
             implementation(kotlin("stdlib"))
-            implementation("fr.acinq.secp256k1:secp256k1-kmp-jni-android:0.15.0")
-            implementation("fr.acinq.secp256k1:secp256k1-kmp-jni-jvm:0.15.0")
+            implementation(libs.secp256k1.kmp.jni.android)
+            implementation(libs.secp256k1.kmp.jni.jvm)
         }
 
         iosMain.dependencies {
