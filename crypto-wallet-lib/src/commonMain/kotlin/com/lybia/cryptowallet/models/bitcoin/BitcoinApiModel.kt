@@ -1,4 +1,4 @@
-package com.lybia.cryptowallet.models
+package com.lybia.cryptowallet.models.bitcoin
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

@@ -1,7 +1,9 @@
 import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.enums.Network
+import com.lybia.cryptowallet.services.BitcoinApiService
 import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertNotNull
@@ -17,7 +19,7 @@ class BitcoinManagerTest {
     fun setup() {
         mnemonic = "" // Mnemonic seed words
         bitcoinManager = BitcoinManager(mnemonic)
-        Config.shared.setNetwork(Network.MAINNET) // Set network
+        Config.shared.setNetwork(Network.TESTNET) // Set network
 
     }
 
@@ -65,5 +67,23 @@ class BitcoinManagerTest {
         assertTrue(transactionHistory is List<*>)
         assertTrue(transactionHistory.size > 0)
         println("Transaction History: $transactionHistory")
+    }
+
+    @Test
+    fun createTransactionSegwitTest() = runBlocking {
+        val address = bitcoinManager.getNativeSegWitAddress()
+        assertNotNull(address)
+        assertTrue(address.isNotEmpty())
+
+        val transaction = BitcoinApiService.INSTANCE.createNewTransaction(address, "tb1qusf9adcth4teh7lhw9eeletfz3xlvgkw8dm2v3", 100)
+
+        assertNotNull(transaction)
+        println("Transaction: $transaction")
+    }
+
+    @Test
+    fun sendBitcoinTransaction() = runTest {
+        bitcoinManager.getNativeSegWitAddress()
+        bitcoinManager.sendBitcoinTransaction("tb1qusf9adcth4teh7lhw9eeletfz3xlvgkw8dm2v3", 0.00001)
     }
 }

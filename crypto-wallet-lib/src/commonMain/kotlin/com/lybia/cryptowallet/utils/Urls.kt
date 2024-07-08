@@ -9,4 +9,9 @@ object Urls {
     fun getBitcoinApiTransaction(network: String, address: String): String{
         return "https://api.blockcypher.com/v1/btc/${network}/addrs/${address}/full"
     }
+
+    fun getBitcoinApiCreateNewTransaction(network: String): String{
+        return "https://api.blockcypher.com/v1/btc/${network}/txs/new"
+    }
+
 }
