@@ -60,6 +60,7 @@ interface ICoinsManager {
     fun addresses(coin: ACTCoin): Array<ACTAddress>?
     fun getBalance(coin: ACTCoin, completionHandler: BalanceHandle)
     fun getTransactions(coin: ACTCoin, moreParam: JsonObject?, completionHandler: TransactionsHandle)
+    fun getADATransactions(addresses: Array<ACTAddress>, completionHandler: TransactionsHandle)
     fun sendCoin(fromAddress: ACTAddress,
                  toAddressStr: String,
                  serAddressStr: String,
@@ -495,7 +496,7 @@ class CoinsManager : ICoinsManager {
         completionHandler.completionHandler(arrayOf(), null, "TO DO")
     }
 
-    private fun getADATransactions(addresses: Array<ACTAddress>, completionHandler: TransactionsHandle) {
+    override fun getADATransactions(addresses: Array<ACTAddress>, completionHandler: TransactionsHandle) {
         val adds = addresses.map { it.rawAddressString() }
         if (adds.isNotEmpty()) {
             Gada.shared.bestblock(object : ADACurrentBlockHandle {
