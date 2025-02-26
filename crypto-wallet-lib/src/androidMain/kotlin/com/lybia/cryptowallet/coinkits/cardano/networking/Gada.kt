@@ -344,8 +344,9 @@ class Gada {
 
                                 var netFee = ceil(networkFee * ADACoin)
                                 // Network fee always > 0
-                                if (netFee <= 0) {
-                                    netFee = 0.14 * ADACoin
+                                val MIN_FEE = ceil(0.165589 * ADACoin)
+                                if (netFee < MIN_FEE) {
+                                    netFee = MIN_FEE
                                 }
                                 var availableAmount = floor(amount)
                                 val totalAmount = availableAmount + netFee + walletServiceFee
