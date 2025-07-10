@@ -71,7 +71,7 @@ enum class ACTCoin(val assetId: Int = 0) {
     },
     Ripple{
         override fun feeDefault()       = 0.000012
-        override fun minimumAmount()    = 10.0
+        override fun minimumAmount()    = 1.0
         override fun supportMemo()      = true
         override fun nameCoin()         = "Ripple"
         override fun symbolName()       = "XRP"
