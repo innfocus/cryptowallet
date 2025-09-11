@@ -73,7 +73,7 @@ fun Array<ADATransactionInOut>.filterAddress(addresses: Array<String>): Array<AD
 }
 
 fun Array<ADATransaction>.toTransactionDatas(addresses: Array<String>): Array<TransationData> {
-    return map { it.toTransactionData(addresses) }.sortedByDescending { it.date }.toTypedArray()
+    return filter { !it.hasCertificates()}.map { it.toTransactionData(addresses) }.sortedByDescending { it.date }.toTypedArray()
 }
 
 fun ADATransaction.toTransactionData(addresses: Array<String>): TransationData {

@@ -30,6 +30,9 @@ class ADATransaction : Serializable {
     @SerializedName("outputs")
     lateinit var outputs: Array<ADATransactionInOut>
 
+    @SerializedName("certificates")
+    lateinit var certificates: Array<Any>
+
     var fee: Double = 0.0
     var amount: Double = 0.0
 
@@ -39,5 +42,9 @@ class ADATransaction : Serializable {
 
     fun lastUpdate(): Date {
         return _lastUpdate.toDate()
+    }
+
+    fun hasCertificates(): Boolean {
+        return certificates.isNotEmpty()
     }
 }
