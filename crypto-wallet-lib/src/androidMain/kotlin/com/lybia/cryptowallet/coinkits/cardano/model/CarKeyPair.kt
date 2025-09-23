@@ -1,7 +1,9 @@
 package com.lybia.cryptowallet.coinkits.cardano.model
 
 import org.spongycastle.crypto.digests.SHA512Digest
-import org.whispersystems.curve25519.java.*
+import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
+import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
+import org.bouncycastle.crypto.signers.Ed25519Signer
 
 class CarKeyPair {
     var publicKey   : CarPublicKey
@@ -18,26 +20,11 @@ class CarKeyPair {
     }
 
     fun sign(message: ByteArray): ByteArray {
-        val signatureL  = ByteArray(32)
-        val signatureR  = ByteArray(32)
-        val hram        = ByteArray(64)
-        val r           = ByteArray(64)
-        val iR          = ge_p3()
-        val sha512      = SHA512Digest()
-        sha512.update(privateKey.bytes(), 32, 32)
-        sha512.update(message, 0, message.size)
-        sha512.doFinal(r, 0)
-        sc_reduce.sc_reduce(r)
-        ge_scalarmult_base.ge_scalarmult_base(iR, r)
-        ge_p3_tobytes.ge_p3_tobytes(signatureL, iR)
-        sha512.reset()
-        sha512.update(signatureL, 0, 32)
-        sha512.update(publicKey.bytes(), 0, 32)
-        sha512.update(message, 0, message.size)
-        sha512.doFinal(hram, 0)
-        sc_reduce.sc_reduce(hram)
-        sc_muladd.sc_muladd(signatureR, hram, privateKey.bytes(), r)
-        return signatureL + signatureR
+        val privParams = Ed25519PrivateKeyParameters(privateKey.bytes(), 0)
+        val signer = Ed25519Signer()
+        signer.init(true, privParams)
+        signer.update(message, 0, message.size)
+        return signer.generateSignature()
     }
 
 }

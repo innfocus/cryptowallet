@@ -1,9 +1,6 @@
 package com.lybia.cryptowallet.coinkits.cardano.model
 
-import org.whispersystems.curve25519.java.ge_p3
-import org.whispersystems.curve25519.java.ge_p3_tobytes
-import org.whispersystems.curve25519.java.ge_scalarmult_base
-
+import org.bouncycastle.math.ec.rfc7748.X25519
 
 class CarPublicKey {
     private var buffer: ByteArray = byteArrayOf()
@@ -21,11 +18,9 @@ class CarPublicKey {
 
     companion object {
         fun derive(fromSecret: ByteArray):CarPublicKey {
-            val pub     = ByteArray(32)
-            val point   = ge_p3()
-            ge_scalarmult_base.ge_scalarmult_base(point, fromSecret)
-            ge_p3_tobytes.ge_p3_tobytes(pub, point)
-            return CarPublicKey(pub)
+            val publicKey = ByteArray(32)
+            X25519.generatePublicKey(fromSecret, 0, publicKey, 0)
+            return CarPublicKey(publicKey)
         }
     }
 }

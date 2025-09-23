@@ -107,7 +107,7 @@ kotlin {
 
 android {
     namespace = "com.lybia.cryptowallet"
-    compileSdk = 35
+    compileSdk = 36
     defaultConfig {
         minSdk = 26
     }
@@ -123,7 +123,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.innfocus",
         artifactId = "crypto-wallet-lib",
-        version = "1.1.2"
+        version = "1.1.3"
     )
 
     // Configure POM metadata for the published artifact
