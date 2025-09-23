@@ -34,6 +34,7 @@ import com.lybia.cryptowallet.coinkits.ripple.networking.Gxrp
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPBalanceHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPSubmitTxtHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPTransactionsHandle
+import java.util.Locale
 
 interface BalanceHandle {
     fun completionHandler(balance: Double, success: Boolean)
@@ -539,7 +540,8 @@ class CoinsManager : ICoinsManager {
             XRPTransactionsHandle {
             override fun completionHandler(transactions: XRPTransaction?, err: Throwable?) {
                 if (transactions != null) {
-                    val xrpTranFilter = transactions.transactions!!.filter { it.meta.result.toUpperCase().contains("SUCCESS") }.toTypedArray()
+                    val xrpTranFilter = transactions.transactions!!.filter { it.meta.result.uppercase(Locale.getDefault())
+                        .contains("SUCCESS") }.toTypedArray()
                     val trans = xrpTranFilter.toTransactionDatas(address.rawAddressString())
                     if (transactions.marker == null) {
                         completionHandler.completionHandler(trans, null, "")

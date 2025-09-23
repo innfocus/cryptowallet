@@ -36,8 +36,8 @@ fun String.fromHexToByteArray(): ByteArray{
     val rs = ByteArray(ns)
     if (ns * 2 == length) {
         for (i in 0 until ns) {
-            val cl = get(i*2).toUpperCase()
-            val cr = get(i*2 + 1).toUpperCase()
+            val cl = get(i*2).uppercaseChar()
+            val cr = get(i*2 + 1).uppercaseChar()
             if (StringExtension.DIGITS_UPPER().contains(cl) && StringExtension.DIGITS_UPPER().contains(cr)) {
                 val l = StringExtension.DIGITS_UPPER().indexOf(cl) shl 4
                 val r = StringExtension.DIGITS_UPPER().indexOf(cr)

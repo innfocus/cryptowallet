@@ -39,6 +39,13 @@ kotlin {
     }
 
     sourceSets {
+        val androidMain by getting {
+            kotlin.srcDirs("src/androidMain/kotlin")
+        }
+        val commonMain by getting {
+            kotlin.srcDirs("src/commonMain/kotlin")
+        }
+
         commonMain.dependencies {
             implementation(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.serialization.json)

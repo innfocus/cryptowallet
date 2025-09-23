@@ -10,8 +10,8 @@ class ACTEIP55 {
             return hash.let { hexHash -> address.mapIndexed { index, hexChar ->
                 when {
                     hexChar         in '0'..'9' -> hexChar
-                    hexHash[index]  in '0'..'7' -> hexChar.toLowerCase()
-                    else                        -> hexChar.toUpperCase()
+                    hexHash[index]  in '0'..'7' -> hexChar.lowercaseChar()
+                    else                        -> hexChar.uppercaseChar()
                 }
             } }.toCharArray().joinToString("")
         }
