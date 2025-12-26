@@ -2,8 +2,8 @@ package com.lybia.cryptowallet.coinkits.cardano.model
 
 import org.spongycastle.crypto.digests.SHA512Digest
 import org.bouncycastle.crypto.params.Ed25519PrivateKeyParameters
-import org.bouncycastle.crypto.params.Ed25519PublicKeyParameters
 import org.bouncycastle.crypto.signers.Ed25519Signer
+import org.bouncycastle.math.ec.rfc8032.Ed25519
 
 class CarKeyPair {
     var publicKey   : CarPublicKey
@@ -20,7 +20,9 @@ class CarKeyPair {
     }
 
     fun sign(message: ByteArray): ByteArray {
-        val privParams = Ed25519PrivateKeyParameters(privateKey.bytes(), 0)
+        val privBytes = privateKey.bytes()
+        val seed = if (privBytes.size == 64) privBytes.copyOfRange(0, 32) else privBytes
+        val privParams = Ed25519PrivateKeyParameters(seed, 0)
         val signer = Ed25519Signer()
         signer.init(true, privParams)
         signer.update(message, 0, message.size)
