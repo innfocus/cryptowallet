@@ -39,7 +39,7 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
                 val account =
                     DeterministicWallet.derivePrivateKey(master, keyPath!!)
                 walletAddress =
-                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Testnet.chainHash)
+                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Testnet4.chainHash)
             }
         }
         return walletAddress
@@ -66,7 +66,7 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
                         keyPath!!
                     )
                 walletAddress =
-                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Testnet.chainHash)
+                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Testnet4.chainHash)
             }
         }
 
@@ -89,7 +89,7 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
                 val account =
                     DeterministicWallet.derivePrivateKey(master, keyPath!!)
                 walletAddress =
-                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Testnet.chainHash)
+                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Testnet4.chainHash)
             }
         }
 
@@ -165,7 +165,7 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
     override suspend fun getChainId(coinNetwork: CoinNetwork): String {
         return when (Config.shared.getNetwork()) {
             Network.MAINNET -> Chain.Mainnet.name
-            else -> Chain.Testnet.name
+            else -> Chain.Testnet4.name
         }
     }
 

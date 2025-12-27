@@ -140,7 +140,7 @@ fun ByteArray.toBitsString(): String {
 fun ByteArray.toCharArray(): CharArray {
     val rs = CharArray(size)
     for (i in 0 until size) {
-        rs[i] = get(i).toChar()
+        rs[i] = get(i).toInt().toChar()
     }
     return rs
 }
