@@ -1,27 +1,27 @@
 [versions]
-agp = "8.5.2"
-bitcoinKmp = "0.19.0"
+androidGradlePlugin = "8.13.2"
+bitcoinKmp = "0.29.0"
 cbor = "0.9"
 krypto = "4.0.10"
-secp256k1Kmp = "0.19.0"
-web3j-core-android = "5.0.0"
+secp256k1Kmp = "0.22.0"
+web3j-core-android = "5.0.1"
 coreVersion = "1.58.0.0"
 curve25519Android = "0.5.0"
-gson = "2.10.1"
-guava = "33.2.1-android"
-kotlin = "2.2.20"
+gson = "2.13.2"
+guava = "33.5.0-android"
+kotlin = "2.3.0"
 kotlinUnsigned = "v2.1"
-ktor = "2.3.12"
-kotlinxCoroutinesCore = "1.8.1"
-kotlinxSerializationJson = "1.6.3"
-mockitoCore = "5.2.0"
-okhttp = "5.1.0"
-okio = "3.16.0"
-retrofit = "2.11.0"
+ktor = "3.3.3"
+kotlinxCoroutinesCore = "1.10.2"
+kotlinxSerializationJson = "1.9.0"
+mockitoCore = "5.21.0"
+okhttp = "5.3.2"
+okio = "3.16.4"
+retrofit = "3.0.0"
 rxandroid = "2.1.1"
 rxjava = "2.2.21"
 rxkotlin = "2.4.0"
-testng = "6.9.6"
+testng = "7.11.0"
 bouncycastle="1.83"
 
 [libraries]
@@ -67,7 +67,8 @@ kotlinx-coroutines-test = {module = "org.jetbrains.kotlinx:kotlinx-coroutines-te
 
 
 [plugins]
-androidLibrary = { id = "com.android.library", version.ref = "agp" }
+androidLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "androidGradlePlugin" }
 kotlinAndroid = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 kotlinCocoapods = { id = "org.jetbrains.kotlin.native.cocoapods", version.ref = "kotlin" }

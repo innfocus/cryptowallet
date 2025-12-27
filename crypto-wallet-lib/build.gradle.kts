@@ -1,4 +1,3 @@
-import com.vanniktech.maven.publish.SonatypeHost
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.plugin.mpp.apple.XCFramework
 
@@ -6,21 +5,25 @@ plugins {
     alias(libs.plugins.kotlinMultiplatform)
     alias(libs.plugins.androidLibrary)
     id("com.vanniktech.maven.publish") version "0.35.0"
-    kotlin("plugin.serialization").version("2.0.0")
+    alias(libs.plugins.kotlin.serialization)
 }
-
 
 kotlin {
 
-    androidTarget {
+
+    android {
+        namespace = "com.lybia.cryptowallet"
+        compileSdk = 36
+        minSdk = 26
+
         compilations.all {
             compileTaskProvider.configure {
-                compilerOptions{
-                    jvmTarget.set(JvmTarget.JVM_11)
+                compilerOptions {
+                    jvmTarget.set(JvmTarget.JVM_17)
                 }
             }
         }
-        publishLibraryVariants("release", "debug")
+
     }
 
     val xcframeworkName = "crypto-wallet-lib"
@@ -39,101 +42,99 @@ kotlin {
     }
 
     sourceSets {
-        val androidMain by getting {
-            kotlin.srcDirs("src/androidMain/kotlin")
-        }
         val commonMain by getting {
-            kotlin.srcDirs("src/commonMain/kotlin")
+            dependencies {
+                implementation(libs.kotlinx.coroutines.core)
+                implementation(libs.kotlinx.serialization.json)
+
+                implementation(libs.ktor.client.core)
+                implementation(libs.ktor.client.cio)
+                implementation(libs.ktor.client.serialization)
+                implementation(libs.ktor.client.json)
+                implementation(libs.ktor.client.content.negotiation)
+                implementation(libs.ktor.serialization.kotlinx.json)
+                implementation(libs.ktor.client.logging)
+                implementation(libs.okio)
+
+                implementation(libs.krypto)
+                implementation(libs.bitcoin.kmp)
+
+                api(libs.secp256k1.kmp)
+            }
         }
 
-        commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
-            implementation(libs.kotlinx.serialization.json)
-
-
-            implementation(libs.ktor.client.core)
-            implementation(libs.ktor.client.cio)
-            implementation(libs.ktor.client.serialization)
-            implementation(libs.ktor.client.json)
-            implementation(libs.ktor.client.content.negotiation)
-            implementation(libs.ktor.serialization.kotlinx.json)
-            implementation(libs.ktor.client.logging)
-            implementation(libs.okio)
-
-            implementation(libs.krypto)
-            implementation(libs.bitcoin.kmp)
-
-            api(libs.secp256k1.kmp)
-
-        }
-        commonTest.dependencies {
-            implementation(libs.kotlin.test)
-            implementation(libs.kotlinx.coroutines.test)
-            implementation(libs.ktor.client.mock)
-
-            api(libs.secp256k1.kmp)
+        val commonTest by getting {
+            dependencies {
+                implementation(libs.kotlin.test)
+                implementation(libs.kotlinx.coroutines.test)
+                implementation(libs.ktor.client.mock)
+                api(libs.secp256k1.kmp)
+            }
         }
 
-        androidMain.dependencies {
-            implementation(libs.web3j.core.android)
-            implementation(libs.kotlinx.coroutines.android)
-            implementation(libs.ktor.client.okhttp)
-            implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
+        val androidMain by getting {
+            dependencies {
+                implementation(libs.web3j.core.android)
+                implementation(libs.kotlinx.coroutines.android)
+                implementation(libs.ktor.client.okhttp)
+//                implementation(fileTree(kotlin.collections.mapOf("dir" to "libs", "include" to kotlin.collections.listOf("*.jar"))))
+//                implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
 
-            implementation(libs.kotlin.unsigned)
-            implementation(libs.kotlin.stdlib.jdk8)
-            implementation(libs.cbor)
-            implementation(libs.spongycastle.core)
-            implementation(libs.prov)
-            implementation(libs.curve25519.android)
-            implementation(libs.guava)
+                implementation(fileTree("libs") {
+                    include("*.jar")
+                })
 
-            implementation(libs.rxjava)
-            implementation(libs.rxandroid)
-            implementation(libs.rxkotlin)
 
-            implementation(libs.gson)
-            implementation(libs.retrofit)
-            implementation(libs.converter.gson)
-            implementation(libs.okhttp)
-            implementation(libs.adapter.rxjava2)
+                implementation(libs.kotlin.unsigned)
+                implementation(libs.kotlin.stdlib.jdk8)
+                implementation(libs.cbor)
+                implementation(libs.spongycastle.core)
+                implementation(libs.prov)
+                implementation(libs.curve25519.android)
+                implementation(libs.guava)
 
-            implementation(libs.mockito.core)
+                implementation(libs.rxjava)
+                implementation(libs.rxandroid)
+                implementation(libs.rxkotlin)
 
-            implementation(kotlin("stdlib"))
-            implementation(libs.secp256k1.kmp.jni.android)
-            implementation(libs.secp256k1.kmp.jni.jvm)
+                implementation(libs.gson)
+                implementation(libs.retrofit)
+                implementation(libs.converter.gson)
+                implementation(libs.okhttp)
+                implementation(libs.adapter.rxjava2)
+
+                implementation(libs.mockito.core)
+
+                implementation(libs.secp256k1.kmp.jni.android)
+                implementation(libs.secp256k1.kmp.jni.jvm)
+            }
         }
 
-        iosMain.dependencies {
-            implementation(libs.ktor.client.darwin)
+        val iosMain by creating {
+            dependencies {
+                implementation(libs.ktor.client.darwin)
+            }
         }
+        // Link các target iOS vào iosMain
+        val iosX64Main by getting
+        val iosArm64Main by getting
+        val iosSimulatorArm64Main by getting
 
-    }
-}
-
-android {
-    namespace = "com.lybia.cryptowallet"
-    compileSdk = 36
-    defaultConfig {
-        minSdk = 26
-    }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        iosMain.dependsOn(commonMain)
+        iosX64Main.dependsOn(iosMain)
+        iosArm64Main.dependsOn(iosMain)
+        iosSimulatorArm64Main.dependsOn(iosMain)
     }
 }
 
 
 mavenPublishing {
-    // Define coordinates for the published artifact
     coordinates(
         groupId = "io.github.innfocus",
         artifactId = "crypto-wallet-lib",
         version = "1.1.5"
     )
 
-    // Configure POM metadata for the published artifact
     pom {
         name.set("Crypto Wallet Libirary")
         description.set("A library for blockchain crypto wallet")
@@ -147,7 +148,6 @@ mavenPublishing {
             }
         }
 
-        // Specify developers information
         developers {
             developer {
                 id.set("nqhuy2509")
@@ -156,25 +156,12 @@ mavenPublishing {
             }
         }
 
-        // Specify SCM information
         scm {
             url.set("https://github.com/innfocus/cryptowallet")
         }
     }
 
-    // Configure publishing to Maven Central
-    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL)
+    publishToMavenCentral()
 
-    // Enable GPG signing for all publications
     signAllPublications()
 }
-
-task("testClasses") {
-    doLast {
-        println("Hello from testClasses")
-    }
-}
-dependencies {
-    testImplementation(libs.testng)
-}
-
