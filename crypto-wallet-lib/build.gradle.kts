@@ -141,7 +141,7 @@ mavenPublishing {
     coordinates(
         groupId = "io.github.innfocus",
         artifactId = "crypto-wallet-lib",
-        version = "1.1.6"
+        version = "1.2.0"
     )
 
     pom {
