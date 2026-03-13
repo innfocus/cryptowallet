@@ -16,10 +16,12 @@ import org.ton.tlb.storeTlb
 import org.ton.tlb.loadTlb
 import org.ton.cell.*
 import org.ton.boc.BagOfCells
-import io.ktor.util.*
+import kotlin.io.encoding.Base64
+import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlinx.serialization.json.jsonPrimitive
 import org.ton.cell.buildCell
 
+@OptIn(ExperimentalEncodingApi::class)
 class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
     private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
     
@@ -53,13 +55,13 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         val userAddr = MsgAddressInt.parse(userAddress)
         val bocBytes = BagOfCells(CellBuilder.createCell { storeTlb(MsgAddressInt, userAddr) }).toByteArray()
         val stackParams = listOf(
-            listOf("tvm.Slice", bocBytes.encodeBase64())
+            listOf("tvm.Slice", Base64.Default.encode(bocBytes))
         )
         
         val resAddr = TonApiService.INSTANCE.runGetMethod(coinNetwork, jettonMasterAddress, "get_wallet_address", stackParams)
         if (resAddr?.ok == true && resAddr.result?.stack?.isNotEmpty() == true) {
             val jettonWalletAddrBoc = resAddr.result.stack[0][1].jsonPrimitive.content
-            val jettonWalletAddr = BagOfCells(jettonWalletAddrBoc.decodeBase64Bytes()).roots[0].beginParse().loadTlb(MsgAddressInt)
+            val jettonWalletAddr = BagOfCells(Base64.Default.decode(jettonWalletAddrBoc)).roots[0].beginParse().loadTlb(MsgAddressInt)
             return jettonWalletAddr.toString()
         }
         return null
@@ -84,7 +86,7 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         val res = TonApiService.INSTANCE.runGetMethod(coinNetwork, contractAddress, "get_jetton_data")
         if (res?.ok == true && res.result?.stack != null && res.result.stack.size >= 4) {
             val contentBoc = res.result.stack[3][1].jsonPrimitive.content
-            val contentCell = BagOfCells(contentBoc.decodeBase64Bytes()).roots[0]
+            val contentCell = BagOfCells(Base64.Default.decode(contentBoc)).roots[0]
             val slice = contentCell.beginParse()
             
             val layout = slice.loadUInt(8).toInt()
@@ -134,9 +136,9 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             storeTlb(Coins, Coins(jettonAmountNano))
             storeTlb(MsgAddressInt, MsgAddressInt.parse(toAddress))
             storeTlb(MsgAddressInt, address) // response_destination = sender
-            storeBit(false)                  // custom_payload = null
+            storeBoolean(false)              // custom_payload = null
             storeTlb(Coins, Coins(forwardTonAmountNano))
-            storeBit(memo != null)
+            storeBoolean(memo != null)
             if (memo != null) {
                 val memoCell = CellBuilder.createCell {
                     storeUInt(0, 32)
@@ -169,7 +171,7 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         )
 
         val cell = buildCell { storeTlb(Message.Any, message) }
-        return BagOfCells(cell).toByteArray().encodeBase64()
+        return Base64.Default.encode(BagOfCells(cell).toByteArray())
     }
 
     suspend fun getSeqno(coinNetwork: CoinNetwork): Int {
@@ -212,7 +214,7 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         )
 
         val cell = buildCell { storeTlb(Message.Any, message) }
-        return BagOfCells(cell).toByteArray().encodeBase64()
+        return Base64.Default.encode(BagOfCells(cell).toByteArray())
     }
 
     override suspend fun getTransactionHistory(address: String?, coinNetwork: CoinNetwork?): Any? {
