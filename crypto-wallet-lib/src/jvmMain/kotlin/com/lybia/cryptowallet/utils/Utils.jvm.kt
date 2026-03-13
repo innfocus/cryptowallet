@@ -2,6 +2,7 @@ package com.lybia.cryptowallet.utils
 
 import kotlin.math.pow
 
+
 actual class Utils {
     actual companion object {
         actual fun convertHexStringToDouble(hex: String?, decimals: Int?): Double {
