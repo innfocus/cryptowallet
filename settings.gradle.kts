@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "CryptoWallet"
 include(":crypto-wallet-lib")
+include(":android-app")
