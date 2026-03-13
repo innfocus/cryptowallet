@@ -17,21 +17,108 @@
             android:orientation="vertical">
 
             <TextView
-                android:id="@+id/textViewTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="CryptoWallet Library Test"
-                android:textSize="20sp"
+                android:text="TonManager Test Tool"
+                android:textSize="22sp"
                 android:textStyle="bold"
                 android:layout_marginBottom="16dp"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Select Network:"
+                android:textStyle="bold"/>
+
+            <RadioGroup
+                android:id="@+id/radioGroupNetwork"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="16dp">
+                <RadioButton
+                    android:id="@+id/radioMainnet"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Mainnet"
+                    android:checked="true"/>
+                <RadioButton
+                    android:id="@+id/radioTestnet"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Testnet"/>
+            </RadioGroup>
+
+            <Button
+                android:id="@+id/btnGenerateMnemonic"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Generate Random Mnemonic"/>
+
+            <EditText
+                android:id="@+id/etMnemonic"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="#f0f0f0"
+                android:padding="12dp"
+                android:layout_marginVertical="8dp"
+                android:hint="Enter your 12 or 24 words seed phrase here"
+                android:textSize="14sp"
+                android:gravity="top|start"
+                android:minLines="3"
+                android:inputType="textMultiLine"/>
+
+            <Space android:layout_width="match_parent" android:layout_height="16dp"/>
+
+            <Button
+                android:id="@+id/btnGetAddress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Get Address"/>
+
+            <Button
+                android:id="@+id/btnGetBalance"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Get Balance"/>
+
+            <Button
+                android:id="@+id/btnGetChainId"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Get Chain ID"/>
+
+            <Button
+                android:id="@+id/btnGetHistory"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Get Transaction History"/>
+
+            <Button
+                android:id="@+id/btnTransfer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Transfer (Test Mock)"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Output Log:"
+                android:textStyle="bold"
+                android:layout_marginTop="24dp"/>
 
             <TextView
                 android:id="@+id/textViewOutput"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Initializing..."
-                android:textSize="14sp"
-                android:fontFamily="monospace"/>
+                android:background="#000"
+                android:textColor="#0f0"
+                android:padding="8dp"
+                android:layout_marginTop="8dp"
+                android:textSize="12sp"
+                android:fontFamily="monospace"
+                android:minHeight="200dp"
+                android:text="> Ready..."/>
 
         </LinearLayout>
     </ScrollView>
