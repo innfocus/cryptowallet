@@ -113,5 +113,15 @@ data class JettonMetadata(
     val image: String? = null
 )
 
+@Serializable
+data class TonStakingBalance(
+    val poolAddress: String,
+    val amount: Double,
+    val pendingDeposit: Double = 0.0,
+    val pendingWithdrawal: Double = 0.0,
+    val liquidBalance: Double = 0.0,
+    val rewards: Double = 0.0
+)
+
 
 

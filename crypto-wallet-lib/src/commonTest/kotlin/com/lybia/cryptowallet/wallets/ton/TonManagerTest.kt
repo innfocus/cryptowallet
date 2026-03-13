@@ -84,4 +84,48 @@ class TonManagerTest {
         
         println("Address $address resolved to domain: $domain")
     }
+
+    @Test
+    @Ignore // Requires network and valid pool address
+    fun testGetNominatorStakingBalance() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val tonManager = TonManager(testMnemonic)
+        val coinNetwork = CoinNetwork(NetworkName.TON, apiKeyInfura = "YOUR_API_KEY")
+
+        // Example Nominator Pool address
+        val poolAddress = "EQD4S93o-Jv-W-2n-Xp-V_2p-Xp-V_2p-Xp-V_2p-Xp-V_2p" // Fake address
+        val stakingBalance = tonManager.getNominatorStakingBalance(poolAddress, coinNetwork)
+
+        println("Staking Balance: $stakingBalance")
+        if (stakingBalance != null) {
+            assertTrue(stakingBalance.amount >= 0, "Staking amount should be non-negative")
+        }
+    }
+
+    @Test
+    @Ignore // Requires network
+    fun testGetTonstakersStakingBalance() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val tonManager = TonManager(testMnemonic)
+        val coinNetwork = CoinNetwork(NetworkName.TON, apiKeyInfura = "YOUR_API_KEY")
+
+        // Tonstakers Master Address
+        val poolAddress = "EQD-cvRscwXMDFFdc1kYQK8zV8N39p9N3T8E_0KjLpInS3Wl"
+        val stakingBalance = tonManager.getTonstakersStakingBalance(poolAddress, coinNetwork)
+
+        println("Tonstakers Balance: $stakingBalance")
+    }
+
+    @Test
+    fun testSignDepositToNominatorPool() = runTest {
+        val tonManager = TonManager(testMnemonic)
+        val poolAddress = "EQD4S93o-Jv-W-2n-Xp-V_2p-Xp-V_2p-Xp-V_2p-Xp-V_2p"
+        val amount = 10_000_000_000L // 10 TON
+        val seqno = 5
+        
+        val boc = tonManager.signDepositToNominatorPool(poolAddress, amount, seqno)
+        
+        assertTrue(boc.isNotEmpty(), "Signed BOC should not be empty")
+        println("Signed Deposit BOC: $boc")
+    }
 }

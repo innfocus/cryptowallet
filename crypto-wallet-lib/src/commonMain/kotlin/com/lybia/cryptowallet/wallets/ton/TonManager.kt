@@ -6,7 +6,7 @@ import com.lybia.cryptowallet.base.BaseCoinManager
 import com.lybia.cryptowallet.base.ITokenAndNFT
 import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.models.TransferResponseModel
-import com.lybia.cryptowallet.models.ton.JettonMetadata
+import com.lybia.cryptowallet.models.ton.*
 import com.lybia.cryptowallet.services.TonApiService
 import org.ton.contract.wallet.*
 import org.ton.kotlin.crypto.PrivateKeyEd25519
@@ -398,5 +398,161 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
 
         // Category 0xe8d2 for domain name (TEP-81)
         return resolveDns(domain, coinNetwork, category = 0xe8d2)
+    }
+
+    suspend fun getNominatorStakingBalance(
+        poolAddress: String,
+        coinNetwork: CoinNetwork
+    ): TonStakingBalance? {
+        val userAddr = getAddress()
+        val bocBytes = BagOfCells(CellBuilder.createCell { storeTlb(MsgAddressInt, MsgAddressInt.parse(userAddr)) }).toByteArray()
+        val stackParams = listOf(
+            listOf("tvm.Slice", Base64.Default.encode(bocBytes))
+        )
+
+        val res = TonApiService.INSTANCE.runGetMethod(
+            coinNetwork,
+            poolAddress,
+            "get_nominator_data",
+            stackParams
+        )
+        if (res?.ok == true && res.result?.stack?.isNotEmpty() == true && res.result.stack.size >= 5) {
+            // Stack: [utime, amount, pending_deposit, pending_withdrawal, liquid_balance]
+            val amountRaw = res.result.stack[1][1].jsonPrimitive.content
+            val pendingDepositRaw = res.result.stack[2][1].jsonPrimitive.content
+            val pendingWithdrawalRaw = res.result.stack[3][1].jsonPrimitive.content
+            val liquidBalanceRaw = res.result.stack[4][1].jsonPrimitive.content
+
+            val amountNano = amountRaw.removePrefix("0x").toLong(if (amountRaw.startsWith("0x")) 16 else 10)
+            val pendingDepositNano = pendingDepositRaw.removePrefix("0x").toLong(if (pendingDepositRaw.startsWith("0x")) 16 else 10)
+            val pendingWithdrawalNano = pendingWithdrawalRaw.removePrefix("0x").toLong(if (pendingWithdrawalRaw.startsWith("0x")) 16 else 10)
+            val liquidBalanceNano = liquidBalanceRaw.removePrefix("0x").toLong(if (liquidBalanceRaw.startsWith("0x")) 16 else 10)
+
+            return TonStakingBalance(
+                poolAddress = poolAddress,
+                amount = amountNano.toDouble() / 1_000_000_000.0,
+                pendingDeposit = pendingDepositNano.toDouble() / 1_000_000_000.0,
+                pendingWithdrawal = pendingWithdrawalNano.toDouble() / 1_000_000_000.0,
+                liquidBalance = liquidBalanceNano.toDouble() / 1_000_000_000.0
+            )
+        }
+        return null
+    }
+
+    suspend fun getTonstakersStakingBalance(
+        poolAddress: String,
+        coinNetwork: CoinNetwork
+    ): TonStakingBalance? {
+        // PoolAddress here is the Tonstakers Master contract
+        // Tonstakers (tsTON)
+        val tsTonBalance = getBalanceToken(getAddress(), poolAddress, coinNetwork)
+        if (tsTonBalance == 0.0) return TonStakingBalance(poolAddress, 0.0)
+
+        val res = TonApiService.INSTANCE.runGetMethod(coinNetwork, poolAddress, "get_pool_full_data")
+        if (res?.ok == true && res.result?.stack != null && res.result.stack.size >= 2) {
+            val totalStakingBalanceRaw = res.result.stack[0][1].jsonPrimitive.content
+            val totalTokensSupplyRaw = res.result.stack[1][1].jsonPrimitive.content
+
+            val totalStakingBalance = totalStakingBalanceRaw.removePrefix("0x").toLong(if (totalStakingBalanceRaw.startsWith("0x")) 16 else 10)
+            val totalTokensSupply = totalTokensSupplyRaw.removePrefix("0x").toLong(if (totalTokensSupplyRaw.startsWith("0x")) 16 else 10)
+
+            if (totalTokensSupply > 0) {
+                val rate = totalStakingBalance.toDouble() / totalTokensSupply.toDouble()
+                val amountInTon = tsTonBalance * rate
+                return TonStakingBalance(
+                    poolAddress = poolAddress,
+                    amount = amountInTon,
+                    rewards = amountInTon - tsTonBalance // Simplified rewards
+                )
+            }
+        }
+
+        return TonStakingBalance(poolAddress, tsTonBalance)
+    }
+
+    suspend fun getBemoStakingBalance(
+        poolAddress: String,
+        coinNetwork: CoinNetwork
+    ): TonStakingBalance? {
+        // Bemo (stTON)
+        val stTonBalance = getBalanceToken(getAddress(), poolAddress, coinNetwork)
+        if (stTonBalance == 0.0) return TonStakingBalance(poolAddress, 0.0)
+
+        val res = TonApiService.INSTANCE.runGetMethod(coinNetwork, poolAddress, "get_full_data")
+        if (res?.ok == true && res.result?.stack != null && res.result.stack.size >= 2) {
+            // Stack elements for Bemo: [total_ton, total_st_ton, ...]
+            val totalTonRaw = res.result.stack[0][1].jsonPrimitive.content
+            val totalStTonRaw = res.result.stack[1][1].jsonPrimitive.content
+
+            val totalTon = totalTonRaw.removePrefix("0x").toLong(if (totalTonRaw.startsWith("0x")) 16 else 10)
+            val totalStTon = totalStTonRaw.removePrefix("0x").toLong(if (totalStTonRaw.startsWith("0x")) 16 else 10)
+
+            if (totalStTon > 0) {
+                val rate = totalTon.toDouble() / totalStTon.toDouble()
+                val amountInTon = stTonBalance * rate
+                return TonStakingBalance(
+                    poolAddress = poolAddress,
+                    amount = amountInTon,
+                    rewards = amountInTon - stTonBalance
+                )
+            }
+        }
+        return TonStakingBalance(poolAddress, stTonBalance)
+    }
+
+    suspend fun signDepositToNominatorPool(
+        poolAddress: String,
+        amountNano: Long,
+        seqno: Int
+    ): String {
+        // Standard Nominator Pool deposit op-code is 0x4e73746b ("nstk")
+        val payload = CellBuilder.createCell {
+            storeUInt(0x4e73746b, 32)
+        }
+
+        val walletId = WalletContract.DEFAULT_WALLET_ID
+        val stateInit = if (seqno == 0) {
+            WalletV4R2Contract.stateInit(WalletV4R2Contract.Data(0, publicKey)).load()
+        } else null
+
+        val transfer = WalletTransfer {
+            destination = AddrStd.parse(poolAddress)
+            bounceable = true
+            coins = Coins(amountNano)
+            messageData = MessageData.Raw(payload, null, null)
+        }
+
+        val message = WalletV4R2Contract.transferMessage(
+            address = address,
+            stateInit = stateInit,
+            privateKey = privateKey,
+            walletId = walletId,
+            validUntil = Int.MAX_VALUE,
+            seqno = seqno,
+            transfer
+        )
+
+        val cell = buildCell { storeTlb(Message.Any, message) }
+        return Base64.Default.encode(BagOfCells(cell).toByteArray())
+    }
+
+    suspend fun signTonstakersDeposit(
+        masterAddress: String,
+        amountNano: Long,
+        seqno: Int
+    ): String {
+        // Tonstakers deposit (simple transfer to master contract)
+        // Usually, it's just a transfer to master address.
+        // Some protocols use specific op-codes.
+        return signTransaction(masterAddress, amountNano, seqno)
+    }
+
+    suspend fun signBemoDeposit(
+        masterAddress: String,
+        amountNano: Long,
+        seqno: Int
+    ): String {
+        // Bemo deposit
+        return signTransaction(masterAddress, amountNano, seqno)
     }
 }
