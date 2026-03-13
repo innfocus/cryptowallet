@@ -61,6 +61,39 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        findViewById<Button>(R.id.btnGetJettonBalance).setOnClickListener {
+            runTest {
+                initManagerFromInput()
+                val coinNetwork = getTonCoinNetwork()
+                // USDT Master Address on TON Mainnet
+                val usdtMaster = "EQCxE6mUtVrWBMD77QCWnv9sh9SZAInAsS9ZebNo09pInOCp"
+                val address = tonManager.getAddress()
+                val balance = tonManager.getBalanceToken(address, usdtMaster, coinNetwork)
+                log("Jetton Balance (USDT): $balance")
+            }
+        }
+
+        findViewById<Button>(R.id.btnGetJettonHistory).setOnClickListener {
+            runTest {
+                initManagerFromInput()
+                val coinNetwork = getTonCoinNetwork()
+                val usdtMaster = "EQCxE6mUtVrWBMD77QCWnv9sh9SZAInAsS9ZebNo09pInOCp"
+                val address = tonManager.getAddress()
+                val history = tonManager.getTransactionHistoryToken(address, usdtMaster, coinNetwork)
+                log("Jetton History (USDT): $history")
+            }
+        }
+
+        findViewById<Button>(R.id.btnGetJettonMetadata).setOnClickListener {
+            runTest {
+                initManagerFromInput()
+                val coinNetwork = getTonCoinNetwork()
+                val usdtMaster = "EQCxE6mUtVrWBMD77QCWnv9sh9SZAInAsS9ZebNo09pInOCp"
+                val metadata = tonManager.getJettonMetadata(usdtMaster, coinNetwork)
+                log("Jetton Metadata: Name=${metadata?.name}, Symbol=${metadata?.symbol}, Decimals=${metadata?.decimals}")
+            }
+        }
+
         findViewById<Button>(R.id.btnGetChainId).setOnClickListener {
             runTest {
                 initManagerFromInput()
@@ -110,6 +143,38 @@ class MainActivity : AppCompatActivity() {
                 log("4. Broadcasting...")
                 val result = tonManager.transfer(bocBase64, coinNetwork)
                 log("Transfer Result: success=${result.success}, error=${result.error}, status=${result.txHash}")
+            }
+        }
+
+        findViewById<Button>(R.id.btnJettonTransfer).setOnClickListener {
+            runTest {
+                initManagerFromInput()
+                val coinNetwork = getTonCoinNetwork()
+                
+                val toAddr = etToAddress.text.toString().trim()
+                val amountStr = etAmount.text.toString().trim()
+                val memo = etMemo.text.toString().takeIf { it.isNotEmpty() }
+                val usdtMaster = "EQCxE6mUtVrWBMD77QCWnv9sh9SZAInAsS9ZebNo09pInOCp"
+                
+                if (toAddr.isEmpty() || amountStr.isEmpty()) {
+                    log("Error: Destination and Amount are required")
+                    return@runTest
+                }
+                
+                // Giả định USDT có 6 decimals (thực tế USDT trên TON có 6 decimals)
+                val jettonAmountNano = (amountStr.toDouble() * 1_000_000).toLong()
+                
+                log("1. Fetching seqno...")
+                val seqno = tonManager.getSeqno(coinNetwork)
+                
+                log("2. Signing Jetton transaction...")
+                val bocBase64 = tonManager.signJettonTransaction(
+                    usdtMaster, toAddr, jettonAmountNano, seqno, coinNetwork, memo = memo
+                )
+                
+                log("3. Broadcasting Jetton Transfer...")
+                val status = tonManager.TransferToken(bocBase64, coinNetwork)
+                log("Jetton Transfer Status: $status")
             }
         }
     }

@@ -83,6 +83,24 @@
                 android:text="Get Balance"/>
 
             <Button
+                android:id="@+id/btnGetJettonBalance"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Get Jetton Balance (USDT)"/>
+
+            <Button
+                android:id="@+id/btnGetJettonHistory"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Get Jetton History (USDT)"/>
+
+            <Button
+                android:id="@+id/btnGetJettonMetadata"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Get Jetton Metadata (USDT)"/>
+
+            <Button
                 android:id="@+id/btnGetChainId"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -128,6 +146,12 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="Execute Transfer"/>
+
+            <Button
+                android:id="@+id/btnJettonTransfer"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Execute Jetton Transfer (USDT)"/>
 
             <TextView
                 android:layout_width="match_parent"
