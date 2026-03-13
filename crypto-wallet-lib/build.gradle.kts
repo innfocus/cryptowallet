@@ -26,6 +26,8 @@ kotlin {
 
     }
 
+    jvm()
+
     val xcframeworkName = "crypto-wallet-lib"
     val xcf = XCFramework(xcframeworkName)
     listOf(
@@ -58,6 +60,8 @@ kotlin {
 
                 implementation(libs.krypto)
                 implementation(libs.bitcoin.kmp)
+
+                implementation(libs.ton.kotlin)
 
                 api(libs.secp256k1.kmp)
             }
