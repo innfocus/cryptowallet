@@ -1,10 +1,14 @@
 package com.lybia.cryptowallet.wallets.ton
 
 import com.lybia.cryptowallet.Config
+import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.enums.Network
+import com.lybia.cryptowallet.enums.NetworkName
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.Ignore
+import kotlinx.coroutines.test.runTest
 
 class TonManagerTest {
 
@@ -35,5 +39,49 @@ class TonManagerTest {
         // Actually, in ton-kotlin 0.5.0, toString(testOnly = true) should produce a testnet format.
         println("Testnet Address: $address")
         assertEquals(48, address.length, "TON user-friendly address length should be 48 characters")
+    }
+
+    @Test
+    @Ignore // Requires network and potentially an API key
+    fun testResolveDns() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val tonManager = TonManager(testMnemonic)
+        // Note: You need a valid API key in CoinNetwork for this to work
+        val coinNetwork = CoinNetwork(NetworkName.TON, apiKeyInfura = "YOUR_API_KEY")
+        
+        // foundation.ton is a well-known domain
+        val domain = "foundation.ton"
+        val resolvedAddress = try {
+             tonManager.resolveDns(domain, coinNetwork)
+        } catch (e: Exception) {
+            println("Resolution failed (possibly due to network or missing API key): ${e.message}")
+            null
+        }
+        
+        println("Resolved $domain to $resolvedAddress")
+        if (resolvedAddress != null) {
+            assertTrue(resolvedAddress.startsWith("EQ") || resolvedAddress.startsWith("UQ") || resolvedAddress.startsWith("0:"), 
+                "Resolved address should be a valid TON address")
+        }
+    }
+
+    @Test
+    @Ignore // Requires network
+    fun testReverseResolveDns() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val tonManager = TonManager(testMnemonic)
+        val coinNetwork = CoinNetwork(NetworkName.TON, apiKeyInfura = "YOUR_API_KEY")
+        
+        // Example address that has a TON DNS (foundation.ton)
+        // EQCD39VS5Is_fS8L99I4tq8t_TAn8U7z69-95vD0j_X4_S - actually foundation.ton address might vary
+        val address = "EQCD39VS5Is_fS8L99I4tq8t_TAn8U7z69-95vD0j_X4_S" 
+        val domain = try {
+            tonManager.reverseResolveDns(address, coinNetwork)
+        } catch (e: Exception) {
+            println("Reverse resolution failed: ${e.message}")
+            null
+        }
+        
+        println("Address $address resolved to domain: $domain")
     }
 }

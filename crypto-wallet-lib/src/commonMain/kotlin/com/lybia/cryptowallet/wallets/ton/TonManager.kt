@@ -24,7 +24,7 @@ import org.ton.cell.buildCell
 @OptIn(ExperimentalEncodingApi::class)
 class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
     private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
-    
+
     private val seed = Mnemonic(mnemonicList).toSeed()
     private val privateKey = PrivateKeyEd25519(seed.sliceArray(0 until 32))
     val publicKey = privateKey.publicKey()
@@ -35,6 +35,7 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         privateKey = privateKey,
         workchainId = 0
     )
+
     override fun getAddress(): String {
         val isTestnet = Config.shared.getNetwork() == Network.TESTNET
         return address.toString(userFriendly = true, bounceable = false, testOnly = isTestnet)
@@ -51,44 +52,69 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         }
     }
 
-    private suspend fun getJettonWalletAddress(userAddress: String, jettonMasterAddress: String, coinNetwork: CoinNetwork): String? {
+    private suspend fun getJettonWalletAddress(
+        userAddress: String,
+        jettonMasterAddress: String,
+        coinNetwork: CoinNetwork
+    ): String? {
         val userAddr = MsgAddressInt.parse(userAddress)
-        val bocBytes = BagOfCells(CellBuilder.createCell { storeTlb(MsgAddressInt, userAddr) }).toByteArray()
+        val bocBytes =
+            BagOfCells(CellBuilder.createCell { storeTlb(MsgAddressInt, userAddr) }).toByteArray()
         val stackParams = listOf(
             listOf("tvm.Slice", Base64.Default.encode(bocBytes))
         )
-        
-        val resAddr = TonApiService.INSTANCE.runGetMethod(coinNetwork, jettonMasterAddress, "get_wallet_address", stackParams)
+
+        val resAddr = TonApiService.INSTANCE.runGetMethod(
+            coinNetwork,
+            jettonMasterAddress,
+            "get_wallet_address",
+            stackParams
+        )
         if (resAddr?.ok == true && resAddr.result?.stack?.isNotEmpty() == true) {
             val jettonWalletAddrBoc = resAddr.result.stack[0][1].jsonPrimitive.content
-            val jettonWalletAddr = BagOfCells(Base64.Default.decode(jettonWalletAddrBoc)).roots[0].beginParse().loadTlb(MsgAddressInt)
+            val jettonWalletAddr =
+                BagOfCells(Base64.Default.decode(jettonWalletAddrBoc)).roots[0].beginParse()
+                    .loadTlb(MsgAddressInt)
             return jettonWalletAddr.toString()
         }
         return null
     }
 
-    override suspend fun getBalanceToken(address: String, contractAddress: String, coinNetwork: CoinNetwork): Double {
-        val jettonWalletAddr = getJettonWalletAddress(address, contractAddress, coinNetwork) ?: return 0.0
-        
-        val resData = TonApiService.INSTANCE.runGetMethod(coinNetwork, jettonWalletAddr, "get_wallet_data")
+    override suspend fun getBalanceToken(
+        address: String,
+        contractAddress: String,
+        coinNetwork: CoinNetwork
+    ): Double {
+        val jettonWalletAddr =
+            getJettonWalletAddress(address, contractAddress, coinNetwork) ?: return 0.0
+
+        val resData =
+            TonApiService.INSTANCE.runGetMethod(coinNetwork, jettonWalletAddr, "get_wallet_data")
         if (resData?.ok == true && resData.result?.stack?.isNotEmpty() == true) {
             val balanceRaw = resData.result.stack[0][1].jsonPrimitive.content
             val balanceNano = try {
-                if (balanceRaw.startsWith("0x")) balanceRaw.substring(2).toLong(16) else balanceRaw.toLong()
-            } catch (e: Exception) { 0L }
-            
-            return balanceNano.toDouble() / 1_000_000_000.0 
+                if (balanceRaw.startsWith("0x")) balanceRaw.substring(2)
+                    .toLong(16) else balanceRaw.toLong()
+            } catch (e: Exception) {
+                0L
+            }
+
+            return balanceNano.toDouble() / 1_000_000_000.0
         }
         return 0.0
     }
 
-    suspend fun getJettonMetadata(contractAddress: String, coinNetwork: CoinNetwork): JettonMetadata? {
-        val res = TonApiService.INSTANCE.runGetMethod(coinNetwork, contractAddress, "get_jetton_data")
+    suspend fun getJettonMetadata(
+        contractAddress: String,
+        coinNetwork: CoinNetwork
+    ): JettonMetadata? {
+        val res =
+            TonApiService.INSTANCE.runGetMethod(coinNetwork, contractAddress, "get_jetton_data")
         if (res?.ok == true && res.result?.stack != null && res.result.stack.size >= 4) {
             val contentBoc = res.result.stack[3][1].jsonPrimitive.content
             val contentCell = BagOfCells(Base64.Default.decode(contentBoc)).roots[0]
             val slice = contentCell.beginParse()
-            
+
             val layout = slice.loadUInt(8).toInt()
             if (layout == 0x01) {
                 // Try loadBits and convert if loadSnakeString is missing
@@ -103,8 +129,13 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         return null
     }
 
-    override suspend fun getTransactionHistoryToken(address: String, contractAddress: String, coinNetwork: CoinNetwork): Any? {
-        val jettonWalletAddr = getJettonWalletAddress(address, contractAddress, coinNetwork) ?: return null
+    override suspend fun getTransactionHistoryToken(
+        address: String,
+        contractAddress: String,
+        coinNetwork: CoinNetwork
+    ): Any? {
+        val jettonWalletAddr =
+            getJettonWalletAddress(address, contractAddress, coinNetwork) ?: return null
         return TonApiService.INSTANCE.getTransactions(coinNetwork, jettonWalletAddr)
     }
 
@@ -240,11 +271,132 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         return if (result == "success") {
             TransferResponseModel(success = true, error = null, txHash = "pending")
         } else {
-            TransferResponseModel(success = false, error = "Failed to broadcast transaction", txHash = null)
+            TransferResponseModel(
+                success = false,
+                error = "Failed to broadcast transaction",
+                txHash = null
+            )
         }
     }
 
     override suspend fun getChainId(coinNetwork: CoinNetwork): String {
         return if (Config.shared.getNetwork() == Network.MAINNET) "mainnet" else "testnet"
+    }
+
+    suspend fun resolveDns(
+        domain: String,
+        coinNetwork: CoinNetwork,
+        category: Int = 0x9fd3
+    ): String? {
+        val rootDns = "Ef_SByTMM97KVRlaEFIqX_67pYI67FPRu_YBaAs7_pS48_p6"
+        var currentResolver = rootDns
+
+        val normalized = domain.lowercase().removeSuffix(".")
+        val labels = normalized.split(".")
+
+        var bitsToResolve = 0
+        val builder = CellBuilder.beginCell()
+        labels.reversed().forEach { label ->
+            val bytes = label.encodeToByteArray()
+            builder.storeBytes(bytes)
+            builder.storeUInt(0, 8)
+            bitsToResolve += (bytes.size + 1) * 8
+        }
+        var currentSubdomainCell = builder.endCell()
+
+        repeat(5) { // Limit recursion to prevent infinite loops
+            val subdomainBoc = Base64.Default.encode(BagOfCells(currentSubdomainCell).toByteArray())
+            val stack = listOf(
+                listOf("tvm.Slice", subdomainBoc),
+                listOf("num", category.toString())
+            )
+
+            val res = TonApiService.INSTANCE.runGetMethod(
+                coinNetwork,
+                currentResolver,
+                "dnsresolve",
+                stack
+            )
+            if (res?.ok != true || res.result?.stack == null || res.result.stack.size < 2) return null
+
+            val resolvedBits = try {
+                val element = res.result.stack[0]
+                val value = element[1].jsonPrimitive.content
+                if (value.startsWith("0x")) value.substring(2).toInt(16) else value.toInt()
+            } catch (e: Exception) {
+                0
+            }
+
+            if (resolvedBits == 0) return null
+
+            val resultCellBoc = res.result.stack[1][1].jsonPrimitive.content
+            if (resultCellBoc == "null" || resultCellBoc.isEmpty()) return null
+
+            val resultCell = BagOfCells(Base64.Default.decode(resultCellBoc)).roots[0]
+
+            if (resolvedBits == bitsToResolve) {
+                // Fully resolved
+                val slice = resultCell.beginParse()
+                if (slice.remainingBits >= 16) {
+                    val resCategory = slice.loadUInt(16).toInt()
+                    if (resCategory == category) {
+                        return if (category == 0x9fd3) {
+                            slice.loadTlb(MsgAddressInt).toString()
+                        } else if (category == 0xe8d2) {
+                            // TEP-81 Domain name
+                            val domainSlice = slice.loadRef().beginParse()
+                            val firstByte = domainSlice.loadUInt(8).toInt()
+                            if (firstByte == 0x00) {
+                                val bytes = domainSlice.loadBitString(domainSlice.remainingBits)
+                                    .toByteArray()
+                                bytes.decodeToString()
+                            } else null
+                        } else null
+                    }
+                }
+                // Fallback
+                return try {
+                    if (category == 0x9fd3) {
+                        resultCell.beginParse().loadTlb(MsgAddressInt).toString()
+                    } else null
+                } catch (e: Exception) {
+                    null
+                }
+            } else {
+                // Partially resolved, get next resolver
+                val slice = resultCell.beginParse()
+                if (slice.remainingBits >= 16) {
+                    val resCategory = slice.loadUInt(16).toInt()
+                    if (resCategory == 1) { // Category 1 is next resolver
+                        currentResolver = slice.loadTlb(MsgAddressInt).toString()
+
+                        // Update subdomain cell to remaining bits
+                        val remainingBits = bitsToResolve - resolvedBits
+                        val fullSlice = currentSubdomainCell.beginParse()
+                        fullSlice.skipBits(resolvedBits)
+                        currentSubdomainCell = CellBuilder.createCell {
+                            storeBits(fullSlice.loadBitString(remainingBits))
+                        }
+                        bitsToResolve = remainingBits
+                    } else return null
+                } else return null
+            }
+        }
+
+        return null
+    }
+
+    suspend fun reverseResolveDns(address: String, coinNetwork: CoinNetwork): String? {
+        val addr = MsgAddressInt.parse(address)
+        if (addr !is AddrStd) return null
+
+        // Construct hex address domain: <hex>.addr.reverse
+        val accountIdHex = addr.address.toByteArray().joinToString("") {
+            it.toInt().and(0xFF).toString(16).padStart(2, '0')
+        }
+        val domain = "$accountIdHex.addr.reverse"
+
+        // Category 0xe8d2 for domain name (TEP-81)
+        return resolveDns(domain, coinNetwork, category = 0xe8d2)
     }
 }
