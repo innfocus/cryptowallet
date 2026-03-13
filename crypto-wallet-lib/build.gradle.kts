@@ -115,6 +115,11 @@ kotlin {
                 implementation(libs.mockito.core)
 
                 implementation(libs.secp256k1.kmp.jni.android)
+            }
+        }
+
+        val jvmMain by getting {
+            dependencies {
                 implementation(libs.secp256k1.kmp.jni.jvm)
             }
         }
