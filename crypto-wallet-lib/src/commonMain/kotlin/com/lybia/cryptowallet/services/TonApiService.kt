@@ -78,6 +78,37 @@ class TonApiService {
         return null
     }
 
+    suspend fun getSeqno(coin: CoinNetwork, address: String): Int {
+        val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
+            contentType(ContentType.Application.Json)
+            setBody(
+                TonRpcRequest(
+                    method = "runGetMethod",
+                    params = mapOf(
+                        "address" to address,
+                        "method" to "seqno",
+                        "stack" to emptyList<String>()
+                    )
+                )
+            )
+        }
+
+        if (response.status.value in 200..299) {
+            val body = response.body<TonRunGetMethodResponse>()
+            if (body.ok && body.result?.stack?.isNotEmpty() == true) {
+                // Stack element for integer result usually contains the value directly or as hex
+                val element = body.result.stack[0]
+                if (element.size >= 2) {
+                    val value = element[1].toString().removeSurrounding("\"")
+                    return try {
+                        if (value.startsWith("0x")) value.substring(2).toInt(16) else value.toInt()
+                    } catch (e: Exception) { 0 }
+                }
+            }
+        }
+        return 0
+    }
+
     suspend fun sendBoc(coin: CoinNetwork, bocBase64: String): String? {
         val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
             contentType(ContentType.Application.Json)
@@ -90,10 +121,8 @@ class TonApiService {
         }
 
         if (response.status.value in 200..299) {
-            val body = response.body<TonTransactionsResponse>() // Reusing model as structure is similar
+            val body = response.body<TonAddressInformationResponse>()
             if (body.ok) {
-                // In TON Center, sendBoc usually returns success and tx hash might be available later
-                // but let's return a success indicator for now
                 return "success"
             }
         }

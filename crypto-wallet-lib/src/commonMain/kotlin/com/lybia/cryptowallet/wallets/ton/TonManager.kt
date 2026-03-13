@@ -7,6 +7,7 @@ import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.TonApiService
 import org.ton.contract.wallet.WalletV4R2Contract
+import org.ton.contract.wallet.WalletTransfer
 import org.ton.kotlin.crypto.PrivateKeyEd25519
 import org.ton.kotlin.crypto.mnemonic.Mnemonic
 import org.ton.block.*
@@ -40,20 +41,46 @@ class TonManager(mnemonics: String) : BaseCoinManager() {
         }
     }
 
+    suspend fun getSeqno(coinNetwork: CoinNetwork): Int {
+        return TonApiService.INSTANCE.getSeqno(coinNetwork, getAddress())
+    }
+
+    /**
+     * T3.1 & T3.2: Xây dựng Cell, ký và serialize sang BOC
+     */
     suspend fun signTransaction(
         toAddress: String,
         amountNano: Long,
         seqno: Int,
         memo: String? = null
     ): String {
-        // Fallback to manual message building if Contract API is unstable
-        // For V4R2, the internal message is roughly:
-        // [signature, subwallet_id, valid_until, seqno, op, mode, payload]
-        
-        // This is a simplified mock-up because the exact SDK API is hard to guess without docs
-        // In a real scenario, we'd use the stable WalletV4R2Contract.transfer
-        
-        return "mock_signed_boc_base64"
+        // 1. Tạo Message Payload (nếu có memo)
+        val payload = if (memo != null) {
+            CellBuilder.createCell {
+                storeUInt(0, 32) // Opcode 0 cho text comment
+                storeBytes(memo.encodeToByteArray())
+            }
+        } else null
+
+        // 2. Tạo WalletTransfer object
+        val transfer = WalletTransfer {
+            this.destination = AddrStd.parse(toAddress)
+            this.coins = Coins(amountNano)
+            this.body = payload
+            this.sendMode = 3 // 1 (pay fees separately) + 2 (ignore errors)
+        }
+
+        // 3. Tạo Signed Message (Cell)
+        // Lưu ý: subwalletId mặc định cho V4R2 là 698983191
+        val walletContract = WalletV4R2Contract(publicKey, workchain = 0)
+        val signedCell = walletContract.createTransferMessage(
+            privateKey = privateKey,
+            seqno = seqno,
+            transfer = transfer
+        )
+
+        // 4. Serialize sang BOC và mã hóa Base64
+        return BagOfCells(signedCell).toByteArray().encodeBase64()
     }
 
     override suspend fun getTransactionHistory(address: String?, coinNetwork: CoinNetwork?): Any? {
@@ -75,9 +102,10 @@ class TonManager(mnemonics: String) : BaseCoinManager() {
         dataSigned: String,
         coinNetwork: CoinNetwork
     ): TransferResponseModel {
+        // T3.3: Gửi BOC lên blockchain
         val result = TonApiService.INSTANCE.sendBoc(coinNetwork, dataSigned)
         return if (result == "success") {
-            TransferResponseModel(success = true, error = null, txHash = "sent")
+            TransferResponseModel(success = true, error = null, txHash = "pending")
         } else {
             TransferResponseModel(success = false, error = "Failed to broadcast transaction", txHash = null)
         }

@@ -91,3 +91,17 @@ data class TonSourceFees(
     val fwdFee: Long
 )
 
+@Serializable
+data class TonRunGetMethodResponse(
+    val ok: Boolean,
+    val result: TonRunGetMethodResult? = null
+)
+
+@Serializable
+data class TonRunGetMethodResult(
+    @SerialName("@type")
+    val type: String,
+    val stack: List<List<kotlinx.serialization.json.JsonElement>>
+)
+
+
