@@ -34,6 +34,9 @@ import com.lybia.cryptowallet.coinkits.ripple.networking.Gxrp
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPBalanceHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPSubmitTxtHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPTransactionsHandle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 interface BalanceHandle {
@@ -92,13 +95,14 @@ class CoinsManager : ICoinsManager {
     private var extendPrvKeysNumber = mutableMapOf<String, Int>()
     private var addressesManager = mutableMapOf<String, Array<ACTAddress>>()
     private var coinsSupported = arrayListOf(ACTCoin.Bitcoin, ACTCoin.Ethereum, ACTCoin.Cardano, ACTCoin.Ripple,
-        ACTCoin.Centrality, ACTCoin.Centrality, ACTCoin.XCoin)
+        ACTCoin.Centrality, ACTCoin.Centrality, ACTCoin.XCoin, ACTCoin.TON)
     private var networkManager = mutableMapOf(ACTCoin.Bitcoin.symbolName() to ACTNetwork(ACTCoin.Bitcoin, true),
             ACTCoin.Ethereum.symbolName() to ACTNetwork(ACTCoin.Ethereum, true),
             ACTCoin.Cardano.symbolName() to ACTNetwork(ACTCoin.Cardano, false),
             ACTCoin.Ripple.symbolName() to ACTNetwork(ACTCoin.Ripple, true),
             ACTCoin.XCoin.symbolName() to ACTNetwork(ACTCoin.XCoin, true),
-            ACTCoin.Centrality.symbolName() to ACTNetwork(ACTCoin.Centrality, false))
+            ACTCoin.Centrality.symbolName() to ACTNetwork(ACTCoin.Centrality, false),
+            ACTCoin.TON.symbolName() to ACTNetwork(ACTCoin.TON, false))
     var mnemonicRecover = ""
     var mnemonic = ""
 
@@ -214,6 +218,9 @@ class CoinsManager : ICoinsManager {
                     coin.assetId,
                     completionHandler)
                 }
+                ACTCoin.TON -> {
+                    getTonBalance(adds.first(), completionHandler)
+                }
                 else -> {}
             }
         } else {
@@ -236,6 +243,9 @@ class CoinsManager : ICoinsManager {
                 }
                 ACTCoin.Ripple -> {
                     getXRPTransactions(adds.first(), moreParam, completionHandler)
+                }
+                ACTCoin.TON -> {
+                    getTonTransactions(adds.first(), completionHandler)
                 }
                 else -> {}
             }
@@ -293,6 +303,9 @@ class CoinsManager : ICoinsManager {
                     }
 
                 })
+            }
+            ACTCoin.TON -> {
+                getTonEstimateFee(amount, serAddressStr, paramFee, network, completionHandler)
             }
             else -> {}
         }
@@ -477,6 +490,71 @@ class CoinsManager : ICoinsManager {
                 completionHandler.completionHandler(balance.toDouble(), true)
             }
         })
+    }
+
+    private fun getTonBalance(address: ACTAddress, completionHandler: BalanceHandle) {
+        val tonManager = com.lybia.cryptowallet.wallets.ton.TonManager(mnemonic)
+        val coinNetwork = com.lybia.cryptowallet.CoinNetwork(
+            name = com.lybia.cryptowallet.enums.NetworkName.TON,
+            apiKeyInfura = "mock_infura_key"
+        )
+        
+        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+        GlobalScope.launch(Dispatchers.Main) {
+            try {
+                val balance = tonManager.getBalance(address.rawAddressString(), coinNetwork)
+                completionHandler.completionHandler(balance, true)
+            } catch (e: Exception) {
+                completionHandler.completionHandler(0.0, false)
+            }
+        }
+    }
+
+    private fun getTonTransactions(address: ACTAddress, completionHandler: TransactionsHandle) {
+        val tonManager = com.lybia.cryptowallet.wallets.ton.TonManager(mnemonic)
+        val coinNetwork = com.lybia.cryptowallet.CoinNetwork(
+            name = com.lybia.cryptowallet.enums.NetworkName.TON,
+            apiKeyInfura = "mock_infura_key"
+        )
+        
+        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+        GlobalScope.launch(Dispatchers.Main) {
+            try {
+                val history = tonManager.getTransactionHistory(address.rawAddressString(), coinNetwork)
+                if (history is List<*>) {
+                    // Mapping to TransationData might be complex if they have different structures
+                    // For now, return empty or a basic mapping
+                    completionHandler.completionHandler(arrayOf(), null, "")
+                } else {
+                    completionHandler.completionHandler(null, null, "Error")
+                }
+            } catch (e: Exception) {
+                completionHandler.completionHandler(null, null, e.localizedMessage ?: "Error")
+            }
+        }
+    }
+
+    private fun getTonEstimateFee(amount: Double,
+                                  serAddressStr: String,
+                                  paramFee: Double,
+                                  network: ACTNetwork,
+                                  completionHandler: EstimateFeeHandle) {
+        val tonManager = com.lybia.cryptowallet.wallets.ton.TonManager(mnemonic)
+        val coinNetwork = com.lybia.cryptowallet.CoinNetwork(
+            name = com.lybia.cryptowallet.enums.NetworkName.TON,
+            apiKeyInfura = "mock_infura_key"
+        )
+        
+        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
+        GlobalScope.launch(Dispatchers.Main) {
+            try {
+                // We need a dummy BOC for fee estimation if we don't have the signed data yet
+                val fee = tonManager.estimateFee(coinNetwork, tonManager.getAddress(), "mock_body_boc")
+                completionHandler.completionHandler(fee, "")
+            } catch (e: Exception) {
+                completionHandler.completionHandler(0.0, e.localizedMessage ?: "Error")
+            }
+        }
     }
 
     private fun getBTCTransactions(addresses: Array<ACTAddress>, completionHandler: TransactionsHandle) {

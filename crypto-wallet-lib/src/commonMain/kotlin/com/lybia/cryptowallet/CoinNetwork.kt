@@ -18,6 +18,7 @@ class CoinNetwork(
                     NetworkName.ARBITRUM -> "https://arbitrum-mainnet.infura.io/v3/${apiKeyInfura}"
                     NetworkName.BTC -> ""
                     NetworkName.ETHEREUM -> "https://mainnet.infura.io/v3/${apiKeyInfura}"
+                    NetworkName.TON -> "https://toncenter.com/api/v2/jsonRPC"
                 }
             }
             Network.TESTNET -> {
@@ -25,6 +26,7 @@ class CoinNetwork(
                     NetworkName.ARBITRUM -> "https://arbitrum-sepolia.infura.io/v3/${apiKeyInfura}"
                     NetworkName.BTC -> ""
                     NetworkName.ETHEREUM -> "https://sepolia.infura.io/v3/${apiKeyInfura}"
+                    NetworkName.TON -> "https://testnet.toncenter.com/api/v2/jsonRPC"
                 }
             }
         }
@@ -38,6 +40,7 @@ class CoinNetwork(
                     NetworkName.ARBITRUM -> "https://api.arbiscan.io/api"
                     NetworkName.BTC -> ""
                     NetworkName.ETHEREUM -> "https://api.etherscan.io/api"
+                    NetworkName.TON -> "https://tonscan.org"
                 }
             }
             Network.TESTNET -> {
@@ -45,6 +48,7 @@ class CoinNetwork(
                     NetworkName.ARBITRUM -> "https://api-sepolia.arbiscan.io/api"
                     NetworkName.BTC -> ""
                     NetworkName.ETHEREUM -> "https://api-sepolia.etherscan.io/api"
+                    NetworkName.TON -> "https://testnet.tonscan.org"
                 }
             }
         }
@@ -55,6 +59,7 @@ class CoinNetwork(
             NetworkName.ARBITRUM -> "https://api.owlracle.info/v4/arb/gas"
             NetworkName.BTC -> return ""
             NetworkName.ETHEREUM -> "https://api.owlracle.info/v4/eth/gas"
+            NetworkName.TON -> ""
         }
     }
 

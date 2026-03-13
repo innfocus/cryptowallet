@@ -108,6 +108,19 @@ enum class ACTCoin(val assetId: Int = 0) {
         override fun algorithm() = Algorithm.Sr25519
         override fun baseApiUrl() = ""
         override fun allowNewAddress() = false
+    },
+    TON {
+        override fun feeDefault()       = 0.01
+        override fun minimumAmount()    = 0.0
+        override fun supportMemo()      = true
+        override fun nameCoin()         = "TON"
+        override fun symbolName()       = "TON"
+        override fun minimumValue()     = 0.01
+        override fun unit()             = BigDecimal(1000000000)
+        override fun regex()            = "(?:([a-km-zA-HJ-NP-Z1-9]{48,}))"
+        override fun algorithm()        = Algorithm.Ed25519
+        override fun baseApiUrl()       = ""
+        override fun allowNewAddress()  = false
     };
     abstract fun nameCoin()         : String
     abstract fun symbolName()       : String
@@ -135,6 +148,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
             ACTCoin.Ripple      -> 144
             ACTCoin.Centrality -> 392
             ACTCoin.XCoin       -> 868
+            ACTCoin.TON         -> 607
         }
     }
 
@@ -182,6 +196,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
             ACTCoin.Ripple      -> if (chain == Change.Internal) 0  else 1
             ACTCoin.Centrality  -> if (chain == Change.Internal) 0  else 1
             ACTCoin.XCoin       -> if (chain == Change.Internal) 0  else 1
+            ACTCoin.TON         -> if (chain == Change.Internal) 0  else 1
         }
     }
 
@@ -193,6 +208,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
             ACTCoin.Ripple      -> if (chain == Change.Internal) 0 else 0
             ACTCoin.Centrality -> if (chain == Change.Internal) 0 else 0
             ACTCoin.XCoin       -> if (chain == Change.Internal) 0 else 0
+            ACTCoin.TON         -> if (chain == Change.Internal) 0 else 0
         }
     }
 
@@ -206,6 +222,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
                     ACTCoin.Ripple      -> "https://bithomp.com"
                     ACTCoin.Centrality -> "https://uncoverexplorer.com"
                     ACTCoin.XCoin       -> "Explorer XCoin"
+                    ACTCoin.TON         -> "https://tonscan.org"
                 }
             }
             true -> {
@@ -216,6 +233,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
                     ACTCoin.Ripple      -> "https://test.bithomp.com"
                     ACTCoin.Centrality -> "https://uncoverexplorer.com"
                     ACTCoin.XCoin       -> "Explorer XCoin"
+                    ACTCoin.TON         -> "https://testnet.tonscan.org"
                 }
             }
         }

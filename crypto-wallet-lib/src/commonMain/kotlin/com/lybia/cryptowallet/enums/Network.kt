@@ -7,5 +7,6 @@ enum class Network {
 enum class NetworkName {
     BTC,
     ETHEREUM,
-    ARBITRUM
+    ARBITRUM,
+    TON
 }
