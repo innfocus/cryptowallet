@@ -18,6 +18,7 @@ import org.ton.cell.*
 import org.ton.boc.BagOfCells
 import io.ktor.util.*
 import kotlinx.serialization.json.jsonPrimitive
+import org.ton.cell.buildCell
 
 class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
     private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
@@ -128,12 +129,12 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             ?: throw Exception("Could not find Jetton Wallet")
 
         val jettonBody = CellBuilder.createCell {
-            storeUInt(0x0f8a7ea5, 32)
-            storeUInt(0, 64)
+            storeUInt(0x0f8a7ea5, 32) // transfer op-code (TEP-74)
+            storeUInt(0, 64)          // query_id
             storeTlb(Coins, Coins(jettonAmountNano))
             storeTlb(MsgAddressInt, MsgAddressInt.parse(toAddress))
-            storeTlb(MsgAddressInt, address)
-            storeBit(false)
+            storeTlb(MsgAddressInt, address) // response_destination = sender
+            storeBit(false)                  // custom_payload = null
             storeTlb(Coins, Coins(forwardTonAmountNano))
             storeBit(memo != null)
             if (memo != null) {
@@ -145,22 +146,30 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             }
         }
 
+        val walletId = WalletContract.DEFAULT_WALLET_ID
+        val stateInit = if (seqno == 0) {
+            WalletV4R2Contract.stateInit(WalletV4R2Contract.Data(0, publicKey)).load()
+        } else null
+
         val transfer = WalletTransfer {
             destination = AddrStd.parse(myJettonWallet)
+            bounceable = true // Jetton wallet is a smart contract
             coins = Coins(totalTonAmountNano)
-            // Use 'body' if it works, or try assigning to the correct property
-            // In 0.5.0, WalletTransfer might use 'payload' or 'message'
-            // I'll try to find the correct one.
+            messageData = MessageData.Raw(jettonBody, null, null)
         }
 
-//        val signedCell = wallet.createTransferMessage(
-//            privateKey = privateKey,
-//            seqno = seqno,
-//            transfer = transfer
-//        )
-//
-//        return BagOfCells(signedCell).toByteArray().encodeBase64()
-        return "Todo"
+        val message = WalletV4R2Contract.transferMessage(
+            address = address,
+            stateInit = stateInit,
+            privateKey = privateKey,
+            walletId = walletId,
+            validUntil = Int.MAX_VALUE,
+            seqno = seqno,
+            transfer
+        )
+
+        val cell = buildCell { storeTlb(Message.Any, message) }
+        return BagOfCells(cell).toByteArray().encodeBase64()
     }
 
     suspend fun getSeqno(coinNetwork: CoinNetwork): Int {
@@ -175,25 +184,35 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
     ): String {
         val payload = if (memo != null) {
             CellBuilder.createCell {
-                storeUInt(0, 32)
+                storeUInt(0, 32) // text comment prefix
                 storeBytes(memo.encodeToByteArray())
             }
+        } else Cell.empty()
+
+        val walletId = WalletContract.DEFAULT_WALLET_ID
+        val stateInit = if (seqno == 0) {
+            WalletV4R2Contract.stateInit(WalletV4R2Contract.Data(0, publicKey)).load()
         } else null
 
         val transfer = WalletTransfer {
             destination = AddrStd.parse(toAddress)
+            bounceable = false // safe default for user wallets
             coins = Coins(amountNano)
+            messageData = MessageData.Raw(payload, null, null)
         }
 
-//        val signedCell = wallet.createTransferMessage(
-//            privateKey = privateKey,
-//            seqno = seqno,
-//            transfer = transfer
-//        )
-//
-//        return BagOfCells(signedCell).toByteArray().encodeBase64()
-        return "Todo"
+        val message = WalletV4R2Contract.transferMessage(
+            address = address,
+            stateInit = stateInit,
+            privateKey = privateKey,
+            walletId = walletId,
+            validUntil = Int.MAX_VALUE,
+            seqno = seqno,
+            transfer
+        )
 
+        val cell = buildCell { storeTlb(Message.Any, message) }
+        return BagOfCells(cell).toByteArray().encodeBase64()
     }
 
     override suspend fun getTransactionHistory(address: String?, coinNetwork: CoinNetwork?): Any? {
