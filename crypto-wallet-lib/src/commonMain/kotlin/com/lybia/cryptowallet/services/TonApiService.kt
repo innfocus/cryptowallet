@@ -3,10 +3,14 @@ package com.lybia.cryptowallet.services
 import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.models.ton.*
 import io.ktor.client.call.body
+import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 
 class TonApiService {
     companion object {
@@ -78,7 +82,7 @@ class TonApiService {
         return null
     }
 
-    suspend fun getSeqno(coin: CoinNetwork, address: String): Int {
+    suspend fun runGetMethod(coin: CoinNetwork, address: String, method: String, stack: List<List<String>> = emptyList()): TonRunGetMethodResponse? {
         val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
             contentType(ContentType.Application.Json)
             setBody(
@@ -86,24 +90,38 @@ class TonApiService {
                     method = "runGetMethod",
                     params = mapOf(
                         "address" to address,
-                        "method" to "seqno",
-                        "stack" to emptyList<String>()
+                        "method" to method,
+                        "stack" to stack
                     )
                 )
             )
         }
 
-        if (response.status.value in 200..299) {
-            val body = response.body<TonRunGetMethodResponse>()
-            if (body.ok && body.result?.stack?.isNotEmpty() == true) {
-                // Stack element for integer result usually contains the value directly or as hex
-                val element = body.result.stack[0]
-                if (element.size >= 2) {
-                    val value = element[1].toString().removeSurrounding("\"")
-                    return try {
-                        if (value.startsWith("0x")) value.substring(2).toInt(16) else value.toInt()
-                    } catch (e: Exception) { 0 }
-                }
+        return if (response.status.value in 200..299) {
+            response.body<TonRunGetMethodResponse>()
+        } else null
+    }
+
+    suspend fun getJettonMetadataFromUrl(url: String): JettonMetadata? {
+        return try {
+            val response = HttpClientService.INSTANCE.client.get(url)
+            if (response.status.value in 200..299) {
+                response.body<JettonMetadata>()
+            } else null
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    suspend fun getSeqno(coin: CoinNetwork, address: String): Int {
+        val body = runGetMethod(coin, address, "seqno")
+        if (body?.ok == true && body.result?.stack?.isNotEmpty() == true) {
+            val element = body.result.stack[0]
+            if (element.size >= 2) {
+                val value = element[1].toString().removeSurrounding("\"")
+                return try {
+                    if (value.startsWith("0x")) value.substring(2).toInt(16) else value.toInt()
+                } catch (e: Exception) { 0 }
             }
         }
         return 0

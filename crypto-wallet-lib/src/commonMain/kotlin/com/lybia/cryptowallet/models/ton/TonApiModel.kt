@@ -104,4 +104,14 @@ data class TonRunGetMethodResult(
     val stack: List<List<kotlinx.serialization.json.JsonElement>>
 )
 
+@Serializable
+data class JettonMetadata(
+    val name: String? = null,
+    val symbol: String? = null,
+    val decimals: Int = 9,
+    val description: String? = null,
+    val image: String? = null
+)
+
+
 
