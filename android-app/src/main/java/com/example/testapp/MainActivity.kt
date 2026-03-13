@@ -19,6 +19,9 @@ import kotlinx.coroutines.launch
 class MainActivity : AppCompatActivity() {
 
     private lateinit var etMnemonic: EditText
+    private lateinit var etToAddress: EditText
+    private lateinit var etAmount: EditText
+    private lateinit var etMemo: EditText
     private lateinit var tvOutput: TextView
     private lateinit var radioGroupNetwork: RadioGroup
     
@@ -29,10 +32,12 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         etMnemonic = findViewById(R.id.etMnemonic)
+        etToAddress = findViewById(R.id.etToAddress)
+        etAmount = findViewById(R.id.etAmount)
+        etMemo = findViewById(R.id.etMemo)
         tvOutput = findViewById(R.id.textViewOutput)
         radioGroupNetwork = findViewById(R.id.radioGroupNetwork)
 
-        // Initialize with a random mnemonic for convenience
         generateRandomMnemonic()
 
         findViewById<Button>(R.id.btnGenerateMnemonic).setOnClickListener {
@@ -78,8 +83,33 @@ class MainActivity : AppCompatActivity() {
             runTest {
                 initManagerFromInput()
                 val coinNetwork = getTonCoinNetwork()
-                val result = tonManager.transfer("mock_signed_data", coinNetwork)
-                log("Transfer Result: success=${result.success}, error=${result.error}, hash=${result.txHash}")
+                
+                val toAddr = etToAddress.text.toString().trim()
+                val amountStr = etAmount.text.toString().trim()
+                val memo = etMemo.text.toString().takeIf { it.isNotEmpty() }
+                
+                if (toAddr.isEmpty() || amountStr.isEmpty()) {
+                    log("Error: Destination and Amount are required")
+                    return@runTest
+                }
+                
+                val amountNano = (amountStr.toDouble() * 1_000_000_000).toLong()
+                
+                log("1. Fetching seqno...")
+                val seqno = tonManager.getSeqno(coinNetwork)
+                log("   Seqno: $seqno")
+                
+                log("2. Signing transaction...")
+                val bocBase64 = tonManager.signTransaction(toAddr, amountNano, seqno, memo)
+                log("   BOC length: ${bocBase64.length}")
+                
+                log("3. Estimating fee...")
+                val fee = tonManager.estimateFee(coinNetwork, toAddr, bocBase64)
+                log("   Estimated Fee: $fee TON")
+                
+                log("4. Broadcasting...")
+                val result = tonManager.transfer(bocBase64, coinNetwork)
+                log("Transfer Result: success=${result.success}, error=${result.error}, status=${result.txHash}")
             }
         }
     }
@@ -88,7 +118,7 @@ class MainActivity : AppCompatActivity() {
         val words = Mnemonics.generateRandomSeed(MNEMONIC_SIZE.WORDS_12)
         val mnemonicStr = words.joinToString(" ")
         etMnemonic.setText(mnemonicStr)
-        log("Random mnemonic generated and set to input.")
+        log("Random mnemonic generated.")
     }
 
     private fun initManagerFromInput() {
@@ -96,7 +126,7 @@ class MainActivity : AppCompatActivity() {
         if (input.isEmpty()) {
             throw Exception("Mnemonic input is empty!")
         }
-        updateConfig() // Ensure network is set correctly before manager creation
+        updateConfig()
         tonManager = TonManager(input)
     }
 
@@ -112,10 +142,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun getTonCoinNetwork(): CoinNetwork {
+        // IMPORTANT: Replace with real API keys if testing actual transfers
         return CoinNetwork(
             name = NetworkName.TON,
             apiKeyExplorer = "mock_explorer_key",
-            apiKeyInfura = "mock_infura_key"
+            apiKeyInfura = "mock_infura_key" 
         )
     }
 

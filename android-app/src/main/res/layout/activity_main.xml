@@ -94,11 +94,40 @@
                 android:layout_height="wrap_content"
                 android:text="Get Transaction History"/>
 
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Transfer TON:"
+                android:textStyle="bold"
+                android:layout_marginTop="16dp"/>
+
+            <EditText
+                android:id="@+id/etToAddress"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Destination Address (EQ...)"
+                android:textSize="14sp"/>
+
+            <EditText
+                android:id="@+id/etAmount"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Amount (e.g. 0.01)"
+                android:inputType="numberDecimal"
+                android:textSize="14sp"/>
+
+            <EditText
+                android:id="@+id/etMemo"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:hint="Memo (optional)"
+                android:textSize="14sp"/>
+
             <Button
                 android:id="@+id/btnTransfer"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Transfer (Test Mock)"/>
+                android:text="Execute Transfer"/>
 
             <TextView
                 android:layout_width="match_parent"
