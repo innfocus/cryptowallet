@@ -61,9 +61,14 @@ kotlin {
                 implementation(libs.krypto)
                 implementation(libs.bitcoin.kmp)
 
-                implementation(libs.ton.kotlin)
+                implementation(libs.ton.kotlin.crypto)
+                implementation(libs.ton.kotlin.contract)
+                implementation(libs.ton.kotlin.tvm)
+                implementation(libs.ton.kotlin.tlb)
+                implementation(libs.ton.kotlin.block.tlb)
 
                 api(libs.secp256k1.kmp)
+
             }
         }
 

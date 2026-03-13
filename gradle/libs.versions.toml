@@ -26,7 +26,11 @@ bouncycastle="1.83"
 tonKotlin = "0.5.0"
 
 [libraries]
-ton-kotlin = { module = "org.ton:ton-kotlin", version.ref = "tonKotlin" }
+ton-kotlin-crypto = { module = "org.ton.kotlin:ton-kotlin-crypto", version.ref = "tonKotlin" }
+ton-kotlin-contract = { module = "org.ton.kotlin:ton-kotlin-contract", version.ref = "tonKotlin" }
+ton-kotlin-tvm = { module = "org.ton.kotlin:ton-kotlin-tvm", version.ref = "tonKotlin" }
+ton-kotlin-tlb = { module = "org.ton.kotlin:ton-kotlin-tlb", version.ref = "tonKotlin" }
+ton-kotlin-block-tlb = { module = "org.ton.kotlin:ton-kotlin-block-tlb", version.ref = "tonKotlin" }
 adapter-rxjava2 = { module = "com.squareup.retrofit2:adapter-rxjava2", version.ref = "retrofit" }
 bitcoin-kmp = { module = "fr.acinq.bitcoin:bitcoin-kmp", version.ref = "bitcoinKmp" }
 cbor = { module = "co.nstant.in:cbor", version.ref = "cbor" }
