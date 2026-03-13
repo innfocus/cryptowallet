@@ -24,15 +24,22 @@ rxkotlin = "2.4.0"
 testng = "7.12.0"
 bouncycastle="1.83"
 tonKotlin = "0.5.0"
+androidxCoreKtx = "1.18.0"
+androidxAppcompat = "1.7.1"
+material = "1.13.0"
+androidxConstraintlayout = "2.2.1"
+junit = "4.13.2"
+androidxTestExtJunit = "1.3.0"
+androidxTestEspressoCore = "3.7.0"
 
 [libraries]
-androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version = "1.12.0" }
-androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version = "1.6.1" }
-material = { group = "com.google.android.material", name = "material", version = "1.11.0" }
-androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version = "2.1.4" }
-junit = { group = "junit", name = "junit", version = "4.13.2" }
-androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version = "1.1.5" }
-androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version = "3.5.1" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidxCoreKtx" }
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "androidxAppcompat" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "androidxConstraintlayout" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
+androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "androidxTestEspressoCore" }
 
 ton-kotlin-crypto = { module = "org.ton.kotlin:ton-kotlin-crypto", version.ref = "tonKotlin" }
 ton-kotlin-contract = { module = "org.ton.kotlin:ton-kotlin-contract", version.ref = "tonKotlin" }
