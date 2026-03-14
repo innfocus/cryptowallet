@@ -16,12 +16,14 @@ class TonAddressTest {
         Config.shared.setNetwork(Network.MAINNET)
         var tonManager = TonManager(mnemonic)
         var address = tonManager.getAddress()
+        println(address)
         assertEquals("UQByrCknMpLynnPTjz6w_-Xn3dbqiGoEYo29jdqolDVWBezb", address)
 
         // Test Testnet
         Config.shared.setNetwork(Network.TESTNET)
         tonManager = TonManager(mnemonic)
         address = tonManager.getAddress()
+        println(address)
         assertEquals("0QByrCknMpLynnPTjz6w_-Xn3dbqiGoEYo29jdqolDVWBVdR", address)
     }
 }
