@@ -160,7 +160,165 @@ CoinsManager.shared.sendCoin(
 
 ```
 
-## 4. Manual Manager Usage (Legacy/Advanced)
+## 5. Token (Jetton / ERC-20) Operations — Android
+
+Token operations are exposed through `ITokenManager`, which `CoinsManager` implements. The current implementation supports **TON Jettons**; other chains follow the same interface.
+
+### Get Token Balance
+
+Fetches the Jetton balance **and** metadata (name, symbol, decimals, image) in one call.
+
+```kotlin
+import com.lybia.cryptowallet.coinkits.models.TokenInfo
+import com.lybia.cryptowallet.coinkits.services.TokenBalanceHandle
+
+val walletAddress  = CoinsManager.shared.firstAddress(ACTCoin.TON)?.rawAddressString() ?: return
+val jettonMaster   = "EQBlqsm144Dq6SjbPI4jjZvA1hqTIP3CvHovbIfW_t-SCALE" // e.g. SCALE token
+
+CoinsManager.shared.getTokenBalance(
+    coin              = ACTCoin.TON,
+    address           = walletAddress,
+    contractAddress   = jettonMaster,
+    completionHandler = object : TokenBalanceHandle {
+        override fun completionHandler(tokenInfo: TokenInfo?, success: Boolean, errStr: String) {
+            if (success && tokenInfo != null) {
+                println("Name:    ${tokenInfo.name}")
+                println("Symbol:  ${tokenInfo.symbol}")
+                println("Balance: ${tokenInfo.balance}")
+                println("Image:   ${tokenInfo.imageUrl}")
+            }
+        }
+    }
+)
+```
+
+### Get Token Transaction History
+
+Returns the same `TransationData` format used by native coin history.
+
+```kotlin
+import com.lybia.cryptowallet.coinkits.services.TokenTransactionsHandle
+
+CoinsManager.shared.getTokenTransactions(
+    coin              = ACTCoin.TON,
+    address           = walletAddress,
+    contractAddress   = jettonMaster,
+    completionHandler = object : TokenTransactionsHandle {
+        override fun completionHandler(transactions: Array<TransationData>?, errStr: String) {
+            transactions?.forEach { tx ->
+                println("${if (tx.isSend) "Sent" else "Received"} ${tx.amount} — ${tx.iD}")
+            }
+        }
+    }
+)
+```
+
+### Send Token
+
+```kotlin
+import com.lybia.cryptowallet.coinkits.services.SendTokenHandle
+
+CoinsManager.shared.sendToken(
+    coin              = ACTCoin.TON,
+    toAddress         = "UQ...",
+    contractAddress   = jettonMaster,
+    amount            = 10.0,        // human-readable amount
+    decimals          = 9,           // 9 for most Jettons, 6 for USDT
+    memo              = "payment",   // optional comment
+    completionHandler = object : SendTokenHandle {
+        override fun completionHandler(txHash: String, success: Boolean, errStr: String) {
+            if (success) println("Sent! txHash: $txHash")
+            else         println("Error: $errStr")
+        }
+    }
+)
+```
+
+---
+
+## 6. NFT Operations — Android
+
+NFT operations are exposed through `INFTManager`, which `CoinsManager` implements. The current implementation supports **TON NFTs** (TEP-62) fetched via the Toncenter v3 REST API.
+
+### Get NFTs Owned by Address
+
+```kotlin
+import com.lybia.cryptowallet.coinkits.models.NFTItem
+import com.lybia.cryptowallet.coinkits.services.NFTListHandle
+
+val walletAddress = CoinsManager.shared.firstAddress(ACTCoin.TON)?.rawAddressString() ?: return
+
+CoinsManager.shared.getNFTs(
+    coin              = ACTCoin.TON,
+    address           = walletAddress,
+    completionHandler = object : NFTListHandle {
+        override fun completionHandler(nfts: Array<NFTItem>?, errStr: String) {
+            nfts?.forEach { nft ->
+                println("NFT: ${nft.name}")
+                println("  Address:    ${nft.address}")
+                println("  Collection: ${nft.collectionAddress}")
+                println("  Index:      ${nft.index}")
+                println("  Image:      ${nft.imageUrl}")
+                nft.attributes?.forEach { (trait, value) ->
+                    println("  $trait: $value")
+                }
+            }
+        }
+    }
+)
+```
+
+### Transfer NFT
+
+Sends a TEP-62 NFT transfer message. The wallet must hold enough TON to cover gas (~0.1 TON).
+
+```kotlin
+import com.lybia.cryptowallet.coinkits.services.NFTTransferHandle
+
+CoinsManager.shared.transferNFT(
+    coin              = ACTCoin.TON,
+    nftAddress        = "EQ...",    // address of the NFT item contract
+    toAddress         = "UQ...",    // recipient
+    memo              = null,       // optional forward comment
+    completionHandler = object : NFTTransferHandle {
+        override fun completionHandler(txHash: String, success: Boolean, errStr: String) {
+            if (success) println("NFT transferred! txHash: $txHash")
+            else         println("Error: $errStr")
+        }
+    }
+)
+```
+
+---
+
+## 7. Architecture Overview — Token & NFT
+
+The feature is structured in three layers to keep concerns separate and allow new chains to be added with minimal changes.
+
+```
+ITokenManager / INFTManager          ← interfaces in CoinsManager
+        │
+        │  dispatch by ACTCoin
+        ▼
+    TonService                        ← androidMain, bridges coroutines → callbacks
+        │
+        │  suspend calls
+        ▼
+    TonManager (commonMain / KMP)     ← sign + broadcast logic
+        │
+        ▼
+    TonApiService                     ← Ktor HTTP: Toncenter v2 JSON-RPC + v3 REST
+```
+
+**Adding a new chain (e.g. Ethereum ERC-20):**
+1. Create `EthService : TokenService, NFTService` in `coinkits/eth/`.
+2. Add `ACTCoin.Ethereum -> ethService.xxx(...)` inside `CoinsManager`.
+
+No changes to interfaces or models are required.
+
+---
+
+## 8. Manual Manager Usage (Legacy / Advanced)
 
 While `CoinsManager` is preferred for Android, individual managers are still available and used for KMP/iOS.
 
@@ -192,7 +350,7 @@ let address = btcManager.getNativeSegWitAddress(numberAccount: 0)
 
 ---
 
-## 4. Working with Ethereum & Arbitrum
+## 8b. Working with Ethereum & Arbitrum
 
 `EthereumManager` is a singleton that handles EVM-compatible chains. You need to provide a `CoinNetwork` with your API keys (Infura, Etherscan, etc.).
 
@@ -213,7 +371,7 @@ val balance = EthereumManager.shared.getBalance("0xYourAddress...", arbitrumNetw
 
 ---
 
-## 5. API Reference Summary
+## 9. API Reference Summary
 
 ### `CoinNetwork`
 | Parameter | Description |
@@ -232,7 +390,7 @@ All managers inherit these common methods:
 
 ---
 
-## 6. Building XCFramework for iOS
+## 10. Building XCFramework for iOS
 If you are contributing to the library and need to update the iOS framework:
 
 ```bash
