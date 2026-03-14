@@ -1,6 +1,7 @@
 package com.lybia.cryptowallet.coinkits
 
 import co.touchlab.kermit.Logger
+import co.touchlab.kermit.LogcatWriter
 import com.google.gson.JsonObject
 import com.lybia.cryptowallet.coinkits.bitcoin.model.BTCTransactionData
 import com.lybia.cryptowallet.coinkits.bitcoin.networking.BTCBalanceHandle
@@ -146,6 +147,11 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
 
     private val logger = Logger.withTag("CoinsManager")
 
+    init {
+        // Initialize Kermit to write to Android Logcat
+        Logger.setLogWriters(LogcatWriter())
+    }
+
     companion object {
         val shared = CoinsManager()
     }
@@ -176,6 +182,16 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         set(value) {
             updateMnemonic(value)
         }
+
+    /** API Keys for various services (Infura, Explorer, OwlRacle, etc.) */
+    var apiKeyInfura: String = ""
+    var apiKeyExplorer: String = ""
+    var apiKeyOwlRacle: String = ""
+
+    /** Legacy support for tonApiKey, redirects to apiKeyInfura */
+    var tonApiKey: String
+        get() = apiKeyInfura
+        set(value) { apiKeyInfura = value }
 
     fun updateMnemonic(newMnemonic: String) {
         synchronized(this) {
@@ -709,7 +725,12 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         })
     }
 
-    private fun tonCoinNetwork() = CoinNetwork(name = NetworkName.TON, apiKeyInfura = "")
+    private fun tonCoinNetwork() = CoinNetwork(
+        name = NetworkName.TON,
+        apiKeyExplorer = apiKeyExplorer,
+        apiKeyInfura = apiKeyInfura,
+        apiKeyOwlRacle = apiKeyOwlRacle
+    )
 
     private fun getTonBalance(address: ACTAddress, completionHandler: BalanceHandle) {
         val tonManager = TonManager(_mnemonic)
