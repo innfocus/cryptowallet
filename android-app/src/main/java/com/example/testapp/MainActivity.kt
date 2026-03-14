@@ -241,9 +241,7 @@ class MainActivity : AppCompatActivity() {
     private fun getTonCoinNetwork(): CoinNetwork {
         // IMPORTANT: Replace with real API keys if testing actual transfers
         return CoinNetwork(
-            name = NetworkName.TON,
-            apiKeyExplorer = "mock_explorer_key",
-            apiKeyInfura = "mock_infura_key" 
+            name = NetworkName.TON
         )
     }
 
