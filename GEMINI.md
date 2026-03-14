@@ -18,11 +18,17 @@ This project is a Kotlin Multiplatform (KMP) library designed to provide crypto 
 ## Architecture
 
 The project follows the standard KMP structure:
-*   `crypto-wallet-lib/src/commonMain`: Shared logic for wallet management (`BitcoinManager`, `EthereumManager`), network configurations (`CoinNetwork`), and service interfaces (`BitcoinApiService`, `InfuraRpcService`).
-*   `crypto-wallet-lib/src/androidMain`: Android-specific implementations, including a comprehensive `coinkits` package supporting Cardano, Ripple, and Centrality.
+*   `crypto-wallet-lib/src/commonMain`: Shared logic for wallet management (`BitcoinManager`, `EthereumManager`, `TonManager`), network configurations (`CoinNetwork`), and service interfaces (`BitcoinApiService`, `InfuraRpcService`, `TonApiService`).
+*   `crypto-wallet-lib/src/androidMain`: Android-specific implementations, including a comprehensive `coinkits` package. **`CoinsManager` is the primary singleton entry point for all coin operations on Android.**
 *   `crypto-wallet-lib/src/iosMain`: iOS-specific implementations, primarily utilizing the Darwin engine for Ktor.
 
 ## Building and Running
+
+### Fast Development Mode (Android Priority)
+To optimize speed during development, prioritize Android-specific tasks:
+*   **Build Android only**: `./gradlew :crypto-wallet-lib:assembleDebug`
+*   **Test Android only**: `./gradlew :crypto-wallet-lib:testDebugUnitTest`
+*   **Full Build (All Platforms)**: `./gradlew build -PisAndroidOnly=false` (Use this for CI/CD or publishing).
 
 ### Gradle Commands
 *   **Build all:** `./gradlew build`
@@ -36,18 +42,17 @@ The project uses the `com.vanniktech.maven.publish` plugin for publishing to Mav
 
 ## Development Conventions
 
-*   **Concurrency:** Use Kotlinx Coroutines for shared logic. Android-specific legacy code may use RxJava.
-*   **Networking:** Shared networking should use Ktor. Configuration is managed via the `Config` singleton and `CoinNetwork` class.
-*   **Testing:** Common logic is tested in `commonTest` using `kotlin.test`. Mocking for Ktor is available via `ktor-client-mock`.
-*   **Wallet Management:**
-    *   `BitcoinManager`: Handles Bitcoin wallet creation (Legacy, SegWit, Native SegWit) and transactions.
-    *   `EthereumManager`: Handles Ethereum and Arbitrum balances, transactions, and token transfers.
-    *   `CoinsManager` (Android): Central manager for Android-specific coin implementations.
+*   **Android Entry Point**: Always use `CoinsManager.shared` for blockchain operations on Android (Balance, Transactions, Transfer).
+*   **Concurrency**: Use Kotlinx Coroutines for shared logic. Android-specific legacy code may use RxJava.
+*   **Networking**: Shared networking should use Ktor. Configuration is managed via the `Config` singleton and `CoinNetwork` class.
+*   **Testing**: Common logic is tested in `commonTest` using `kotlin.test`. Mocking for Ktor is available via `ktor-client-mock`.
 
 ## Key Files
 
 *   `crypto-wallet-lib/src/commonMain/kotlin/com/lybia/cryptowallet/wallets/bitcoin/BitcoinManager.kt`: Core Bitcoin logic.
 *   `crypto-wallet-lib/src/commonMain/kotlin/com/lybia/cryptowallet/wallets/ethereum/EthereumManager.kt`: Core Ethereum/Arbitrum logic.
+*   `crypto-wallet-lib/src/commonMain/kotlin/com/lybia/cryptowallet/wallets/ton/TonManager.kt`: Core TON logic with Jetton/NFT support.
 *   `crypto-wallet-lib/src/commonMain/kotlin/com/lybia/cryptowallet/CoinNetwork.kt`: Network endpoint and API key management.
-*   `crypto-wallet-lib/src/androidMain/kotlin/com/lybia/cryptowallet/coinkits/CoinsManager.kt`: Android-specific coin management.
+*   `crypto-wallet-lib/src/androidMain/kotlin/com/lybia/cryptowallet/coinkits/CoinsManager.kt`: Central manager for Android-specific coin implementations.
 *   `Package.swift`: Swift Package Manager configuration for iOS.
+
