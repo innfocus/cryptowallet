@@ -21,14 +21,59 @@ import kotlin.io.encoding.ExperimentalEncodingApi
 import kotlinx.serialization.json.jsonPrimitive
 import org.ton.cell.buildCell
 import co.touchlab.kermit.Logger
+import fr.acinq.bitcoin.Crypto
+import fr.acinq.bitcoin.MnemonicCode
+
+/**
+ * SLIP-0010 ED25519 key derivation.
+ * Derives a private key from [seed] following the given hardened [path] indices.
+ * All path components MUST be hardened (bit 31 set).
+ */
+private fun slip10DeriveEd25519(seed: ByteArray, path: IntArray): ByteArray {
+    // Master key: HMAC-SHA512(key="ed25519 seed", data=seed)
+    var iBytes = Crypto.hmac512("ed25519 seed".encodeToByteArray(), seed)
+    var kL = iBytes.sliceArray(0 until 32)
+    var kR = iBytes.sliceArray(32 until 64)
+
+    for (index in path) {
+        // Child key (hardened only): HMAC-SHA512(key=chainCode, data=0x00 || kL || ser32(index))
+        val data = ByteArray(37)
+        data[0] = 0x00
+        kL.copyInto(data, 1)
+        data[33] = (index ushr 24).toByte()
+        data[34] = (index ushr 16).toByte()
+        data[35] = (index ushr 8).toByte()
+        data[36] = index.toByte()
+        iBytes = Crypto.hmac512(kR, data)
+        kL = iBytes.sliceArray(0 until 32)
+        kR = iBytes.sliceArray(32 until 64)
+    }
+    return kL
+}
 
 @OptIn(ExperimentalEncodingApi::class)
 class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
     private val logger = Logger.withTag("TonManager")
     private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
 
-    private val seed = Mnemonic(mnemonicList).toSeed()
-    private val privateKey = PrivateKeyEd25519(seed.sliceArray(0 until 32))
+    private val privateKey: PrivateKeyEd25519 = when (mnemonicList.size) {
+        24 -> {
+            // TON native 24-word mnemonic
+            val seed = Mnemonic(mnemonicList).toSeed()
+            PrivateKeyEd25519(seed.sliceArray(0 until 32))
+        }
+        else -> {
+            // BIP39 mnemonic (12-word) — SLIP-0010 ED25519, path m/44'/607'/0'
+            // Used by Tonkeeper and hardware wallets
+            val bip39Seed = MnemonicCode.toSeed(mnemonicList, "")
+            val privateKeyBytes = slip10DeriveEd25519(bip39Seed, intArrayOf(
+                0x80000000.toInt() or 44,
+                0x80000000.toInt() or 607,
+                0x80000000.toInt() or 0
+            ))
+            PrivateKeyEd25519(privateKeyBytes)
+        }
+    }
     val publicKey = privateKey.publicKey()
 
     // Use WalletV4R2 instead of WalletV4R2Contract to avoid LiteClient requirement
