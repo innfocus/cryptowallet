@@ -1,6 +1,7 @@
 package com.lybia.cryptowallet.services
 
 import com.lybia.cryptowallet.CoinNetwork
+import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.models.GasPrice
 import com.lybia.cryptowallet.models.OwlRacleModel
 import com.lybia.cryptowallet.models.TransactionGas
@@ -14,10 +15,12 @@ class OwlRacleService {
         val shared: OwlRacleService = OwlRacleService()
     }
     suspend fun getAllGasPrice(coin: CoinNetwork): GasPrice?{
-        require(!coin.apiKeyOwlRacle.isNullOrEmpty()) { "API key Explorer is null" }
+        val apiKey = Config.shared.apiKeyOwlRacle
+        require(!apiKey.isNullOrEmpty()) { "API key OwlRacle is null" }
+        
         val response = HttpClientService.INSTANCE.client.get(coin.getOwlRacleUrl()){
             url{
-                parameters.append("apikey",coin.apiKeyOwlRacle!!)
+                parameters.append("apikey", apiKey)
                 parameters.append("blocks","200")
                 parameters.append("accept","35,60,90")
                 parameters.append("eip1559","false")

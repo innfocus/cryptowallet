@@ -37,6 +37,7 @@ import com.lybia.cryptowallet.coinkits.ripple.networking.XRPBalanceHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPSubmitTxtHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPTransactionsHandle
 import com.lybia.cryptowallet.CoinNetwork
+import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.coinkits.models.NFTItem
 import com.lybia.cryptowallet.coinkits.models.TokenInfo
 import com.lybia.cryptowallet.coinkits.services.NFTListHandle
@@ -183,13 +184,21 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
             updateMnemonic(value)
         }
 
-    /** API Keys for various services (Infura, Explorer, OwlRacle, etc.) */
-    var apiKeyInfura: String = ""
-    var apiKeyExplorer: String = ""
-    var apiKeyOwlRacle: String = ""
+    /** API Keys managed via global Config */
+    var apiKeyInfura: String?
+        get() = Config.shared.apiKeyInfura
+        set(value) { Config.shared.apiKeyInfura = value }
+
+    var apiKeyExplorer: String?
+        get() = Config.shared.apiKeyExplorer
+        set(value) { Config.shared.apiKeyExplorer = value }
+
+    var apiKeyOwlRacle: String?
+        get() = Config.shared.apiKeyOwlRacle
+        set(value) { Config.shared.apiKeyOwlRacle = value }
 
     /** Legacy support for tonApiKey, redirects to apiKeyInfura */
-    var tonApiKey: String
+    var tonApiKey: String?
         get() = apiKeyInfura
         set(value) { apiKeyInfura = value }
 
@@ -725,12 +734,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         })
     }
 
-    private fun tonCoinNetwork() = CoinNetwork(
-        name = NetworkName.TON,
-        apiKeyExplorer = apiKeyExplorer,
-        apiKeyInfura = apiKeyInfura,
-        apiKeyOwlRacle = apiKeyOwlRacle
-    )
+    private fun tonCoinNetwork() = CoinNetwork(name = NetworkName.TON)
 
     private fun getTonBalance(address: ACTAddress, completionHandler: BalanceHandle) {
         val tonManager = TonManager(_mnemonic)

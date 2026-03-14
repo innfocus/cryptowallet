@@ -4,15 +4,11 @@ import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.enums.NetworkName
 
 class CoinNetwork(
-    var name: NetworkName,
-    var apiKeyExplorer: String? = null,
-    var apiKeyInfura: String? = null,
-    var apiKeyOwlRacle: String? = null
+    var name: NetworkName
 ) {
 
-    fun getApiKey(): String? = apiKeyInfura
-
     fun getInfuraRpcUrl(): String {
+        val apiKeyInfura = Config.shared.apiKeyInfura
         return when (Config.shared.getNetwork()) {
             Network.MAINNET -> {
                 when(name){
@@ -64,11 +60,9 @@ class CoinNetwork(
     fun getOwlRacleUrl(): String {
         return when(name){
             NetworkName.ARBITRUM -> "https://api.owlracle.info/v4/arb/gas"
-            NetworkName.BTC -> return ""
+            NetworkName.BTC -> ""
             NetworkName.ETHEREUM -> "https://api.owlracle.info/v4/eth/gas"
             NetworkName.TON -> ""
         }
     }
-
-
 }

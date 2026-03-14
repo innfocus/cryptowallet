@@ -38,7 +38,7 @@ class TonService(
     private val scope: CoroutineScope
 ) : TokenService, NFTService {
 
-    private val coinNetwork = CoinNetwork(name = NetworkName.TON, apiKeyInfura = "")
+    private val coinNetwork = CoinNetwork(name = NetworkName.TON)
 
     // Create a fresh TonManager for each operation so mnemonic changes are
     // picked up without needing to restart TonService.
