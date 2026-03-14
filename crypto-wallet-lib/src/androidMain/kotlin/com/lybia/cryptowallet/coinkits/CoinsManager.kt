@@ -149,15 +149,26 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
             ACTCoin.XCoin.symbolName() to ACTNetwork(ACTCoin.XCoin, true),
             ACTCoin.Centrality.symbolName() to ACTNetwork(ACTCoin.Centrality, false),
             ACTCoin.TON.symbolName() to ACTNetwork(ACTCoin.TON, false))
-    var mnemonicRecover = ""
-    var mnemonic = ""
+    private var _mnemonic: String = ""
+    var mnemonic: String
+        get() = _mnemonic
+        set(value) {
+            updateMnemonic(value)
+        }
+
+    fun updateMnemonic(newMnemonic: String) {
+        synchronized(this) {
+            cleanAll()
+            _mnemonic = newMnemonic
+        }
+    }
 
     override fun getHDWallet(): ACTHDWallet? {
         return when (hdWallet != null) {
             true -> hdWallet
             false -> {
                 try {
-                    hdWallet = ACTHDWallet(mnemonic)
+                    hdWallet = ACTHDWallet(_mnemonic)
                     hdWallet
                 } catch (e: ACTBIP39Exception) {
                     null
@@ -168,10 +179,10 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
 
     override fun setNetworks(networks: Array<ACTNetwork>) {
         /* Store mnemonic before clean data */
-        val mn = mnemonic
+        val mn = _mnemonic
         cleanAll()
         /* Restore mnemonic */
-        mnemonic = mn
+        _mnemonic = mn
         coinsSupported.clear()
         networkManager.clear()
         networks.forEach {
@@ -187,8 +198,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
 
     override fun cleanAll() {
         hdWallet = null
-        mnemonic = ""
-        mnemonicRecover = ""
+        _mnemonic = ""
         addressesManager.clear()
         extendPrvKeysNumber.clear()
         prvKeysManager.clear()
@@ -196,7 +206,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
 
     override fun firstAddress(coin: ACTCoin): ACTAddress? {
         val adds = addresses(coin)
-        return if ((adds != null) && adds.isNotEmpty()) {
+        return if (!adds.isNullOrEmpty()) {
             adds.first()
         } else {
             null
@@ -228,7 +238,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
                             }
                             ACTCoin.TON -> {
                                 try {
-                                    val tonAddress = TonManager(mnemonic).getAddress()
+                                    val tonAddress = TonManager(_mnemonic).getAddress()
                                     val network = networkManager[symbolName] ?: ACTNetwork(ACTCoin.TON, false)
                                     addressesManager[symbolName] = arrayOf(ACTAddress(tonAddress, network))
                                     addressesManager[symbolName]
@@ -596,7 +606,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
     private fun tonCoinNetwork() = CoinNetwork(name = NetworkName.TON, apiKeyInfura = "")
 
     private fun getTonBalance(address: ACTAddress, completionHandler: BalanceHandle) {
-        val tonManager = TonManager(mnemonic)
+        val tonManager = TonManager(_mnemonic)
         val coinNetwork = tonCoinNetwork()
         launch {
             try {
@@ -609,7 +619,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
     }
 
     private fun getTonTransactions(address: ACTAddress, completionHandler: TransactionsHandle) {
-        val tonManager = TonManager(mnemonic)
+        val tonManager = TonManager(_mnemonic)
         val coinNetwork = tonCoinNetwork()
         launch {
             try {
@@ -633,7 +643,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         network: ACTNetwork,
         completionHandler: EstimateFeeHandle
     ) {
-        val tonManager = TonManager(mnemonic)
+        val tonManager = TonManager(_mnemonic)
         val coinNetwork = tonCoinNetwork()
         launch {
             try {
@@ -661,7 +671,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         networkMemo: MemoData?,
         completionHandler: SendCoinHandle
     ) {
-        val tonManager = TonManager(mnemonic)
+        val tonManager = TonManager(_mnemonic)
         val coinNetwork = tonCoinNetwork()
         launch {
             try {

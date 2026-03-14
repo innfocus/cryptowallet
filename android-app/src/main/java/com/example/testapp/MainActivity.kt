@@ -221,7 +221,7 @@ class MainActivity : AppCompatActivity() {
         updateConfig()
 
         // Update CoinsManager (Primary)
-        CoinsManager.shared.mnemonic = input
+        CoinsManager.shared.updateMnemonic(input)
 
         // Update TonManager (For advanced features)
         tonManager = TonManager(input)
