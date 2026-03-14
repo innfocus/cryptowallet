@@ -23,22 +23,54 @@ Use Xcode to add the project (**File -> Add Package Dependencies**)
 
 ## Usage
 
-### Define Coin Network
+### CoinsManager (Android Only)
 
-#### Android
+`CoinsManager` is the central entry point for managing multiple coins on Android. It handles HD Wallet derivation, network configuration, and core operations like balance fetching and transactions.
+
+#### Initialize and Recover Wallet
 
 ```kotlin
+import com.lybia.cryptowallet.coinkits.CoinsManager
 
-    import com.lybia.cryptowallet.CoinNetwork
-    import com.lybia.cryptowallet.enums.NetworkName
+// Set mnemonic to recover wallet
+CoinsManager.shared.mnemonic = "your twenty four word mnemonic phrase..."
 
-    private var coinNetwork = CoinNetwork(
-                                name = NetworkName,
-                                apiKeyExplorer = "explorerAPIKey",
-                                apiKeyInfura = "infuraAPIKey",
-
-    )
+// Get HD Wallet instance
+val wallet = CoinsManager.shared.getHDWallet()
 ```
+
+#### Get Balance
+
+```kotlin
+import com.lybia.cryptowallet.coinkits.BalanceHandle
+import com.lybia.cryptowallet.coinkits.hdwallet.bip32.ACTCoin
+
+CoinsManager.shared.getBalance(ACTCoin.Bitcoin, object : BalanceHandle {
+    override fun completionHandler(balance: Double, success: Boolean) {
+        if (success) {
+            println("Bitcoin Balance: $balance")
+        }
+    }
+})
+```
+
+#### Get Transactions
+
+```kotlin
+import com.lybia.cryptowallet.coinkits.TransactionsHandle
+import com.lybia.cryptowallet.coinkits.TransationData
+
+CoinsManager.shared.getTransactions(ACTCoin.Bitcoin, null, object : TransactionsHandle {
+    override fun completionHandler(transactions: Array<TransationData>?, moreParam: JsonObject?, errStr: String) {
+        transactions?.forEach { 
+            println("Transaction: ${it.hash}, Amount: ${it.amount}")
+        }
+    }
+})
+```
+
+### Define Coin Network (Common)
+
 
 #### Ios
 

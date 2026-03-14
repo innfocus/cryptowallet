@@ -40,10 +40,60 @@ import crypto_wallet_lib
 Config.shared.setNetwork(network: .testnet)
 ```
 
----
+## 3. Working with Coins via CoinsManager (Android)
 
-## 3. Working with Bitcoin
+`CoinsManager` is the recommended way to interact with all supported coins on Android. It provides a unified interface for core operations.
 
+### Setup and Recovery
+```kotlin
+import com.lybia.cryptowallet.coinkits.CoinsManager
+
+// Recover wallet using mnemonic
+CoinsManager.shared.mnemonic = "your mnemonic words..."
+```
+
+### Supported Coins
+The library supports: `Bitcoin`, `Ethereum`, `Cardano`, `Ripple`, `Centrality`, `TON`.
+
+### Get Balance
+```kotlin
+import com.lybia.cryptowallet.coinkits.BalanceHandle
+import com.lybia.cryptowallet.coinkits.hdwallet.bip32.ACTCoin
+
+CoinsManager.shared.getBalance(ACTCoin.Bitcoin, object : BalanceHandle {
+    override fun completionHandler(balance: Double, success: Boolean) {
+        if (success) println("Balance: $balance")
+    }
+})
+```
+
+### Send Coins
+```kotlin
+import com.lybia.cryptowallet.coinkits.SendCoinHandle
+import com.lybia.cryptowallet.coinkits.hdwallet.bip44.ACTAddress
+
+val fromAddress = CoinsManager.shared.firstAddress(ACTCoin.Bitcoin)!!
+CoinsManager.shared.sendCoin(
+    fromAddress = fromAddress,
+    toAddressStr = "recipient_address",
+    serAddressStr = "", // Service fee address if applicable
+    amount = 0.001,
+    networkFee = 0.0001,
+    serviceFee = 0.0,
+    completionHandler = object : SendCoinHandle {
+        override fun completionHandler(transID: String, success: Boolean, errStr: String) {
+            if (success) println("Tx ID: $transID")
+        }
+    }
+)
+
+```
+
+## 4. Manual Manager Usage (Legacy/Advanced)
+
+While `CoinsManager` is preferred for Android, individual managers are still available and used for KMP/iOS.
+
+### Working with Bitcoin
 The `BitcoinManager` handles address derivation (Legacy, SegWit, Native SegWit) and balance fetching.
 
 ### Kotlin
