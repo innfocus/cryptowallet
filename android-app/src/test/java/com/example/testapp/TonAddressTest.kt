@@ -1,29 +1,68 @@
 package com.example.testapp
 
+import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.enums.Network
+import com.lybia.cryptowallet.enums.NetworkName
+import com.lybia.cryptowallet.models.ton.TonTransaction
 import com.lybia.cryptowallet.wallets.ton.TonManager
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TonAddressTest {
 
     @Test
     fun testTonAddressGeneration() {
-        val mnemonic = "push dawn mercy parade famous armor saddle caught profit gauge sunny bonus verify grape involve ensure reject duty pottery soap surround have napkin magnet"
-        
+        val mnemonic = ""
+        val mnemonic24 =
+            "push dawn mercy parade famous armor saddle caught profit gauge sunny bonus verify grape involve ensure reject duty pottery soap surround have napkin magnet"
+
         // Test Mainnet
         Config.shared.setNetwork(Network.MAINNET)
         var tonManager = TonManager(mnemonic)
         var address = tonManager.getAddress()
-        println(address)
-        assertEquals("UQByrCknMpLynnPTjz6w_-Xn3dbqiGoEYo29jdqolDVWBezb", address)
+        println("address 12: $address")
+
+        tonManager = TonManager(mnemonic24)
+        address = tonManager.getAddress()
+        println("address 24: $address")
+        assertEquals("UQDF3gcg1_fLn96gnocNhj1GT0deFHUFsJDWsmrcyaLgeChW", address)
 
         // Test Testnet
         Config.shared.setNetwork(Network.TESTNET)
         tonManager = TonManager(mnemonic)
         address = tonManager.getAddress()
-        println(address)
-        assertEquals("0QByrCknMpLynnPTjz6w_-Xn3dbqiGoEYo29jdqolDVWBVdR", address)
+        println("address 12: $address")
+        tonManager = TonManager(mnemonic24)
+        address = tonManager.getAddress()
+        println("address 24: $address")
+        assertEquals("0QDF3gcg1_fLn96gnocNhj1GT0deFHUFsJDWsmrcyaLgeJPc", address)
+    }
+
+    @Test
+    fun testTonBalanceAndHistory() = runBlocking {
+        val testAddressW5 = "0QByrCknMpLynnPTjz6w_-Xn3dbqiGoEYo29jdqolDVWBVdR"
+        val mnemonic =
+            "push dawn mercy parade famous armor saddle caught profit gauge sunny bonus verify grape involve ensure reject duty pottery soap surround have napkin magnet"
+
+        Config.shared.setNetwork(Network.TESTNET)
+        val tonManager = TonManager(mnemonic)
+        val coinNetwork =
+            CoinNetwork(NetworkName.TON, apiKeyExplorer = "dummy", apiKeyInfura = "dummy")
+
+        // Check Balance
+        val balance = tonManager.getBalance(testAddressW5, coinNetwork)
+        println("Balance for $testAddressW5: $balance TON")
+        assertTrue("Balance should be > 1, but was $balance", balance > 1.0)
+
+        // Check History
+        val history =
+            tonManager.getTransactionHistory(testAddressW5, coinNetwork) as? List<TonTransaction>
+        println("History for $testAddressW5: ${history?.size} transactions")
+        assertNotNull("History should not be null", history)
+        assertTrue("History should not be empty", history?.isNotEmpty() == true)
     }
 }
