@@ -60,6 +60,7 @@ kotlin {
 
                 implementation(libs.krypto)
                 implementation(libs.bitcoin.kmp)
+                implementation(libs.klogging)
 
                 implementation(libs.ton.kotlin.crypto)
                 implementation(libs.ton.kotlin.contract)
