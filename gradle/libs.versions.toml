@@ -30,7 +30,7 @@ junit = "4.13.2"
 androidxTestExtJunit = "1.3.0"
 androidxTestEspressoCore = "3.7.0"
 androidxLifecycle = "2.10.0"
-klogging = "0.11.7"
+kermit = "2.1.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidxCoreKtx" }
@@ -85,7 +85,7 @@ rxjava = { module = "io.reactivex.rxjava2:rxjava", version.ref = "rxjava" }
 rxkotlin = { module = "io.reactivex.rxjava2:rxkotlin", version.ref = "rxkotlin" }
 spongycastle-core = { module = "com.madgag.spongycastle:core", version.ref = "coreVersion" }
 kotlinx-coroutines-test = {module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutinesCore"}
-klogging = { module = "io.klogging:klogging", version.ref = "klogging" }
+kermit = { module = "co.touchlab:kermit", version.ref = "kermit" }
 
 
 [plugins]
