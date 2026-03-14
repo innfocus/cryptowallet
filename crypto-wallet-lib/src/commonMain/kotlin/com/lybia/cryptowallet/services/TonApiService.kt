@@ -6,6 +6,7 @@ import io.ktor.client.call.body
 import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.request.url
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.serialization.json.JsonArray
@@ -125,6 +126,22 @@ class TonApiService {
             }
         }
         return 0
+    }
+
+    suspend fun getNFTItems(coin: CoinNetwork, ownerAddress: String, limit: Int = 50): List<TonNFTItem>? {
+        return try {
+            val response = HttpClientService.INSTANCE.client.get("${coin.getToncenterV3Url()}/nfts") {
+                url {
+                    parameters.append("owner_address", ownerAddress)
+                    parameters.append("limit", limit.toString())
+                }
+            }
+            if (response.status.value in 200..299) {
+                response.body<TonV3NFTResponse>().nftItems
+            } else null
+        } catch (e: Exception) {
+            null
+        }
     }
 
     suspend fun sendBoc(coin: CoinNetwork, bocBase64: String): String? {

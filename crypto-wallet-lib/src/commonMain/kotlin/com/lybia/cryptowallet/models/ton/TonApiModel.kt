@@ -123,5 +123,40 @@ data class TonStakingBalance(
     val rewards: Double = 0.0
 )
 
+// ─── NFT Models (Toncenter v3 REST API) ───────────────────────────────────────
+
+@Serializable
+data class TonV3NFTResponse(
+    @SerialName("nft_items")
+    val nftItems: List<TonNFTItem> = emptyList()
+)
+
+@Serializable
+data class TonNFTItem(
+    val address: String,
+    @SerialName("collection_address")
+    val collectionAddress: String? = null,
+    @SerialName("owner_address")
+    val ownerAddress: String? = null,
+    @SerialName("collection_item_index")
+    val index: String? = null,
+    val content: TonNFTContent? = null
+)
+
+@Serializable
+data class TonNFTContent(
+    val name: String? = null,
+    val description: String? = null,
+    val image: String? = null,
+    val attributes: List<TonNFTAttribute>? = null
+)
+
+@Serializable
+data class TonNFTAttribute(
+    @SerialName("trait_type")
+    val traitType: String,
+    val value: String
+)
+
 
 

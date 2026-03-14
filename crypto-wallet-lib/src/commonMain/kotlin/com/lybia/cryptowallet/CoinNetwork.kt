@@ -54,6 +54,13 @@ class CoinNetwork(
         }
     }
 
+    fun getToncenterV3Url(): String {
+        return when (Config.shared.getNetwork()) {
+            Network.MAINNET -> "https://toncenter.com/api/v3"
+            Network.TESTNET -> "https://testnet.toncenter.com/api/v3"
+        }
+    }
+
     fun getOwlRacleUrl(): String {
         return when(name){
             NetworkName.ARBITRUM -> "https://api.owlracle.info/v4/arb/gas"

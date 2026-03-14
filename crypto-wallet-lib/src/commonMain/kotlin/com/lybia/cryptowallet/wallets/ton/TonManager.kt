@@ -248,6 +248,59 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         return Base64.Default.encode(BagOfCells(cell).toByteArray())
     }
 
+    // ─── NFT ─────────────────────────────────────────────────────────────────
+
+    /** Signs a TEP-62 NFT transfer message. Returns BOC base64 ready to broadcast. */
+    suspend fun signNFTTransfer(
+        nftAddress: String,
+        toAddress: String,
+        seqno: Int,
+        forwardTonAmountNano: Long = 50_000_000L,  // 0.05 TON for gas
+        totalTonAmountNano: Long  = 100_000_000L,  // 0.1 TON total
+        memo: String? = null
+    ): String {
+        val nftBody = CellBuilder.createCell {
+            storeUInt(0x5fcc3d14, 32) // transfer op-code (TEP-62)
+            storeUInt(0, 64)          // query_id
+            storeTlb(MsgAddressInt, MsgAddressInt.parse(toAddress))  // new_owner
+            storeTlb(MsgAddressInt, address)  // response_destination = sender
+            storeBoolean(false)               // custom_payload = null
+            storeTlb(Coins, Coins(forwardTonAmountNano))
+            storeBoolean(memo != null)
+            if (memo != null) {
+                storeRef(CellBuilder.createCell {
+                    storeUInt(0, 32)
+                    storeBytes(memo.encodeToByteArray())
+                })
+            }
+        }
+
+        val walletId = WalletContract.DEFAULT_WALLET_ID
+        val stateInit = if (seqno == 0) {
+            WalletV4R2Contract.stateInit(WalletV4R2Contract.Data(0, publicKey)).load()
+        } else null
+
+        val transfer = WalletTransfer {
+            destination = AddrStd.parse(nftAddress) // send TO the NFT contract
+            bounceable = true
+            coins = Coins(totalTonAmountNano)
+            messageData = MessageData.Raw(nftBody, null, null)
+        }
+
+        val message = WalletV4R2Contract.transferMessage(
+            address = address,
+            stateInit = stateInit,
+            privateKey = privateKey,
+            walletId = walletId,
+            validUntil = Int.MAX_VALUE,
+            seqno = seqno,
+            transfer
+        )
+
+        val cell = buildCell { storeTlb(Message.Any, message) }
+        return Base64.Default.encode(BagOfCells(cell).toByteArray())
+    }
+
     override suspend fun getTransactionHistory(address: String?, coinNetwork: CoinNetwork?): Any? {
         require(coinNetwork != null) { "CoinNetwork is required" }
         val addr = address ?: getAddress()

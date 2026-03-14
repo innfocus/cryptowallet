@@ -35,6 +35,16 @@ import com.lybia.cryptowallet.coinkits.ripple.networking.XRPBalanceHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPSubmitTxtHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPTransactionsHandle
 import com.lybia.cryptowallet.CoinNetwork
+import com.lybia.cryptowallet.coinkits.models.NFTItem
+import com.lybia.cryptowallet.coinkits.models.TokenInfo
+import com.lybia.cryptowallet.coinkits.services.NFTListHandle
+import com.lybia.cryptowallet.coinkits.services.NFTService
+import com.lybia.cryptowallet.coinkits.services.NFTTransferHandle
+import com.lybia.cryptowallet.coinkits.services.SendTokenHandle
+import com.lybia.cryptowallet.coinkits.services.TokenBalanceHandle
+import com.lybia.cryptowallet.coinkits.services.TokenService
+import com.lybia.cryptowallet.coinkits.services.TokenTransactionsHandle
+import com.lybia.cryptowallet.coinkits.ton.TonService
 import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.models.ton.TonTransaction
 import com.lybia.cryptowallet.wallets.ton.TonManager
@@ -80,7 +90,6 @@ interface ICoinsManager {
                  networkMemo: MemoData? = null,
                  completionHandler: SendCoinHandle
     )
-
     fun estimateFee(amount: Double,
                     serAddressStr: String,
                     paramFee: Double,
@@ -91,10 +100,41 @@ interface ICoinsManager {
     )
 }
 
-class CoinsManager : ICoinsManager, CoroutineScope by CoroutineScope(SupervisorJob() + Dispatchers.IO) {
+/** Token (Jetton / ERC-20) operations, dispatched per-chain. */
+interface ITokenManager {
+    fun getTokenBalance(
+        coin: ACTCoin, address: String, contractAddress: String,
+        completionHandler: TokenBalanceHandle
+    )
+    fun getTokenTransactions(
+        coin: ACTCoin, address: String, contractAddress: String,
+        completionHandler: TokenTransactionsHandle
+    )
+    fun sendToken(
+        coin: ACTCoin, toAddress: String, contractAddress: String,
+        amount: Double, decimals: Int, memo: String? = null,
+        completionHandler: SendTokenHandle
+    )
+}
+
+/** NFT operations, dispatched per-chain. */
+interface INFTManager {
+    fun getNFTs(coin: ACTCoin, address: String, completionHandler: NFTListHandle)
+    fun transferNFT(
+        coin: ACTCoin, nftAddress: String, toAddress: String,
+        memo: String? = null, completionHandler: NFTTransferHandle
+    )
+}
+
+class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
+    CoroutineScope by CoroutineScope(SupervisorJob() + Dispatchers.IO) {
+
     companion object {
         val shared = CoinsManager()
     }
+
+    // Lazily created; mnemonicProvider lambda ensures fresh mnemonic on every call.
+    private val tonService: TonService by lazy { TonService({ mnemonic }, this) }
 
     private var hdWallet: ACTHDWallet? = null
     private var prvKeysManager = mutableMapOf<String, Array<ACTPrivateKey>>()
@@ -384,6 +424,48 @@ class CoinsManager : ICoinsManager, CoroutineScope by CoroutineScope(SupervisorJ
             }
             else -> {}
         }
+    }
+
+    // ─── ITokenManager ────────────────────────────────────────────────────────
+
+    override fun getTokenBalance(
+        coin: ACTCoin, address: String, contractAddress: String,
+        completionHandler: TokenBalanceHandle
+    ) = when (coin) {
+        ACTCoin.TON -> tonService.getTokenBalance(address, contractAddress, completionHandler)
+        else        -> completionHandler.completionHandler(null, false, "Token not supported for ${coin.symbolName()}")
+    }
+
+    override fun getTokenTransactions(
+        coin: ACTCoin, address: String, contractAddress: String,
+        completionHandler: TokenTransactionsHandle
+    ) = when (coin) {
+        ACTCoin.TON -> tonService.getTokenTransactions(address, contractAddress, completionHandler)
+        else        -> completionHandler.completionHandler(null, "Token not supported for ${coin.symbolName()}")
+    }
+
+    override fun sendToken(
+        coin: ACTCoin, toAddress: String, contractAddress: String,
+        amount: Double, decimals: Int, memo: String?,
+        completionHandler: SendTokenHandle
+    ) = when (coin) {
+        ACTCoin.TON -> tonService.sendToken(toAddress, contractAddress, amount, decimals, memo, completionHandler)
+        else        -> completionHandler.completionHandler("", false, "Token not supported for ${coin.symbolName()}")
+    }
+
+    // ─── INFTManager ──────────────────────────────────────────────────────────
+
+    override fun getNFTs(coin: ACTCoin, address: String, completionHandler: NFTListHandle) = when (coin) {
+        ACTCoin.TON -> tonService.getNFTs(address, completionHandler)
+        else        -> completionHandler.completionHandler(null, "NFT not supported for ${coin.symbolName()}")
+    }
+
+    override fun transferNFT(
+        coin: ACTCoin, nftAddress: String, toAddress: String,
+        memo: String?, completionHandler: NFTTransferHandle
+    ) = when (coin) {
+        ACTCoin.TON -> tonService.transferNFT(nftAddress, toAddress, memo, completionHandler)
+        else        -> completionHandler.completionHandler("", false, "NFT not supported for ${coin.symbolName()}")
     }
 
     /*
