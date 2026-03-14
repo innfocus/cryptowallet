@@ -12,6 +12,10 @@ import io.ktor.http.contentType
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.encodeToJsonElement
 
 class TonApiService {
     companion object {
@@ -24,7 +28,9 @@ class TonApiService {
             setBody(
                 TonRpcRequest(
                     method = "getAddressInformation",
-                    params = mapOf("address" to address)
+                    params = buildJsonObject {
+                        put("address", address)
+                    }
                 )
             )
         }
@@ -44,7 +50,10 @@ class TonApiService {
             setBody(
                 TonRpcRequest(
                     method = "getTransactions",
-                    params = mapOf("address" to address, "limit" to limit)
+                    params = buildJsonObject {
+                        put("address", address)
+                        put("limit", limit)
+                    }
                 )
             )
         }
@@ -64,11 +73,11 @@ class TonApiService {
             setBody(
                 TonRpcRequest(
                     method = "estimateFee",
-                    params = mapOf(
-                        "address" to address,
-                        "body" to body,
-                        "ignore_chksig" to true
-                    )
+                    params = buildJsonObject {
+                        put("address", address)
+                        put("body", body)
+                        put("ignore_chksig", true)
+                    }
                 )
             )
         }
@@ -89,11 +98,11 @@ class TonApiService {
             setBody(
                 TonRpcRequest(
                     method = "runGetMethod",
-                    params = mapOf(
-                        "address" to address,
-                        "method" to method,
-                        "stack" to stack
-                    )
+                    params = buildJsonObject {
+                        put("address", address)
+                        put("method", method)
+                        put("stack", Json.encodeToJsonElement(stack))
+                    }
                 )
             )
         }
@@ -150,7 +159,9 @@ class TonApiService {
             setBody(
                 TonRpcRequest(
                     method = "sendBoc",
-                    params = mapOf("boc" to bocBase64)
+                    params = buildJsonObject {
+                        put("boc", bocBase64)
+                    }
                 )
             )
         }

@@ -4,9 +4,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class TonRpcRequest<T>(
+data class TonRpcRequest(
     val method: String,
-    val params: T,
+    val params: kotlinx.serialization.json.JsonElement,
     val id: String = "1",
     val jsonrpc: String = "2.0"
 )
