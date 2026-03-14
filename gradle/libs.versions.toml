@@ -6,7 +6,6 @@ krypto = "4.0.10"
 secp256k1Kmp = "0.22.0"
 web3j-core-android = "5.0.2"
 coreVersion = "1.58.0.0"
-curve25519Android = "0.5.0"
 gson = "2.13.2"
 guava = "33.5.0-android"
 kotlin = "2.3.10"
@@ -21,7 +20,6 @@ retrofit = "3.0.0"
 rxandroid = "2.1.1"
 rxjava = "2.2.21"
 rxkotlin = "2.4.0"
-testng = "7.12.0"
 bouncycastle="1.83"
 tonKotlin = "0.5.0"
 androidxCoreKtx = "1.18.0"
@@ -85,14 +83,11 @@ rxandroid = { module = "io.reactivex.rxjava2:rxandroid", version.ref = "rxandroi
 rxjava = { module = "io.reactivex.rxjava2:rxjava", version.ref = "rxjava" }
 rxkotlin = { module = "io.reactivex.rxjava2:rxkotlin", version.ref = "rxkotlin" }
 spongycastle-core = { module = "com.madgag.spongycastle:core", version.ref = "coreVersion" }
-testng = { group = "org.testng", name = "testng", version.ref = "testng" }
 kotlinx-coroutines-test = {module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutinesCore"}
 
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "androidGradlePlugin" }
 androidLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "androidGradlePlugin" }
-kotlinAndroid = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
-kotlinCocoapods = { id = "org.jetbrains.kotlin.native.cocoapods", version.ref = "kotlin" }
