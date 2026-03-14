@@ -46,7 +46,7 @@ class MainActivity : AppCompatActivity() {
         tvOutput = findViewById(R.id.textViewOutput)
         radioGroupNetwork = findViewById(R.id.radioGroupNetwork)
 
-        generateRandomMnemonic()
+        etMnemonic.setText("push dawn mercy parade famous armor saddle caught profit gauge sunny bonus verify grape involve ensure reject duty pottery soap surround have napkin magnet")
 
         findViewById<Button>(R.id.btnGenerateMnemonic).setOnClickListener {
             generateRandomMnemonic()
