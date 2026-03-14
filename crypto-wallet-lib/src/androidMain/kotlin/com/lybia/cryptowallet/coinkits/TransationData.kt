@@ -10,6 +10,7 @@ import com.lybia.cryptowallet.coinkits.hdwallet.bip32.ACTCoin
 import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.fromHexToByteArray
 import com.lybia.cryptowallet.coinkits.ripple.model.XRPCoin
 import com.lybia.cryptowallet.coinkits.ripple.model.XRPTransactionItem
+import com.lybia.cryptowallet.models.ton.TonTransaction
 import java.io.Serializable
 import java.util.*
 
@@ -132,6 +133,45 @@ fun XRPTransactionItem.toTransactionData(address: String): TransationData {
 
     } catch (e: NoSuchElementException) {
     }
+    return tran
+}
+
+/*
+* For TON
+*/
+
+fun List<TonTransaction>.toTransactionDatas(myAddress: String): Array<TransationData> {
+    return map { it.toTransactionData(myAddress) }.sortedByDescending { it.date }.toTypedArray()
+}
+
+fun TonTransaction.toTransactionData(myAddress: String): TransationData {
+    val tran = TransationData()
+    val nanoUnit = 1_000_000_000f
+
+    tran.iD   = transactionId.hash
+    tran.date = Date(utime * 1000)
+    tran.fee  = (fee.toLongOrNull() ?: 0L).toFloat() / nanoUnit
+    tran.coin = ACTCoin.TON
+
+    // Outgoing: in_msg has no source (external message signed by wallet)
+    // Incoming: in_msg.source is the sender's address
+    val isSend = out_msgs?.isNotEmpty() == true
+    tran.isSend = isSend
+
+    if (isSend) {
+        val outMsg = out_msgs!!.first()
+        tran.fromAddress = myAddress
+        tran.toAddress   = outMsg.destination
+        tran.amount      = (outMsg.value.toLongOrNull() ?: 0L).toFloat() / nanoUnit
+        outMsg.message?.takeIf { it.isNotEmpty() }?.let { tran.memoNetwork = MemoData(it, null) }
+    } else {
+        val inMsg = in_msg
+        tran.fromAddress = inMsg?.source ?: ""
+        tran.toAddress   = myAddress
+        tran.amount      = (inMsg?.value?.toLongOrNull() ?: 0L).toFloat() / nanoUnit
+        inMsg?.message?.takeIf { it.isNotEmpty() }?.let { tran.memoNetwork = MemoData(it, null) }
+    }
+
     return tran
 }
 

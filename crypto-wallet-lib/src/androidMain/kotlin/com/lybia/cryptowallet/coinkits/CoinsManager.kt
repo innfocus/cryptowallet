@@ -34,9 +34,15 @@ import com.lybia.cryptowallet.coinkits.ripple.networking.Gxrp
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPBalanceHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPSubmitTxtHandle
 import com.lybia.cryptowallet.coinkits.ripple.networking.XRPTransactionsHandle
+import com.lybia.cryptowallet.CoinNetwork
+import com.lybia.cryptowallet.enums.NetworkName
+import com.lybia.cryptowallet.models.ton.TonTransaction
+import com.lybia.cryptowallet.wallets.ton.TonManager
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 interface BalanceHandle {
@@ -85,7 +91,7 @@ interface ICoinsManager {
     )
 }
 
-class CoinsManager : ICoinsManager {
+class CoinsManager : ICoinsManager, CoroutineScope by CoroutineScope(SupervisorJob() + Dispatchers.IO) {
     companion object {
         val shared = CoinsManager()
     }
@@ -179,6 +185,16 @@ class CoinsManager : ICoinsManager {
                                     }
                                 })
                                 null
+                            }
+                            ACTCoin.TON -> {
+                                try {
+                                    val tonAddress = TonManager(mnemonic).getAddress()
+                                    val network = networkManager[symbolName] ?: ACTNetwork(ACTCoin.TON, false)
+                                    addressesManager[symbolName] = arrayOf(ACTAddress(tonAddress, network))
+                                    addressesManager[symbolName]
+                                } catch (e: Exception) {
+                                    null
+                                }
                             }
                             else -> {
                                 val prvKeys = privateKeys(coin)
@@ -363,6 +379,9 @@ class CoinsManager : ICoinsManager {
                         null,
                         completionHandler)
             }
+            ACTCoin.TON -> {
+                sendTonCoin(toAddressStr, amount, networkMemo, completionHandler)
+            }
             else -> {}
         }
     }
@@ -492,67 +511,94 @@ class CoinsManager : ICoinsManager {
         })
     }
 
+    private fun tonCoinNetwork() = CoinNetwork(name = NetworkName.TON, apiKeyInfura = "")
+
     private fun getTonBalance(address: ACTAddress, completionHandler: BalanceHandle) {
-        val tonManager = com.lybia.cryptowallet.wallets.ton.TonManager(mnemonic)
-        val coinNetwork = com.lybia.cryptowallet.CoinNetwork(
-            name = com.lybia.cryptowallet.enums.NetworkName.TON,
-            apiKeyInfura = "mock_infura_key"
-        )
-        
-        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-        GlobalScope.launch(Dispatchers.Main) {
+        val tonManager = TonManager(mnemonic)
+        val coinNetwork = tonCoinNetwork()
+        launch {
             try {
                 val balance = tonManager.getBalance(address.rawAddressString(), coinNetwork)
-                completionHandler.completionHandler(balance, true)
+                withContext(Dispatchers.Main) { completionHandler.completionHandler(balance, true) }
             } catch (e: Exception) {
-                completionHandler.completionHandler(0.0, false)
+                withContext(Dispatchers.Main) { completionHandler.completionHandler(0.0, false) }
             }
         }
     }
 
     private fun getTonTransactions(address: ACTAddress, completionHandler: TransactionsHandle) {
-        val tonManager = com.lybia.cryptowallet.wallets.ton.TonManager(mnemonic)
-        val coinNetwork = com.lybia.cryptowallet.CoinNetwork(
-            name = com.lybia.cryptowallet.enums.NetworkName.TON,
-            apiKeyInfura = "mock_infura_key"
-        )
-        
-        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-        GlobalScope.launch(Dispatchers.Main) {
+        val tonManager = TonManager(mnemonic)
+        val coinNetwork = tonCoinNetwork()
+        launch {
             try {
                 val history = tonManager.getTransactionHistory(address.rawAddressString(), coinNetwork)
-                if (history is List<*>) {
-                    // Mapping to TransationData might be complex if they have different structures
-                    // For now, return empty or a basic mapping
-                    completionHandler.completionHandler(arrayOf(), null, "")
-                } else {
-                    completionHandler.completionHandler(null, null, "Error")
-                }
+                @Suppress("UNCHECKED_CAST")
+                val transactions = (history as? List<TonTransaction>) ?: emptyList()
+                val mapped = transactions.toTransactionDatas(address.rawAddressString())
+                withContext(Dispatchers.Main) { completionHandler.completionHandler(mapped, null, "") }
             } catch (e: Exception) {
-                completionHandler.completionHandler(null, null, e.localizedMessage ?: "Error")
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(null, null, e.localizedMessage ?: "Error")
+                }
             }
         }
     }
 
-    private fun getTonEstimateFee(amount: Double,
-                                  serAddressStr: String,
-                                  paramFee: Double,
-                                  network: ACTNetwork,
-                                  completionHandler: EstimateFeeHandle) {
-        val tonManager = com.lybia.cryptowallet.wallets.ton.TonManager(mnemonic)
-        val coinNetwork = com.lybia.cryptowallet.CoinNetwork(
-            name = com.lybia.cryptowallet.enums.NetworkName.TON,
-            apiKeyInfura = "mock_infura_key"
-        )
-        
-        @OptIn(kotlinx.coroutines.DelicateCoroutinesApi::class)
-        GlobalScope.launch(Dispatchers.Main) {
+    private fun getTonEstimateFee(
+        amount: Double,
+        serAddressStr: String,
+        paramFee: Double,
+        network: ACTNetwork,
+        completionHandler: EstimateFeeHandle
+    ) {
+        val tonManager = TonManager(mnemonic)
+        val coinNetwork = tonCoinNetwork()
+        launch {
             try {
-                // We need a dummy BOC for fee estimation if we don't have the signed data yet
-                val fee = tonManager.estimateFee(coinNetwork, tonManager.getAddress(), "mock_body_boc")
-                completionHandler.completionHandler(fee, "")
+                val seqno = tonManager.getSeqno(coinNetwork)
+                val amountNano = (amount * 1_000_000_000).toLong()
+                // Sign a dummy self-transfer to get a valid BOC for estimation
+                val bocBase64 = tonManager.signTransaction(
+                    toAddress = tonManager.getAddress(),
+                    amountNano = amountNano,
+                    seqno = seqno
+                )
+                val fee = tonManager.estimateFee(coinNetwork, tonManager.getAddress(), bocBase64)
+                withContext(Dispatchers.Main) { completionHandler.completionHandler(fee, "") }
             } catch (e: Exception) {
-                completionHandler.completionHandler(0.0, e.localizedMessage ?: "Error")
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(ACTCoin.TON.feeDefault(), "")
+                }
+            }
+        }
+    }
+
+    private fun sendTonCoin(
+        toAddressStr: String,
+        amount: Double,
+        networkMemo: MemoData?,
+        completionHandler: SendCoinHandle
+    ) {
+        val tonManager = TonManager(mnemonic)
+        val coinNetwork = tonCoinNetwork()
+        launch {
+            try {
+                val seqno = tonManager.getSeqno(coinNetwork)
+                val amountNano = (amount * 1_000_000_000).toLong()
+                val memo = networkMemo?.memo?.takeIf { it.isNotEmpty() }
+                val bocBase64 = tonManager.signTransaction(toAddressStr, amountNano, seqno, memo)
+                val result = tonManager.transfer(bocBase64, coinNetwork)
+                withContext(Dispatchers.Main) {
+                    if (result.success) {
+                        completionHandler.completionHandler(result.txHash ?: "pending", true, "")
+                    } else {
+                        completionHandler.completionHandler("", false, result.error ?: "Failed")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler("", false, e.localizedMessage ?: "Error")
+                }
             }
         }
     }
