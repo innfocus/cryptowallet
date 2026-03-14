@@ -1,6 +1,7 @@
 package com.lybia.cryptowallet.services
 
 import com.lybia.cryptowallet.CoinNetwork
+import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.models.ExplorerModel
 import com.lybia.cryptowallet.models.GasPrice
 import com.lybia.cryptowallet.models.Transaction
@@ -19,7 +20,8 @@ class ExplorerRpcService {
         coin: CoinNetwork,
         address: String,
     ): ExplorerModel<List<Transaction>>? {
-        require(coin.apiKeyExplorer != null) { "API key Explorer is null" }
+        val apiKey = Config.shared.apiKeyExplorer
+        require(!apiKey.isNullOrEmpty()) { "API key Explorer is null" }
         try{
             val response = HttpClientService.INSTANCE.client.get(coin.getExplorerEndpoint()){
                 url {
@@ -29,7 +31,7 @@ class ExplorerRpcService {
                     parameters.append("startblock", "0")
                     parameters.append("endblock", "99999999")
                     parameters.append("sort", "asc")
-                    parameters.append("apikey", coin.apiKeyExplorer!!)
+                    parameters.append("apikey", apiKey)
                 }
 
                 headers {
@@ -59,7 +61,8 @@ class ExplorerRpcService {
         address: String,
         contractAddress: String
     ): String? {
-        require(!coin.apiKeyExplorer.isNullOrEmpty()) { "API key Explorer is null" }
+        val apiKey = Config.shared.apiKeyExplorer
+        require(!apiKey.isNullOrEmpty()) { "API key Explorer is null" }
         try{
             val response = HttpClientService.INSTANCE.client.get(coin.getExplorerEndpoint()){
                 url {
@@ -68,7 +71,7 @@ class ExplorerRpcService {
                     parameters.append("contractaddress", contractAddress)
                     parameters.append("address", address)
                     parameters.append("tag", "latest")
-                    parameters.append("apikey", coin.apiKeyExplorer!!)
+                    parameters.append("apikey", apiKey)
                 }
 
                 headers {
@@ -94,7 +97,8 @@ class ExplorerRpcService {
         address: String,
         contractAddress: String
     ): ExplorerModel<List<TransactionToken>>?{
-        require(coin.apiKeyExplorer != null) { "API key Explorer is null" }
+        val apiKey = Config.shared.apiKeyExplorer
+        require(!apiKey.isNullOrEmpty()) { "API key Explorer is null" }
         try{
             val response = HttpClientService.INSTANCE.client.get(coin.getExplorerEndpoint()){
                 url {
@@ -105,7 +109,7 @@ class ExplorerRpcService {
                     parameters.append("startblock", "0")
                     parameters.append("endblock", "99999999")
                     parameters.append("sort", "asc")
-                    parameters.append("apikey", coin.apiKeyExplorer!!)
+                    parameters.append("apikey", apiKey)
                 }
 
                 headers {
@@ -132,12 +136,13 @@ class ExplorerRpcService {
 
     }
     suspend fun getAllGasPrice(coin: CoinNetwork): GasPrice?{
-        require(coin.apiKeyExplorer != null) { "API key Explorer is null" }
+        val apiKey = Config.shared.apiKeyExplorer
+        require(!apiKey.isNullOrEmpty()) { "API key Explorer is null" }
         val response = HttpClientService.INSTANCE.client.get(coin.getExplorerEndpoint()){
             url{
                 parameters.append("module","gastracker")
                 parameters.append("action","gasoracle")
-                parameters.append("apiKey",coin.apiKeyExplorer!!)
+                parameters.append("apiKey", apiKey)
             }
             headers {
                 append(HttpHeaders.Accept, "application/json")
