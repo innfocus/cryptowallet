@@ -14,6 +14,13 @@ import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.wallets.ton.TonManager
 import com.lybia.cryptowallet.wallets.bip39.Mnemonics
 import com.lybia.cryptowallet.wallets.bip39.MNEMONIC_SIZE
+import com.lybia.cryptowallet.coinkits.BalanceHandle
+import com.lybia.cryptowallet.coinkits.CoinsManager
+import com.lybia.cryptowallet.coinkits.SendCoinHandle
+import com.lybia.cryptowallet.coinkits.TransationData
+import com.lybia.cryptowallet.coinkits.TransactionsHandle
+import com.lybia.cryptowallet.coinkits.hdwallet.bip32.ACTCoin
+import com.google.gson.JsonObject
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
@@ -25,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvOutput: TextView
     private lateinit var radioGroupNetwork: RadioGroup
     
+    // For advanced TON features not yet in CoinsManager
     private lateinit var tonManager: TonManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,20 +53,24 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnGetAddress).setOnClickListener {
-            runTest {
-                initManagerFromInput()
-                val address = tonManager.getAddress()
-                log("Address: $address")
-            }
+            initManagerFromInput()
+            val address = CoinsManager.shared.firstAddress(ACTCoin.TON)?.rawAddressString()
+            log("Address (via CoinsManager): $address")
         }
 
         findViewById<Button>(R.id.btnGetBalance).setOnClickListener {
-            runTest {
-                initManagerFromInput()
-                val coinNetwork = getTonCoinNetwork()
-                val balance = tonManager.getBalance(null, coinNetwork)
-                log("Balance: $balance TON")
-            }
+            initManagerFromInput()
+            CoinsManager.shared.getBalance(ACTCoin.TON, object : BalanceHandle {
+                override fun completionHandler(balance: Double, success: Boolean) {
+                    runOnUiThread {
+                        if (success) {
+                            log("Balance (via CoinsManager): $balance TON")
+                        } else {
+                            log("Failed to get balance via CoinsManager")
+                        }
+                    }
+                }
+            })
         }
 
         findViewById<Button>(R.id.btnGetJettonBalance).setOnClickListener {
@@ -104,45 +116,60 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<Button>(R.id.btnGetHistory).setOnClickListener {
-            runTest {
-                initManagerFromInput()
-                val coinNetwork = getTonCoinNetwork()
-                val history = tonManager.getTransactionHistory(null, coinNetwork)
-                log("History: $history")
-            }
+            initManagerFromInput()
+            CoinsManager.shared.getTransactions(ACTCoin.TON, null, object : TransactionsHandle {
+                override fun completionHandler(transactions: Array<TransationData>?, moreParam: JsonObject?, errStr: String) {
+                    runOnUiThread {
+                        if (transactions != null) {
+                            log("History (via CoinsManager): ${transactions.size} transactions")
+                            transactions.take(3).forEach { 
+                                log(" - TX: ${it.iD.take(8)}... Amount: ${it.amount}")
+                            }
+                        } else {
+                            log("Failed to get history: $errStr")
+                        }
+                    }
+                }
+            })
         }
 
         findViewById<Button>(R.id.btnTransfer).setOnClickListener {
             runTest {
                 initManagerFromInput()
-                val coinNetwork = getTonCoinNetwork()
-                
+                val fromAddress = CoinsManager.shared.firstAddress(ACTCoin.TON)
+                if (fromAddress == null) {
+                    log("Error: Could not derive address")
+                    return@runTest
+                }
+
                 val toAddr = etToAddress.text.toString().trim()
                 val amountStr = etAmount.text.toString().trim()
-                val memo = etMemo.text.toString().takeIf { it.isNotEmpty() }
                 
                 if (toAddr.isEmpty() || amountStr.isEmpty()) {
                     log("Error: Destination and Amount are required")
                     return@runTest
                 }
-                
-                val amountNano = (amountStr.toDouble() * 1_000_000_000).toLong()
-                
-                log("1. Fetching seqno...")
-                val seqno = tonManager.getSeqno(coinNetwork)
-                log("   Seqno: $seqno")
-                
-                log("2. Signing transaction...")
-                val bocBase64 = tonManager.signTransaction(toAddr, amountNano, seqno, memo)
-                log("   BOC length: ${bocBase64.length}")
-                
-                log("3. Estimating fee...")
-                val fee = tonManager.estimateFee(coinNetwork, toAddr, bocBase64)
-                log("   Estimated Fee: $fee TON")
-                
-                log("4. Broadcasting...")
-                val result = tonManager.transfer(bocBase64, coinNetwork)
-                log("Transfer Result: success=${result.success}, error=${result.error}, status=${result.txHash}")
+
+                log("Initiating transfer via CoinsManager...")
+                CoinsManager.shared.sendCoin(
+                    fromAddress = fromAddress,
+                    toAddressStr = toAddr,
+                    serAddressStr = "",
+                    amount = amountStr.toDouble(),
+                    networkFee = 0.05, // Mock fee
+                    serviceFee = 0.0,
+                    completionHandler = object : SendCoinHandle {
+                        override fun completionHandler(transID: String, success: Boolean, errStr: String) {
+                            runOnUiThread {
+                                if (success) {
+                                    log("Transfer Success (via CoinsManager)! TX ID: $transID")
+                                } else {
+                                    log("Transfer Failed: $errStr")
+                                }
+                            }
+                        }
+                    }
+                )
             }
         }
 
@@ -192,6 +219,11 @@ class MainActivity : AppCompatActivity() {
             throw Exception("Mnemonic input is empty!")
         }
         updateConfig()
+
+        // Update CoinsManager (Primary)
+        CoinsManager.shared.mnemonic = input
+
+        // Update TonManager (For advanced features)
         tonManager = TonManager(input)
     }
 
