@@ -70,7 +70,7 @@ class ACTAddress {
                     }
                 }
                 ACTCoin.Ethereum -> {
-                    return addressStr!!.substring(network!!.addressPrefix().length)
+                    return addressStr!!.substring(network.addressPrefix().length)
                         .fromHexToByteArray()
                 }
                 ACTCoin.Cardano -> {
@@ -87,17 +87,17 @@ class ACTAddress {
             return addressStr!!
         } else {
             val r = raw()
-            if ((r != null) and (network != null)) {
-                return when (network!!.coin) {
+            if ((r != null) and true) {
+                return when (network.coin) {
                     ACTCoin.Bitcoin,
                     ACTCoin.Ripple -> {
                         val cs = ACTCryto.doubleSHA256(r!!).copyOfRange(0, 4)
                         val type =
-                            if (network!!.coin == ACTCoin.Ripple) Base58.Base58Type.Ripple else Base58.Base58Type.Basic
-                        network!!.addressPrefix() + Base58.encode(r!! + cs, type)
+                            if (network.coin == ACTCoin.Ripple) Base58.Base58Type.Ripple else Base58.Base58Type.Basic
+                        network.addressPrefix() + Base58.encode(r + cs, type)
                     }
                     ACTCoin.Ethereum -> {
-                        network!!.addressPrefix() + ACTEIP55.encode(r!!)
+                        network.addressPrefix() + ACTEIP55.encode(r!!)
                     }
                     ACTCoin.Cardano -> {
                         Base58.encode(r!!)
