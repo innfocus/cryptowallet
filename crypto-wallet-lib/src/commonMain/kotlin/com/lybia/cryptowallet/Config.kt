@@ -8,6 +8,7 @@ class Config {
     var apiKeyInfura: String? = null
     var apiKeyExplorer: String? = null
     var apiKeyOwlRacle: String? = null
+    var apiKeyToncenter: String? = null
 
     companion object {
         val shared: Config = Config()

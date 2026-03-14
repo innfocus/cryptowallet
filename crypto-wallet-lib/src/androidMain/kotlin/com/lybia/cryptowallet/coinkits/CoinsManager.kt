@@ -198,9 +198,9 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         set(value) { Config.shared.apiKeyOwlRacle = value }
 
     /** Legacy support for tonApiKey, redirects to apiKeyInfura */
-    var tonApiKey: String?
-        get() = apiKeyInfura
-        set(value) { apiKeyInfura = value }
+    var apiKeyToncenter: String?
+        get() = Config.shared.apiKeyToncenter
+        set(value) { Config.shared.apiKeyToncenter = value }
 
     fun updateMnemonic(newMnemonic: String) {
         synchronized(this) {

@@ -2,9 +2,11 @@ package com.lybia.cryptowallet.services
 
 import co.touchlab.kermit.Logger
 import com.lybia.cryptowallet.CoinNetwork
+import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.models.ton.*
 import io.ktor.client.call.body
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
@@ -30,6 +32,7 @@ class TonApiService {
         return try {
             val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
                 contentType(ContentType.Application.Json)
+                Config.shared.apiKeyToncenter?.let { header("X-API-Key", it) }
                 setBody(
                     TonRpcRequest(
                         method = "getAddressInformation",
@@ -62,6 +65,7 @@ class TonApiService {
         return try {
             val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
                 contentType(ContentType.Application.Json)
+                Config.shared.apiKeyToncenter?.let { header("X-API-Key", it) }
                 setBody(
                     TonRpcRequest(
                         method = "getTransactions",
@@ -95,6 +99,7 @@ class TonApiService {
         return try {
             val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
                 contentType(ContentType.Application.Json)
+                Config.shared.apiKeyToncenter?.let { header("X-API-Key", it) }
                 setBody(
                     TonRpcRequest(
                         method = "estimateFee",
@@ -132,6 +137,7 @@ class TonApiService {
         return try {
             val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
                 contentType(ContentType.Application.Json)
+                Config.shared.apiKeyToncenter?.let { header("X-API-Key", it) }
                 setBody(
                     TonRpcRequest(
                         method = "runGetMethod",
@@ -199,6 +205,7 @@ class TonApiService {
         logger.d { "getNFTItems: owner=$ownerAddress, limit=$limit" }
         return try {
             val response = HttpClientService.INSTANCE.client.get("${coin.getToncenterV3Url()}/nfts") {
+                Config.shared.apiKeyToncenter?.let { header("X-API-Key", it) }
                 url {
                     parameters.append("owner_address", ownerAddress)
                     parameters.append("limit", limit.toString())
@@ -221,6 +228,7 @@ class TonApiService {
         return try {
             val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
                 contentType(ContentType.Application.Json)
+                Config.shared.apiKeyToncenter?.let { header("X-API-Key", it) }
                 setBody(
                     TonRpcRequest(
                         method = "sendBoc",
@@ -249,3 +257,4 @@ class TonApiService {
         }
     }
 }
+
