@@ -33,7 +33,7 @@ Use Xcode to add the project (**File -> Add Package Dependencies**)
 import com.lybia.cryptowallet.coinkits.CoinsManager
 
 // Set mnemonic to recover wallet
-CoinsManager.shared.mnemonic = "your twenty four word mnemonic phrase..."
+CoinsManager.shared.updateMnemonic("your twenty four word mnemonic phrase...")
 
 // Get HD Wallet instance
 val wallet = CoinsManager.shared.getHDWallet()

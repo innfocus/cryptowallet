@@ -120,7 +120,7 @@ Kotlin exceptions are mapped to `NSError` in Swift. Always wrap calls in `do-cat
 import com.lybia.cryptowallet.coinkits.CoinsManager
 
 // Recover wallet using mnemonic
-CoinsManager.shared.mnemonic = "your mnemonic words..."
+CoinsManager.shared.updateMnemonic("your mnemonic words...")
 ```
 
 ### Supported Coins
