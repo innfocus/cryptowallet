@@ -47,8 +47,8 @@ class TonManagerTest {
         Config.shared.setNetwork(Network.MAINNET)
         val tonManager = TonManager(testMnemonic)
         // Note: You need a valid API key in CoinNetwork for this to work
-        val coinNetwork = CoinNetwork(NetworkName.TON, apiKeyInfura = "YOUR_API_KEY")
-        
+        val coinNetwork = CoinNetwork(NetworkName.TON)
+
         // foundation.ton is a well-known domain
         val domain = "foundation.ton"
         val resolvedAddress = try {
@@ -70,7 +70,7 @@ class TonManagerTest {
     fun testReverseResolveDns() = runTest {
         Config.shared.setNetwork(Network.MAINNET)
         val tonManager = TonManager(testMnemonic)
-        val coinNetwork = CoinNetwork(NetworkName.TON, apiKeyInfura = "YOUR_API_KEY")
+        val coinNetwork = CoinNetwork(NetworkName.TON)
         
         // Example address that has a TON DNS (foundation.ton)
         // EQCD39VS5Is_fS8L99I4tq8t_TAn8U7z69-95vD0j_X4_S - actually foundation.ton address might vary
@@ -90,7 +90,7 @@ class TonManagerTest {
     fun testGetNominatorStakingBalance() = runTest {
         Config.shared.setNetwork(Network.MAINNET)
         val tonManager = TonManager(testMnemonic)
-        val coinNetwork = CoinNetwork(NetworkName.TON, apiKeyInfura = "YOUR_API_KEY")
+        val coinNetwork = CoinNetwork(NetworkName.TON)
 
         // Example Nominator Pool address
         val poolAddress = "EQD4S93o-Jv-W-2n-Xp-V_2p-Xp-V_2p-Xp-V_2p-Xp-V_2p" // Fake address
@@ -107,7 +107,7 @@ class TonManagerTest {
     fun testGetTonstakersStakingBalance() = runTest {
         Config.shared.setNetwork(Network.MAINNET)
         val tonManager = TonManager(testMnemonic)
-        val coinNetwork = CoinNetwork(NetworkName.TON, apiKeyInfura = "YOUR_API_KEY")
+        val coinNetwork = CoinNetwork(NetworkName.TON)
 
         // Tonstakers Master Address
         val poolAddress = "EQD-cvRscwXMDFFdc1kYQK8zV8N39p9N3T8E_0KjLpInS3Wl"
