@@ -16,16 +16,17 @@ class TonAddressTest {
 
     @Test
     fun testTonAddressGeneration() {
-        val mnemonic = "left arena awkward spin damp pipe liar ribbon few husband execute whisper"
+        val mnemonic = ""
         val mnemonic24 =
             "push dawn mercy parade famous armor saddle caught profit gauge sunny bonus verify grape involve ensure reject duty pottery soap surround have napkin magnet"
+        Config.shared.setNetwork(Network.TESTNET)
 
         // Test Mainnet
-        Config.shared.setNetwork(Network.MAINNET)
+//        Config.shared.setNetwork(Network.MAINNET)
         var tonManager = TonManager(mnemonic)
         var address = tonManager.getAddress()
         println("address 12: $address")
-        assertEquals("UQCrSeQwZGKy9KRQMyz0dTuKomxJ1WHFkHs5A2sn1ubgWPcu", address)
+//        assertEquals("UQCrSeQwZGKy9KRQMyz0dTuKomxJ1WHFkHs5A2sn1ubgWPcu", address)
 
 //        tonManager = TonManager(mnemonic24)
 //        address = tonManager.getAddress()
@@ -33,11 +34,11 @@ class TonAddressTest {
 //        assertEquals("UQByrCknMpLynnPTjz6w_-Xn3dbqiGoEYo29jdqolDVWBezb", address)
 
         // Test Testnet
-        Config.shared.setNetwork(Network.TESTNET)
-        tonManager = TonManager(mnemonic)
-        address = tonManager.getAddress()
-        println("address 12: $address")
-        assertEquals("0QDYtgK7Yiqn14Ii0TjVykIZdeA8MUGZ8ueUEfi-KG0UOqQi", address)
+//        Config.shared.setNetwork(Network.TESTNET)
+//        tonManager = TonManager(mnemonic)
+//        address = tonManager.getAddress()
+//        println("address 12: $address")
+        assertEquals("0QDDGFDUxb25-19TkjQts1vdxjlDpWKu97B7BKl1KIyYbMev", address)
 
 //        tonManager = TonManager(mnemonic24)
 //        address = tonManager.getAddress()

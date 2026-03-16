@@ -109,11 +109,33 @@ class TonManager(
         "MeHXTNC01sNe"
 
     // ─── Address ──────────────────────────────────────────────────────────────
+    //
+    // W4: address bytes are network-independent (same on mainnet & testnet).
+    //     Only the display encoding changes (testOnly flag).
+    //
+    // W5: wallet_id encodes the networkGlobalId, so address BYTES differ
+    //     between mainnet (-239) and testnet (-3).
+    //     We precompute both at construction and return the right one at runtime
+    //     so that signing and display are always consistent with current network.
 
-    val address: AddrStd = when (walletVersion) {
-        WalletVersion.W4 -> WalletV4R2Contract.address(privateKey = privateKey, workchainId = 0)
-        WalletVersion.W5 -> computeW5Address()
-    }
+    private val w4Address: AddrStd? =
+        if (walletVersion == WalletVersion.W4)
+            WalletV4R2Contract.address(privateKey = privateKey, workchainId = 0)
+        else null
+
+    private val w5MainnetAddress: AddrStd? =
+        if (walletVersion == WalletVersion.W5) computeW5Address(isTestnet = false) else null
+
+    private val w5TestnetAddress: AddrStd? =
+        if (walletVersion == WalletVersion.W5) computeW5Address(isTestnet = true) else null
+
+    val address: AddrStd
+        get() = when (walletVersion) {
+            WalletVersion.W4 -> w4Address!!
+            WalletVersion.W5 ->
+                if (Config.shared.getNetwork() == Network.TESTNET) w5TestnetAddress!!
+                else w5MainnetAddress!!
+        }
 
     // ─── W5 helpers ──────────────────────────────────────────────────────────
 
@@ -142,13 +164,11 @@ class TonManager(
             storeBit(false)                          // empty extensions dict
         }
 
-    private fun buildW5StateInit(): StateInit {
-        val isTestnet = Config.shared.getNetwork() == Network.TESTNET
-        return StateInit(loadW5CodeCell(), buildW5DataCell(calculateW5WalletId(isTestnet)))
-    }
+    private fun buildW5StateInit(isTestnet: Boolean): StateInit =
+        StateInit(loadW5CodeCell(), buildW5DataCell(calculateW5WalletId(isTestnet)))
 
-    private fun computeW5Address(): AddrStd {
-        val stateInitRef = CellRef(buildW5StateInit(), StateInit)
+    private fun computeW5Address(isTestnet: Boolean): AddrStd {
+        val stateInitRef = CellRef(buildW5StateInit(isTestnet), StateInit)
         return AddrStd(0, stateInitRef.hash())
     }
 
@@ -503,9 +523,10 @@ class TonManager(
     }
 
     private fun signTransferV5(transfer: WalletTransfer, seqno: Int): String {
+        val isTestnet = Config.shared.getNetwork() == Network.TESTNET
         val innerRequest = buildW5InnerRequest(transfer)
         val body = buildW5SignedBody(seqno, innerRequest)
-        val stateInit = if (seqno == 0) buildW5StateInit() else null
+        val stateInit = if (seqno == 0) buildW5StateInit(isTestnet) else null
         val message = buildW5Message(body, stateInit)
         val cell = buildCell { storeTlb(Message.Any, message) }
         return Base64.Default.encode(BagOfCells(cell).toByteArray())
