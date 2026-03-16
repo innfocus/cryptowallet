@@ -23,6 +23,17 @@ import org.ton.cell.buildCell
 import co.touchlab.kermit.Logger
 import fr.acinq.bitcoin.Crypto
 import fr.acinq.bitcoin.MnemonicCode
+import org.ton.bitstring.BitString
+import org.ton.tlb.CellRef
+import org.ton.tlb.constructor.AnyTlbConstructor
+
+/** Wallet contract version. W5 (V5R1) is the current standard and default. */
+enum class WalletVersion {
+    /** Legacy WalletV4R2 */
+    W4,
+    /** Current standard WalletV5R1 — network-aware wallet ID, signature at tail */
+    W5
+}
 
 /**
  * SLIP-0010 ED25519 key derivation.
@@ -52,7 +63,11 @@ private fun slip10DeriveEd25519(seed: ByteArray, path: IntArray): ByteArray {
 }
 
 @OptIn(ExperimentalEncodingApi::class)
-class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
+class TonManager(
+    mnemonics: String,
+    val walletVersion: WalletVersion = WalletVersion.W5
+) : BaseCoinManager(), ITokenAndNFT {
+
     private val logger = Logger.withTag("TonManager")
     private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
 
@@ -76,17 +91,152 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
     }
     val publicKey = privateKey.publicKey()
 
-    // Use WalletV4R2 instead of WalletV4R2Contract to avoid LiteClient requirement
-//    private val wallet = WalletV4R2Contract(publicKey, workchain = 0)
-    val address: AddrStd = WalletV4R2Contract.address(
-        privateKey = privateKey,
-        workchainId = 0
-    )
+    // ─── W5R1 contract code (Base64 BOC) ─────────────────────────────────────
+    // Source: https://github.com/ton-blockchain/wallet-contract-v5 (WalletV5R1)
+    private val W5R1_CODE_BASE64 =
+        "te6cckECFAEAAoEAART/APSkE/S88sgLAQIBIAINAgFIAwQC3NAg10nBIJFbj2Mg1wsfIIIQ" +
+        "ZXh0br0hghBzaW50vbCSXwPgghBleHRuuo60gCDXIQHQdNch+kAw+kT4KPpEMFi9kVvg7UTQ" +
+        "gQFB1yH0BYMH9A5voTGRMOGAQNchcH/bPOAxINdJgQKAuZEw4HDiEA8CASAFDAIBIAYJAgFu" +
+        "BwgAGa3OdqJoQCDrkOuF/8AAGa8d9qJoQBDrkOuFj8ACAUgKCwAXsyX7UTQcdch1wsfgABGy" +
+        "YvtRNDXCgCAAGb5fD2omhAgKDrkPoCwBAvIOAR4g1wsfghBzaWduuvLgin8PAeaO8O2i7fshg" +
+        "wjXIgKDCNcjIIAg1yHTH9Mf0x/tRNDSANMfINMf0//XCgAK+QFAzPkQmiiUXwrbMeHywIff" +
+        "ArNQB7Dy0IRRJbry4IVQNrry4Ib4I7vy0IgikvgA3gGkf8jKAMsfAc8Wye1UIJL4D95w2zzY" +
+        "EAP27aLt+wL0BCFukmwhjkwCIdc5MHCUIccAs44tAdcoIHYeQ2wg10nACPLgkyDXSsAC8uCT" +
+        "INcdBscSwgBSMLDy0InXTNc5MAGk6GwShAe78uCT10rAAPLgk+1V4tIAAcAAkVvg69csCBQg" +
+        "kXCWAdcsCBwS4lIQseMPINdKERITAJYB+kAB+kT4KPpEMFi68uCR7UTQgQFB1xj0BQSdf8jK" +
+        "AEAEgwf0U/Lgi44UA4MH9Fvy4Iwi1woAIW4Bs7Dy0JDiyFADzxYS9ADJ7VQAcjDXLAgkji0h" +
+        "8uCS0gDtRNDSAFETuvLQj1RQMJExnAGBAUDXIdcKAPLgjuLIygBYzxbJ7VST8sCN4gAQk1vb" +
+        "MeHXTNC01sNe"
+
+    // ─── Address ──────────────────────────────────────────────────────────────
+
+    val address: AddrStd = when (walletVersion) {
+        WalletVersion.W4 -> WalletV4R2Contract.address(privateKey = privateKey, workchainId = 0)
+        WalletVersion.W5 -> computeW5Address()
+    }
+
+    // ─── W5 helpers ──────────────────────────────────────────────────────────
+
+    /**
+     * Calculate W5 wallet_id = context XOR networkGlobalId.
+     * context = parse(1bit=1 | workchain(8) | version=0(8) | subwallet=0(15)) as int32
+     * For workchain=0: context = 0x80000000 = Int.MIN_VALUE
+     * networkGlobalId: -239 for mainnet, -3 for testnet
+     */
+    private fun calculateW5WalletId(isTestnet: Boolean = false): Int {
+        val networkGlobalId = if (isTestnet) -3 else -239
+        // context bits: 1_00000000_00000000_000000000000000 = 0x80000000 for workchain=0
+        val context = Int.MIN_VALUE  // 0x80000000 for workchain=0, subwallet=0
+        return context xor networkGlobalId
+    }
+
+    private fun loadW5CodeCell(): Cell =
+        BagOfCells(Base64.decode(W5R1_CODE_BASE64)).first()
+
+    private fun buildW5DataCell(walletId: Int): Cell =
+        CellBuilder.createCell {
+            storeBit(true)                           // is_signature_allowed = true
+            storeUInt(0, 32)                         // initial seqno = 0
+            storeUInt(walletId, 32)                  // wallet_id (uint32)
+            storeBytes(publicKey.key.toByteArray())  // 256-bit public key
+            storeBit(false)                          // empty extensions dict
+        }
+
+    private fun buildW5StateInit(): StateInit {
+        val isTestnet = Config.shared.getNetwork() == Network.TESTNET
+        return StateInit(loadW5CodeCell(), buildW5DataCell(calculateW5WalletId(isTestnet)))
+    }
+
+    private fun computeW5Address(): AddrStd {
+        val stateInitRef = CellRef(buildW5StateInit(), StateInit)
+        return AddrStd(0, stateInitRef.hash())
+    }
+
+    /**
+     * Build W5 OutList cell for a single transfer.
+     * TL-B: out_list$_ {n:#} prev:^(OutList n) action:OutAction = OutList (n + 1)
+     * ActionSendMsg: 0x0ec3c86d(32) + sendMode(8) + prev_ref + msg_ref
+     */
+    private fun buildW5OutListCell(transfer: WalletTransfer, sendMode: Int = 3): Cell {
+        val msgCell = CellRef(transfer.toMessageRelaxed(), MessageRelaxed.tlbCodec(AnyTlbConstructor)).cell
+        val emptyCell = CellBuilder.createCell {}  // OutList 0 (empty prev)
+        return CellBuilder.createCell {
+            storeUInt(0x0ec3c86d, 32)  // OUT_ACTION_SEND_MSG_TAG
+            storeUInt(sendMode, 8)
+            storeRef(emptyCell)         // prev OutList
+            storeRef(msgCell)           // message
+        }
+    }
+
+    /**
+     * Build W5 InnerRequest cell: Maybe outList + has_other_actions(0)
+     */
+    private fun buildW5InnerRequest(transfer: WalletTransfer, sendMode: Int = 3): Cell {
+        val outListCell = buildW5OutListCell(transfer, sendMode)
+        return CellBuilder.createCell {
+            storeBit(true)          // has out_list ref (Maybe = present)
+            storeRef(outListCell)
+            storeBit(false)         // has_other_actions = false
+        }
+    }
+
+    /**
+     * Build the signed external message body for W5.
+     *
+     * Format (ton4j / ton-swift reference):
+     *   signed_request$_
+     *     opcode:      uint32  = 0x7369676E
+     *     wallet_id:   uint32
+     *     valid_until: uint32
+     *     seqno:       uint32
+     *     inner:       InnerRequest
+     *     signature:   bits512   ← at the TAIL
+     *   = SignedRequest
+     *
+     * The signature signs the hash of the cell WITHOUT the signature suffix.
+     */
+    private fun buildW5SignedBody(seqno: Int, innerRequest: Cell): Cell {
+        val isTestnet = Config.shared.getNetwork() == Network.TESTNET
+        val walletId = calculateW5WalletId(isTestnet)
+
+        // validUntil: 0xFFFFFFFF for seqno==0 (deployment), MAX_VALUE otherwise
+        val validUntilBits = if (seqno == 0) 0xFFFFFFFFL else Int.MAX_VALUE.toLong()
+
+        val signingBody = CellBuilder.createCell {
+            storeUInt(0x7369676E, 32)           // PREFIX_SIGNED_EXTERNAL ("sign")
+            storeUInt(walletId, 32)             // wallet_id
+            storeUInt(validUntilBits, 32)       // valid_until
+            storeUInt(seqno, 32)                // seqno
+            storeBits(innerRequest.bits)         // inner request bits
+            storeRefs(innerRequest.refs)         // inner request refs
+        }
+
+        val signature = BitString(privateKey.signToByteArray(signingBody.hash().toByteArray()))
+
+        // Final body = signingBody bits+refs + signature appended at tail
+        return CellBuilder.createCell {
+            storeBits(signingBody.bits)
+            storeRefs(signingBody.refs)
+            storeBits(signature)
+        }
+    }
+
+    /** Wrap a signed W5 body in a Message<Cell> with optional StateInit. */
+    private fun buildW5Message(body: Cell, stateInit: StateInit?): Message<Cell> {
+        val info = ExtInMsgInfo(src = AddrNone, dest = address, importFee = Coins())
+        val maybeStateInit = Maybe.of(stateInit?.let {
+            Either.of<StateInit, CellRef<StateInit>>(null, CellRef(value = it, StateInit))
+        })
+        val messageBody = Either.of<Cell, CellRef<Cell>>(null, CellRef(value = body, AnyTlbConstructor))
+        return Message(info = info, init = maybeStateInit, body = messageBody)
+    }
+
+    // ─── Public API ──────────────────────────────────────────────────────────
 
     override fun getAddress(): String {
         val isTestnet = Config.shared.getNetwork() == Network.TESTNET
         val result = address.toString(userFriendly = true, bounceable = false, testOnly = isTestnet)
-        logger.i { "TON Address: $result (Testnet: $isTestnet)" }
+        logger.i { "TON Address (${walletVersion.name}): $result (Testnet: $isTestnet)" }
         return result
     }
 
@@ -178,9 +328,8 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
 
             val layout = slice.loadUInt(8).toInt()
             if (layout == 0x01) {
-                // Try loadBits and convert if loadSnakeString is missing
                 val url = slice.loadBitString(slice.remainingBits).toByteArray().decodeToString()
-                var cleanUrl = url.filter { it.code in 32..126 } // Simple cleanup
+                var cleanUrl = url.filter { it.code in 32..126 }
                 if (cleanUrl.startsWith("ipfs://")) {
                     cleanUrl = cleanUrl.replace("ipfs://", "https://ipfs.io/ipfs/")
                 }
@@ -245,11 +394,6 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             }
         }
 
-        val walletId = WalletContract.DEFAULT_WALLET_ID
-        val stateInit = if (seqno == 0) {
-            WalletV4R2Contract.stateInit(WalletV4R2Contract.Data(0, publicKey)).load()
-        } else null
-
         val transfer = WalletTransfer {
             destination = AddrStd.parse(myJettonWallet)
             bounceable = true // Jetton wallet is a smart contract
@@ -257,20 +401,10 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             messageData = MessageData.Raw(jettonBody, null, null)
         }
 
-        val message = WalletV4R2Contract.transferMessage(
-            address = address,
-            stateInit = stateInit,
-            privateKey = privateKey,
-            walletId = walletId,
-            validUntil = Int.MAX_VALUE,
-            seqno = seqno,
-            transfer
-        )
-
-        val cell = buildCell { storeTlb(Message.Any, message) }
-        val encoded = Base64.Default.encode(BagOfCells(cell).toByteArray())
-        logger.i { "Signed Jetton transaction BOC: $encoded" }
-        return encoded
+        return when (walletVersion) {
+            WalletVersion.W4 -> signTransferV4(transfer, seqno)
+            WalletVersion.W5 -> signTransferV5(transfer, seqno)
+        }.also { logger.i { "Signed Jetton transaction BOC: $it" } }
     }
 
     suspend fun getSeqno(coinNetwork: CoinNetwork): Int {
@@ -293,11 +427,6 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             }
         } else Cell.empty()
 
-        val walletId = WalletContract.DEFAULT_WALLET_ID
-        val stateInit = if (seqno == 0) {
-            WalletV4R2Contract.stateInit(WalletV4R2Contract.Data(0, publicKey)).load()
-        } else null
-
         val transfer = WalletTransfer {
             destination = AddrStd.parse(toAddress)
             bounceable = false // safe default for user wallets
@@ -305,20 +434,10 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             messageData = MessageData.Raw(payload, null, null)
         }
 
-        val message = WalletV4R2Contract.transferMessage(
-            address = address,
-            stateInit = stateInit,
-            privateKey = privateKey,
-            walletId = walletId,
-            validUntil = Int.MAX_VALUE,
-            seqno = seqno,
-            transfer
-        )
-
-        val cell = buildCell { storeTlb(Message.Any, message) }
-        val encoded = Base64.Default.encode(BagOfCells(cell).toByteArray())
-        logger.i { "Signed TON transaction BOC: $encoded" }
-        return encoded
+        return when (walletVersion) {
+            WalletVersion.W4 -> signTransferV4(transfer, seqno)
+            WalletVersion.W5 -> signTransferV5(transfer, seqno)
+        }.also { logger.i { "Signed TON transaction BOC: $it" } }
     }
 
     // ─── NFT ─────────────────────────────────────────────────────────────────
@@ -349,17 +468,26 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             }
         }
 
-        val walletId = WalletContract.DEFAULT_WALLET_ID
-        val stateInit = if (seqno == 0) {
-            WalletV4R2Contract.stateInit(WalletV4R2Contract.Data(0, publicKey)).load()
-        } else null
-
         val transfer = WalletTransfer {
             destination = AddrStd.parse(nftAddress) // send TO the NFT contract
             bounceable = true
             coins = Coins(totalTonAmountNano)
             messageData = MessageData.Raw(nftBody, null, null)
         }
+
+        return when (walletVersion) {
+            WalletVersion.W4 -> signTransferV4(transfer, seqno)
+            WalletVersion.W5 -> signTransferV5(transfer, seqno)
+        }.also { logger.i { "Signed NFT transfer BOC: $it" } }
+    }
+
+    // ─── Private signing helpers ──────────────────────────────────────────────
+
+    private fun signTransferV4(transfer: WalletTransfer, seqno: Int): String {
+        val walletId = WalletContract.DEFAULT_WALLET_ID
+        val stateInit = if (seqno == 0) {
+            WalletV4R2Contract.stateInit(WalletV4R2Contract.Data(0, publicKey)).load()
+        } else null
 
         val message = WalletV4R2Contract.transferMessage(
             address = address,
@@ -370,12 +498,20 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             seqno = seqno,
             transfer
         )
-
         val cell = buildCell { storeTlb(Message.Any, message) }
-        val encoded = Base64.Default.encode(BagOfCells(cell).toByteArray())
-        logger.i { "Signed NFT transfer BOC: $encoded" }
-        return encoded
+        return Base64.Default.encode(BagOfCells(cell).toByteArray())
     }
+
+    private fun signTransferV5(transfer: WalletTransfer, seqno: Int): String {
+        val innerRequest = buildW5InnerRequest(transfer)
+        val body = buildW5SignedBody(seqno, innerRequest)
+        val stateInit = if (seqno == 0) buildW5StateInit() else null
+        val message = buildW5Message(body, stateInit)
+        val cell = buildCell { storeTlb(Message.Any, message) }
+        return Base64.Default.encode(BagOfCells(cell).toByteArray())
+    }
+
+    // ─── Remaining methods ────────────────────────────────────────────────────
 
     override suspend fun getTransactionHistory(address: String?, coinNetwork: CoinNetwork?): Any? {
         require(coinNetwork != null) { "CoinNetwork is required" }
@@ -560,7 +696,6 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             stackParams
         )
         if (res?.ok == true && res.result?.stack?.isNotEmpty() == true && res.result.stack.size >= 5) {
-            // Stack: [utime, amount, pending_deposit, pending_withdrawal, liquid_balance]
             val amountRaw = res.result.stack[1][1].jsonPrimitive.content
             val pendingDepositRaw = res.result.stack[2][1].jsonPrimitive.content
             val pendingWithdrawalRaw = res.result.stack[3][1].jsonPrimitive.content
@@ -589,8 +724,6 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         coinNetwork: CoinNetwork
     ): TonStakingBalance? {
         logger.i { "Getting Tonstakers staking balance for pool: $poolAddress" }
-        // PoolAddress here is the Tonstakers Master contract
-        // Tonstakers (tsTON)
         val tsTonBalance = getBalanceToken(getAddress(), poolAddress, coinNetwork)
         if (tsTonBalance == 0.0) return TonStakingBalance(poolAddress, 0.0)
 
@@ -608,7 +741,7 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
                 val balance = TonStakingBalance(
                     poolAddress = poolAddress,
                     amount = amountInTon,
-                    rewards = amountInTon - tsTonBalance // Simplified rewards
+                    rewards = amountInTon - tsTonBalance
                 )
                 logger.i { "Tonstakers staking balance: $balance" }
                 return balance
@@ -623,13 +756,11 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         coinNetwork: CoinNetwork
     ): TonStakingBalance? {
         logger.i { "Getting Bemo staking balance for pool: $poolAddress" }
-        // Bemo (stTON)
         val stTonBalance = getBalanceToken(getAddress(), poolAddress, coinNetwork)
         if (stTonBalance == 0.0) return TonStakingBalance(poolAddress, 0.0)
 
         val res = TonApiService.INSTANCE.runGetMethod(coinNetwork, poolAddress, "get_full_data")
         if (res?.ok == true && res.result?.stack != null && res.result.stack.size >= 2) {
-            // Stack elements for Bemo: [total_ton, total_st_ton, ...]
             val totalTonRaw = res.result.stack[0][1].jsonPrimitive.content
             val totalStTonRaw = res.result.stack[1][1].jsonPrimitive.content
 
@@ -657,15 +788,9 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         seqno: Int
     ): String {
         logger.i { "Signing deposit to Nominator Pool: $poolAddress, amount: $amountNano" }
-        // Standard Nominator Pool deposit op-code is 0x4e73746b ("nstk")
         val payload = CellBuilder.createCell {
             storeUInt(0x4e73746b, 32)
         }
-
-        val walletId = WalletContract.DEFAULT_WALLET_ID
-        val stateInit = if (seqno == 0) {
-            WalletV4R2Contract.stateInit(WalletV4R2Contract.Data(0, publicKey)).load()
-        } else null
 
         val transfer = WalletTransfer {
             destination = AddrStd.parse(poolAddress)
@@ -674,20 +799,10 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
             messageData = MessageData.Raw(payload, null, null)
         }
 
-        val message = WalletV4R2Contract.transferMessage(
-            address = address,
-            stateInit = stateInit,
-            privateKey = privateKey,
-            walletId = walletId,
-            validUntil = Int.MAX_VALUE,
-            seqno = seqno,
-            transfer
-        )
-
-        val cell = buildCell { storeTlb(Message.Any, message) }
-        val encoded = Base64.Default.encode(BagOfCells(cell).toByteArray())
-        logger.i { "Signed Nominator Pool deposit BOC: $encoded" }
-        return encoded
+        return when (walletVersion) {
+            WalletVersion.W4 -> signTransferV4(transfer, seqno)
+            WalletVersion.W5 -> signTransferV5(transfer, seqno)
+        }.also { logger.i { "Signed Nominator Pool deposit BOC: $it" } }
     }
 
     suspend fun signTonstakersDeposit(
@@ -696,9 +811,6 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         seqno: Int
     ): String {
         logger.i { "Signing Tonstakers deposit: $masterAddress, amount: $amountNano" }
-        // Tonstakers deposit (simple transfer to master contract)
-        // Usually, it's just a transfer to master address.
-        // Some protocols use specific op-codes.
         return signTransaction(masterAddress, amountNano, seqno)
     }
 
@@ -708,7 +820,6 @@ class TonManager(mnemonics: String) : BaseCoinManager(), ITokenAndNFT {
         seqno: Int
     ): String {
         logger.i { "Signing Bemo deposit: $masterAddress, amount: $amountNano" }
-        // Bemo deposit
         return signTransaction(masterAddress, amountNano, seqno)
     }
 }
