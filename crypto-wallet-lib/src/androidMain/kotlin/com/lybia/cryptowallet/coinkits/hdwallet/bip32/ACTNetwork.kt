@@ -121,6 +121,19 @@ enum class ACTCoin(val assetId: Int = 0) {
         override fun algorithm()        = Algorithm.Ed25519
         override fun baseApiUrl()       = ""
         override fun allowNewAddress()  = false
+    },
+    Midnight {
+        override fun feeDefault()       = 0.01
+        override fun minimumAmount()    = 0.0
+        override fun supportMemo()      = false
+        override fun nameCoin()         = "Midnight"
+        override fun symbolName()       = "tDUST"
+        override fun minimumValue()     = 0.01
+        override fun unit()             = BigDecimal(1000000)
+        override fun regex()            = "(?:(midnight1[a-z0-9]{38,}))"
+        override fun algorithm()        = Algorithm.Ed25519
+        override fun baseApiUrl()       = ""
+        override fun allowNewAddress()  = false
     };
     abstract fun nameCoin()         : String
     abstract fun symbolName()       : String
@@ -149,6 +162,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
             ACTCoin.Centrality -> 392
             ACTCoin.XCoin       -> 868
             ACTCoin.TON         -> 607
+            ACTCoin.Midnight    -> 1815
         }
     }
 
@@ -197,6 +211,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
             ACTCoin.Centrality  -> if (chain == Change.Internal) 0  else 1
             ACTCoin.XCoin       -> if (chain == Change.Internal) 0  else 1
             ACTCoin.TON         -> if (chain == Change.Internal) 0  else 1
+            ACTCoin.Midnight    -> if (chain == Change.Internal) 0  else 1
         }
     }
 
@@ -209,6 +224,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
             ACTCoin.Centrality -> if (chain == Change.Internal) 0 else 0
             ACTCoin.XCoin       -> if (chain == Change.Internal) 0 else 0
             ACTCoin.TON         -> if (chain == Change.Internal) 0 else 0
+            ACTCoin.Midnight    -> if (chain == Change.Internal) 0 else 0
         }
     }
 
@@ -223,6 +239,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
                     ACTCoin.Centrality -> "https://uncoverexplorer.com"
                     ACTCoin.XCoin       -> "Explorer XCoin"
                     ACTCoin.TON         -> "https://tonscan.org"
+                    ACTCoin.Midnight    -> "https://explorer.midnight.network"
                 }
             }
             true -> {
@@ -234,6 +251,7 @@ class ACTNetwork constructor(val coin: ACTCoin, val isTestNet: Boolean) {
                     ACTCoin.Centrality -> "https://uncoverexplorer.com"
                     ACTCoin.XCoin       -> "Explorer XCoin"
                     ACTCoin.TON         -> "https://testnet.tonscan.org"
+                    ACTCoin.Midnight    -> "https://explorer.testnet.midnight.network"
                 }
             }
         }

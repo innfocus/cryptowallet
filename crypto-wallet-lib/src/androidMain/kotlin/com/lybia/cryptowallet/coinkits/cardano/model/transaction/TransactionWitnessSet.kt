@@ -5,6 +5,10 @@ import co.nstant.`in`.cbor.CborEncoder
 import co.nstant.`in`.cbor.model.DataItem
 import java.io.ByteArrayOutputStream
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.wallets.cardano.CardanoWitnessBuilder in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class TransactionWitnessSet(val bootstraps: Array<TxWitness>) {
 
     fun serializer(): List<DataItem> {

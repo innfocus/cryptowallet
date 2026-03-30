@@ -7,6 +7,10 @@ import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.Base58
 import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.Bech32
 import java.lang.Exception
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.wallets.cardano.CardanoTransaction in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class TxOut(val address: String, val value: Long) {
     fun serializer(): List<DataItem>? {
         try {

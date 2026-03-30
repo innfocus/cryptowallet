@@ -5,6 +5,10 @@ import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.toDate
 import java.io.Serializable
 import java.util.*
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.models.cardano API models in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class ADATransaction : Serializable {
     @SerializedName("hash")
     val transactionID: String = ""

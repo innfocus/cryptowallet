@@ -7,6 +7,10 @@ import co.nstant.`in`.cbor.model.DataItem
 import co.nstant.`in`.cbor.model.SimpleValue
 import java.io.ByteArrayOutputStream
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.wallets.cardano.CardanoTransaction in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class TxAux(val tx: Tx, private val witnessSet: TransactionWitnessSet) {
 
 //    body: &TransactionBody

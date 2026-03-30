@@ -13,6 +13,10 @@ private val TAG_DERIVE_Z_HARDENED   = 0x00
 private val TAG_DERIVE_CC_NORMAL    = 0x03
 private val TAG_DERIVE_CC_HARDENED  = 0x01
 
+@Deprecated(
+    message = "Use commonMain Cardano module instead. This function is part of the legacy androidMain Cardano implementation.",
+    level = DeprecationLevel.WARNING
+)
 fun ACTPrivateKey.derivedCar(password   : String = "",
                              node       : ACTDerivationNode,
                              scheme     : CarDerivationScheme): ACTPrivateKey {

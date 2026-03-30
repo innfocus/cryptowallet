@@ -8,5 +8,7 @@ enum class NetworkName {
     BTC,
     ETHEREUM,
     ARBITRUM,
-    TON
+    TON,
+    CARDANO,
+    MIDNIGHT
 }

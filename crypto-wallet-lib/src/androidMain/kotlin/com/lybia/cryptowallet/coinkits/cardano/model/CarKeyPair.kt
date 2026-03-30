@@ -3,6 +3,10 @@ package com.lybia.cryptowallet.coinkits.cardano.model
 import java.math.BigInteger
 import java.security.MessageDigest
 
+@Deprecated(
+    message = "Use commonMain Cardano module instead. This class is part of the legacy androidMain Cardano implementation.",
+    level = DeprecationLevel.WARNING
+)
 class CarKeyPair {
     var publicKey   : CarPublicKey
     var privateKey  : CarPrivateKey

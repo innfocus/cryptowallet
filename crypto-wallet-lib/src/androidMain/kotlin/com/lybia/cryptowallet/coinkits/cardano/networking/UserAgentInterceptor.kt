@@ -5,6 +5,10 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.services.CardanoApiService in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class UserAgentInterceptor : Interceptor {
 
     companion object {

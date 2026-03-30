@@ -5,6 +5,10 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonSyntaxException
 import com.google.gson.annotations.SerializedName
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.models.cardano API models in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 data class ADAUnspentTransaction(
     @SerializedName("utxo_id")
     val utoxID          : String    = "",

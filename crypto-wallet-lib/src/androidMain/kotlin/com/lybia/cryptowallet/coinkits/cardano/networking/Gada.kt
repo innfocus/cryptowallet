@@ -33,6 +33,10 @@ import kotlin.math.floor
 import kotlin.math.max
 
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.services.CardanoApiService in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class YOROIAPI {
     companion object {
         const val server = "https://iohk-mainnet.yoroiwallet.com/api/"
@@ -120,6 +124,10 @@ private interface IGada {
     }
 }
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.services.CardanoApiService in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class Gada {
 
     companion object {

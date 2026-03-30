@@ -2,6 +2,10 @@ package com.lybia.cryptowallet.coinkits.cardano.model
 
 import java.math.BigInteger
 
+@Deprecated(
+    message = "Use commonMain Cardano module instead. This class is part of the legacy androidMain Cardano implementation.",
+    level = DeprecationLevel.WARNING
+)
 class CarPublicKey {
     private var buffer: ByteArray = byteArrayOf()
 

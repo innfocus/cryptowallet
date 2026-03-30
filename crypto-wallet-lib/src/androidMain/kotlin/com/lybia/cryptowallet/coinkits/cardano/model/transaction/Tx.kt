@@ -7,6 +7,10 @@ import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.blake2b
 import java.io.ByteArrayOutputStream
 import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.toHexString
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.wallets.cardano.CardanoTransaction in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class Tx {
     private var inputs: MutableList<TxoPointer> = mutableListOf()
     private var outputs: MutableList<TxOut> = mutableListOf()

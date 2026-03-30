@@ -4,6 +4,10 @@ import com.lybia.cryptowallet.coinkits.cardano.model.CarKeyPair
 import com.lybia.cryptowallet.coinkits.cardano.model.CarPublicKey
 import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.fromHexToByteArray
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.wallets.cardano.CardanoWitnessBuilder in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class TxWitnessBuilder {
     companion object {
         fun builder(

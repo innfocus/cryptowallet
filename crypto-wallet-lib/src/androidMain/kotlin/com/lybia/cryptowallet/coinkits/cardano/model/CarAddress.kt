@@ -13,6 +13,10 @@ import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.crc32
 import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.sha3256
 import java.io.ByteArrayOutputStream
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.wallets.cardano.CardanoAddress in commonMain instead",
+    replaceWith = ReplaceWith("CardanoAddress", "com.lybia.cryptowallet.wallets.cardano.CardanoAddress")
+)
 class CarAddress {
 
     private var publicKey: CarPublicKey? = null

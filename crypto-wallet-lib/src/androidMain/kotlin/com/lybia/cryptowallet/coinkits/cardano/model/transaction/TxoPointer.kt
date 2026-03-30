@@ -6,6 +6,10 @@ import co.nstant.`in`.cbor.model.DataItem
 import co.nstant.`in`.cbor.model.UnsignedInteger
 import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.fromHexToByteArray
 
+@Deprecated(
+    message = "Use com.lybia.cryptowallet.wallets.cardano.CardanoTransaction in commonMain instead",
+    level = DeprecationLevel.WARNING
+)
 class TxoPointer(private val txId: String, val index: Long) {
     fun serializer(): List<DataItem> {
         val utxoCbor = CborBuilder().addArray().add(ByteString(txId.fromHexToByteArray()))
