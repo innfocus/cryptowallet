@@ -1,11 +1,14 @@
 package com.lybia.cryptowallet.coinkits
 
 import com.lybia.cryptowallet.CoinNetwork
+import com.lybia.cryptowallet.base.IBridgeManager
 import com.lybia.cryptowallet.base.IFeeEstimator
 import com.lybia.cryptowallet.base.INFTManager
+import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.base.ITokenManager
 import com.lybia.cryptowallet.base.IWalletManager
 import com.lybia.cryptowallet.enums.NetworkName
+import com.lybia.cryptowallet.wallets.bridge.BridgeManagerFactory
 import com.lybia.cryptowallet.services.CardanoApiService
 import com.lybia.cryptowallet.services.MidnightApiService
 import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
@@ -79,5 +82,25 @@ object ChainManagerFactory {
     fun createFeeEstimator(coin: NetworkName, mnemonic: String): IFeeEstimator? {
         val manager = createWalletManager(coin, mnemonic)
         return manager as? IFeeEstimator
+    }
+
+    /** Type-safe accessor for staking-capable managers (CARDANO, TON). */
+    fun createStakingManager(
+        coin: NetworkName,
+        mnemonic: String,
+        config: ChainConfig = ChainConfig.default(coin)
+    ): IStakingManager? {
+        val manager = createWalletManager(coin, mnemonic, config)
+        return manager as? IStakingManager
+    }
+
+    /** Delegates to [BridgeManagerFactory] for bridge-capable chain pairs. */
+    fun createBridgeManager(
+        fromChain: NetworkName,
+        toChain: NetworkName,
+        mnemonic: String,
+        configs: Map<NetworkName, ChainConfig> = emptyMap()
+    ): IBridgeManager? {
+        return BridgeManagerFactory.createBridgeManager(fromChain, toChain, mnemonic, configs)
     }
 }

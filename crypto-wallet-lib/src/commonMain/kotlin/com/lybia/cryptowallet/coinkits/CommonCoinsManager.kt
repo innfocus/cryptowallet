@@ -2,12 +2,15 @@ package com.lybia.cryptowallet.coinkits
 
 import co.touchlab.kermit.Logger
 import com.lybia.cryptowallet.CoinNetwork
+import com.lybia.cryptowallet.base.IBridgeManager
 import com.lybia.cryptowallet.base.IFeeEstimator
 import com.lybia.cryptowallet.base.INFTManager
+import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.base.ITokenManager
 import com.lybia.cryptowallet.base.IWalletManager
 import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.errors.WalletError
+import com.lybia.cryptowallet.wallets.bridge.BridgeManagerFactory
 import com.lybia.cryptowallet.models.NFTItem
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.wallets.cardano.CardanoAddress
@@ -263,6 +266,205 @@ class CommonCoinsManager(
             NetworkName.ETHEREUM,
             NetworkName.ARBITRUM
         )
+    }
+
+    // ── Staking operations ──────────────────────────────────────────────
+
+    private val stakingChains = setOf(NetworkName.CARDANO, NetworkName.TON)
+
+    /**
+     * Check if a coin supports staking operations.
+     * Only Cardano and TON support staking.
+     */
+    fun supportsStaking(coin: NetworkName): Boolean {
+        return coin in stakingChains
+    }
+
+    /**
+     * Delegate stake to a pool.
+     * Delegates to the [IStakingManager] of the corresponding chain.
+     */
+    suspend fun stake(coin: NetworkName, amount: Long, poolAddress: String): SendResult {
+        if (!supportsStaking(coin)) {
+            return SendResult(
+                txHash = "",
+                success = false,
+                error = WalletError.UnsupportedOperation("stake", coin.name).message
+            )
+        }
+        return try {
+            val manager = getOrCreateManager(coin)
+            val stakingManager = manager as IStakingManager
+            val coinNetwork = CoinNetwork(coin)
+            val result = stakingManager.stake(amount, poolAddress, coinNetwork)
+            SendResult(
+                txHash = result.txHash ?: "",
+                success = result.success,
+                error = result.error
+            )
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to stake for $coin" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    /**
+     * Undelegate / unstake.
+     * Delegates to the [IStakingManager] of the corresponding chain.
+     */
+    suspend fun unstake(coin: NetworkName, amount: Long): SendResult {
+        if (!supportsStaking(coin)) {
+            return SendResult(
+                txHash = "",
+                success = false,
+                error = WalletError.UnsupportedOperation("unstake", coin.name).message
+            )
+        }
+        return try {
+            val manager = getOrCreateManager(coin)
+            val stakingManager = manager as IStakingManager
+            val coinNetwork = CoinNetwork(coin)
+            val result = stakingManager.unstake(amount, coinNetwork)
+            SendResult(
+                txHash = result.txHash ?: "",
+                success = result.success,
+                error = result.error
+            )
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to unstake for $coin" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    /**
+     * Query staking rewards for a chain.
+     * Delegates to the [IStakingManager] of the corresponding chain.
+     */
+    suspend fun getStakingRewards(coin: NetworkName, address: String? = null): BalanceResult {
+        if (!supportsStaking(coin)) {
+            return BalanceResult(
+                balance = 0.0,
+                success = false,
+                error = WalletError.UnsupportedOperation("getStakingRewards", coin.name).message
+            )
+        }
+        return try {
+            val manager = getOrCreateManager(coin)
+            val stakingManager = manager as IStakingManager
+            val coinNetwork = CoinNetwork(coin)
+            val addr = address ?: manager.getAddress()
+            val rewards = stakingManager.getStakingRewards(addr, coinNetwork)
+            BalanceResult(balance = rewards, success = true)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to get staking rewards for $coin" }
+            BalanceResult(balance = 0.0, success = false, error = e.message)
+        }
+    }
+
+    /**
+     * Query staking balance for a chain and pool.
+     * Delegates to the [IStakingManager] of the corresponding chain.
+     */
+    suspend fun getStakingBalance(
+        coin: NetworkName,
+        address: String? = null,
+        poolAddress: String
+    ): BalanceResult {
+        if (!supportsStaking(coin)) {
+            return BalanceResult(
+                balance = 0.0,
+                success = false,
+                error = WalletError.UnsupportedOperation("getStakingBalance", coin.name).message
+            )
+        }
+        return try {
+            val manager = getOrCreateManager(coin)
+            val stakingManager = manager as IStakingManager
+            val coinNetwork = CoinNetwork(coin)
+            val addr = address ?: manager.getAddress()
+            val balance = stakingManager.getStakingBalance(addr, poolAddress, coinNetwork)
+            BalanceResult(balance = balance, success = true)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to get staking balance for $coin" }
+            BalanceResult(balance = 0.0, success = false, error = e.message)
+        }
+    }
+
+    // ── Bridge operations ──────────────────────────────────────────────
+
+    /**
+     * Check if bridging between two chains is supported.
+     * Delegates to [BridgeManagerFactory.supportsBridge].
+     */
+    fun supportsBridge(fromChain: NetworkName, toChain: NetworkName): Boolean {
+        return BridgeManagerFactory.supportsBridge(fromChain, toChain)
+    }
+
+    /**
+     * Bridge asset between two chains.
+     * Delegates to the appropriate [IBridgeManager] implementation.
+     */
+    suspend fun bridgeAsset(fromChain: NetworkName, toChain: NetworkName, amount: Long): SendResult {
+        if (!supportsBridge(fromChain, toChain)) {
+            return SendResult(
+                txHash = "",
+                success = false,
+                error = WalletError.UnsupportedOperation(
+                    "bridgeAsset", "$fromChain → $toChain"
+                ).message
+            )
+        }
+        return try {
+            val bridgeManager = BridgeManagerFactory.createBridgeManager(
+                fromChain, toChain, mnemonic, configs
+            ) ?: return SendResult(
+                txHash = "",
+                success = false,
+                error = WalletError.UnsupportedOperation(
+                    "bridgeAsset", "$fromChain → $toChain"
+                ).message
+            )
+            val result = bridgeManager.bridgeAsset(fromChain, toChain, amount)
+            SendResult(
+                txHash = result.txHash ?: "",
+                success = result.success,
+                error = result.error
+            )
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to bridge asset from $fromChain to $toChain" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    /**
+     * Query bridge transaction status.
+     * Delegates to the appropriate [IBridgeManager] implementation.
+     *
+     * Note: Since getBridgeStatus only takes a txHash, we need to try all
+     * bridge managers. In practice, the caller should know which bridge pair
+     * the txHash belongs to. For simplicity, we try Cardano↔Midnight first,
+     * then Ethereum↔Arbitrum.
+     */
+    suspend fun getBridgeStatus(txHash: String): String {
+        return try {
+            // Try each bridge manager until one succeeds
+            val bridgePairs = listOf(
+                NetworkName.CARDANO to NetworkName.MIDNIGHT,
+                NetworkName.ETHEREUM to NetworkName.ARBITRUM
+            )
+            for ((from, to) in bridgePairs) {
+                val bridgeManager = BridgeManagerFactory.createBridgeManager(
+                    from, to, mnemonic, configs
+                )
+                if (bridgeManager != null) {
+                    return bridgeManager.getBridgeStatus(txHash)
+                }
+            }
+            "unknown"
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to get bridge status for $txHash" }
+            "unknown"
+        }
     }
 
     // ── Cardano-specific operations (backward compat) ───────────────────────
