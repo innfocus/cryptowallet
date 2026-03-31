@@ -4,7 +4,9 @@ import co.touchlab.kermit.Logger
 import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.base.BaseCoinManager
+import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.enums.Network
+import com.lybia.cryptowallet.errors.StakingError
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.CardanoApiService
 import fr.acinq.bitcoin.Crypto
@@ -24,7 +26,7 @@ class CardanoManager(
     private val apiService: CardanoApiService = CardanoApiService(
         baseUrl = "https://cardano-mainnet.blockfrost.io/api/v0"
     )
-) : BaseCoinManager() {
+) : BaseCoinManager(), IStakingManager {
 
     private val logger = Logger.withTag("CardanoManager")
     private val mnemonicWords = mnemonic.split(" ").filter { it.isNotEmpty() }
@@ -421,6 +423,265 @@ class CardanoManager(
             .build()
 
         return CardanoSignedTransaction(body, witnessSet)
+    }
+
+    // ── IStakingManager implementation ──────────────────────────────────
+
+    /**
+     * Delegate ADA to a stake pool.
+     * Builds a transaction with a delegation certificate, signed with both payment and staking keys.
+     *
+     * @param amount Amount in lovelace (used for balance check; delegation delegates entire stake)
+     * @param poolAddress Bech32 pool ID (pool1...)
+     * @param coinNetwork Network configuration
+     * @return TransferResponseModel with transaction hash on success
+     */
+    override suspend fun stake(amount: Long, poolAddress: String, coinNetwork: CoinNetwork): TransferResponseModel {
+        logger.d { "stake: amount=$amount, pool=$poolAddress" }
+        return try {
+            val fromAddress = getAddress()
+            val stakingAddress = getStakingAddress()
+
+            // Decode pool address to get pool key hash (28 bytes)
+            val poolKeyHash = try {
+                val (_, data5bit) = com.lybia.cryptowallet.utils.Bech32.decode(poolAddress)
+                com.lybia.cryptowallet.utils.Bech32.convertBits(data5bit, 5, 8, false)
+            } catch (e: Exception) {
+                throw StakingError.PoolNotFound(poolAddress)
+            }
+            if (poolKeyHash.size != 28) {
+                throw StakingError.PoolNotFound(poolAddress)
+            }
+
+            // Get staking key hash
+            val (stakingPriv, _) = deriveStakingKey(0)
+            val stakingPub = ed25519PublicKey(stakingPriv)
+            val stakingKeyHash = CardanoAddress.hashKey(stakingPub)
+
+            // Check balance
+            val apiUtxos = apiService.getUtxos(listOf(fromAddress))
+            val utxos = apiUtxos.map { apiUtxo ->
+                val lovelace = apiUtxo.amount
+                    .filter { it.unit == "lovelace" }
+                    .sumOf { it.quantity.toLongOrNull() ?: 0L }
+                CardanoUtxo(
+                    txHash = apiUtxo.txHash,
+                    index = apiUtxo.txIndex,
+                    lovelace = lovelace
+                )
+            }
+
+            val fee = 200_000L // estimated fee
+            val deposit = 2_000_000L // stake key registration deposit
+            val requiredTotal = fee + deposit
+            val totalAvailable = utxos.sumOf { it.lovelace }
+
+            if (totalAvailable < requiredTotal) {
+                throw StakingError.InsufficientStakingBalance(
+                    available = totalAvailable.toDouble() / 1_000_000.0,
+                    required = requiredTotal.toDouble() / 1_000_000.0
+                )
+            }
+
+            // Select UTXOs
+            val sorted = utxos.sortedByDescending { it.lovelace }
+            val selected = mutableListOf<CardanoUtxo>()
+            var collected = 0L
+            for (utxo in sorted) {
+                if (collected >= requiredTotal) break
+                selected.add(utxo)
+                collected += utxo.lovelace
+            }
+
+            // Get current slot for TTL
+            val currentBlock = apiService.getCurrentBlock()
+            val ttl = currentBlock.slot + 7200
+
+            // Build transaction with delegation certificate
+            val builder = CardanoTransactionBuilder()
+            for (utxo in selected) {
+                builder.addInput(utxo.txHash, utxo.index)
+            }
+
+            // Change output
+            val change = collected - fee
+            if (change > 0) {
+                val fromAddressBytes = addressToBytes(fromAddress)
+                builder.addOutput(fromAddressBytes, change)
+            }
+
+            builder.setFee(fee)
+            builder.setTtl(ttl)
+
+            // Add stake registration + delegation certificates
+            builder.addCertificate(CardanoCertificate.StakeRegistration(stakingKeyHash))
+            builder.addCertificate(CardanoCertificate.Delegation(stakingKeyHash, poolKeyHash))
+
+            val body = builder.build()
+
+            // Sign with both payment key and staking key
+            val (paymentPriv, _) = derivePaymentKey(0, 0)
+            val paymentPub = ed25519PublicKey(paymentPriv)
+            val txHash = body.getHash()
+            val paymentSig = ed25519Sign(paymentPriv, txHash)
+            val stakingSig = ed25519Sign(stakingPriv, txHash)
+
+            val witnessSet = CardanoWitnessBuilder()
+                .addVKeyWitness(paymentPub, paymentSig)
+                .addVKeyWitness(stakingPub, stakingSig)
+                .build()
+
+            val signedTx = CardanoSignedTransaction(body, witnessSet)
+            val resultHash = apiService.submitTransaction(signedTx.serialize())
+            TransferResponseModel(success = true, error = null, txHash = resultHash)
+        } catch (e: StakingError) {
+            throw e
+        } catch (e: Exception) {
+            logger.e(e) { "stake failed" }
+            TransferResponseModel(success = false, error = e.message, txHash = null)
+        }
+    }
+
+    /**
+     * Undelegate (deregister staking key).
+     * Builds a transaction with a deregistration certificate.
+     *
+     * @param amount Not used for Cardano undelegation
+     * @param coinNetwork Network configuration
+     * @return TransferResponseModel with transaction hash on success
+     */
+    override suspend fun unstake(amount: Long, coinNetwork: CoinNetwork): TransferResponseModel {
+        logger.d { "unstake" }
+        return try {
+            val fromAddress = getAddress()
+            val stakingAddress = getStakingAddress()
+
+            // Check if delegation is active
+            val accountInfo = try {
+                apiService.getAccountInfo(stakingAddress)
+            } catch (e: Exception) {
+                throw StakingError.NoDelegationActive(stakingAddress)
+            }
+
+            if (!accountInfo.active) {
+                throw StakingError.NoDelegationActive(stakingAddress)
+            }
+
+            // Get staking key hash
+            val (stakingPriv, _) = deriveStakingKey(0)
+            val stakingPub = ed25519PublicKey(stakingPriv)
+            val stakingKeyHash = CardanoAddress.hashKey(stakingPub)
+
+            // Get UTXOs for fee
+            val apiUtxos = apiService.getUtxos(listOf(fromAddress))
+            val utxos = apiUtxos.map { apiUtxo ->
+                val lovelace = apiUtxo.amount
+                    .filter { it.unit == "lovelace" }
+                    .sumOf { it.quantity.toLongOrNull() ?: 0L }
+                CardanoUtxo(
+                    txHash = apiUtxo.txHash,
+                    index = apiUtxo.txIndex,
+                    lovelace = lovelace
+                )
+            }
+
+            val fee = 200_000L
+            val sorted = utxos.sortedByDescending { it.lovelace }
+            val selected = mutableListOf<CardanoUtxo>()
+            var collected = 0L
+            for (utxo in sorted) {
+                if (collected >= fee) break
+                selected.add(utxo)
+                collected += utxo.lovelace
+            }
+
+            // Get current slot for TTL
+            val currentBlock = apiService.getCurrentBlock()
+            val ttl = currentBlock.slot + 7200
+
+            // Build transaction with deregistration certificate
+            val builder = CardanoTransactionBuilder()
+            for (utxo in selected) {
+                builder.addInput(utxo.txHash, utxo.index)
+            }
+
+            // Change output (collected - fee + 2 ADA deposit refund)
+            val depositRefund = 2_000_000L
+            val change = collected - fee + depositRefund
+            if (change > 0) {
+                val fromAddressBytes = addressToBytes(fromAddress)
+                builder.addOutput(fromAddressBytes, change)
+            }
+
+            builder.setFee(fee)
+            builder.setTtl(ttl)
+            builder.addCertificate(CardanoCertificate.StakeDeregistration(stakingKeyHash))
+
+            val body = builder.build()
+
+            // Sign with both payment key and staking key
+            val (paymentPriv, _) = derivePaymentKey(0, 0)
+            val paymentPub = ed25519PublicKey(paymentPriv)
+            val txHash = body.getHash()
+            val paymentSig = ed25519Sign(paymentPriv, txHash)
+            val stakingSig = ed25519Sign(stakingPriv, txHash)
+
+            val witnessSet = CardanoWitnessBuilder()
+                .addVKeyWitness(paymentPub, paymentSig)
+                .addVKeyWitness(stakingPub, stakingSig)
+                .build()
+
+            val signedTx = CardanoSignedTransaction(body, witnessSet)
+            val resultHash = apiService.submitTransaction(signedTx.serialize())
+            TransferResponseModel(success = true, error = null, txHash = resultHash)
+        } catch (e: StakingError) {
+            throw e
+        } catch (e: Exception) {
+            logger.e(e) { "unstake failed" }
+            TransferResponseModel(success = false, error = e.message, txHash = null)
+        }
+    }
+
+    /**
+     * Query staking rewards for the given staking address.
+     *
+     * @param address Staking address (if null, derives from mnemonic)
+     * @param coinNetwork Network configuration
+     * @return Rewards in ADA (lovelace / 1,000,000)
+     */
+    override suspend fun getStakingRewards(address: String, coinNetwork: CoinNetwork): Double {
+        val stakingAddress = address.ifEmpty { getStakingAddress() }
+        logger.d { "getStakingRewards: $stakingAddress" }
+        return try {
+            val accountInfo = apiService.getAccountInfo(stakingAddress)
+            val withdrawableLovelace = accountInfo.withdrawableAmount.toLongOrNull() ?: 0L
+            withdrawableLovelace.toDouble() / 1_000_000.0
+        } catch (e: Exception) {
+            logger.e(e) { "getStakingRewards failed" }
+            0.0
+        }
+    }
+
+    /**
+     * Query delegation status and staked balance.
+     *
+     * @param address Staking address (if null, derives from mnemonic)
+     * @param poolAddress Not used for Cardano balance query
+     * @param coinNetwork Network configuration
+     * @return Staked amount in ADA (lovelace / 1,000,000), or 0.0 if no active delegation
+     */
+    override suspend fun getStakingBalance(address: String, poolAddress: String, coinNetwork: CoinNetwork): Double {
+        val stakingAddress = address.ifEmpty { getStakingAddress() }
+        logger.d { "getStakingBalance: $stakingAddress" }
+        return try {
+            val accountInfo = apiService.getAccountInfo(stakingAddress)
+            if (!accountInfo.active) return 0.0
+            val controlledLovelace = accountInfo.controlledAmount.toLongOrNull() ?: 0L
+            controlledLovelace.toDouble() / 1_000_000.0
+        } catch (e: Exception) {
+            logger.e(e) { "getStakingBalance failed" }
+            0.0
+        }
     }
 
     // ── Ed25519 helpers ─────────────────────────────────────────────────────

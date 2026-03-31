@@ -57,7 +57,8 @@ class CardanoTransactionBody(
     val outputs: List<CardanoTransactionOutput>,
     val fee: Long,
     val ttl: Long,
-    val metadataHash: ByteArray? = null
+    val metadataHash: ByteArray? = null,
+    val certificates: List<CardanoCertificate> = emptyList()
 ) {
     private val encoder = CborEncoder()
 
@@ -107,6 +108,12 @@ class CardanoTransactionBody(
         // Key 3: ttl
         entries.add(CborValue.CborUInt(3u) to CborValue.CborUInt(ttl.toULong()))
 
+        // Key 4: certificates (optional)
+        if (certificates.isNotEmpty()) {
+            val certsCbor = certificates.map { it.toCbor() }
+            entries.add(CborValue.CborUInt(4u) to CborValue.CborArray(certsCbor))
+        }
+
         // Key 7: metadata hash (optional)
         if (metadataHash != null) {
             entries.add(CborValue.CborUInt(7u) to CborValue.CborByteString(metadataHash))
@@ -136,6 +143,7 @@ class CardanoTransactionBody(
             var fee = 0L
             var ttl = 0L
             var metadataHash: ByteArray? = null
+            var certificates = emptyList<CardanoCertificate>()
 
             for ((key, value) in cbor.entries) {
                 val keyInt = (key as CborValue.CborUInt).value.toInt()
@@ -182,11 +190,15 @@ class CardanoTransactionBody(
                     }
                     2 -> fee = (value as CborValue.CborUInt).value.toLong()
                     3 -> ttl = (value as CborValue.CborUInt).value.toLong()
+                    4 -> {
+                        val arr = (value as CborValue.CborArray).items
+                        certificates = arr.map { CardanoCertificate.fromCbor(it) }
+                    }
                     7 -> metadataHash = (value as CborValue.CborByteString).bytes
                 }
             }
 
-            return CardanoTransactionBody(inputs, outputs, fee, ttl, metadataHash)
+            return CardanoTransactionBody(inputs, outputs, fee, ttl, metadataHash, certificates)
         }
     }
 }
@@ -210,6 +222,7 @@ class CardanoTransactionBuilder {
     private var fee: Long = 0
     private var ttl: Long = 0
     private var metadataHash: ByteArray? = null
+    private val certificates = mutableListOf<CardanoCertificate>()
 
     fun addInput(txHash: ByteArray, index: Int): CardanoTransactionBuilder {
         inputs.add(CardanoTransactionInput(txHash, index))
@@ -249,6 +262,11 @@ class CardanoTransactionBuilder {
         return this
     }
 
+    fun addCertificate(certificate: CardanoCertificate): CardanoTransactionBuilder {
+        certificates.add(certificate)
+        return this
+    }
+
     fun build(): CardanoTransactionBody {
         require(inputs.isNotEmpty()) { "Transaction must have at least one input" }
         require(outputs.isNotEmpty()) { "Transaction must have at least one output" }
@@ -259,7 +277,8 @@ class CardanoTransactionBuilder {
             outputs = outputs.toList(),
             fee = fee,
             ttl = ttl,
-            metadataHash = metadataHash
+            metadataHash = metadataHash,
+            certificates = certificates.toList()
         )
     }
 

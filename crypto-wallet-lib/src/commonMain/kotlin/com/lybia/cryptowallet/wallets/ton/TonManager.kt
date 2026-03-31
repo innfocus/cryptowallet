@@ -26,6 +26,8 @@ import fr.acinq.bitcoin.MnemonicCode
 import org.ton.bitstring.BitString
 import org.ton.tlb.CellRef
 import org.ton.tlb.constructor.AnyTlbConstructor
+import com.lybia.cryptowallet.base.IStakingManager
+import com.lybia.cryptowallet.errors.WalletError
 
 /** Wallet contract version. W5 (V5R1) is the current standard and default. */
 enum class WalletVersion {
@@ -33,6 +35,14 @@ enum class WalletVersion {
     W4,
     /** Current standard WalletV5R1 — network-aware wallet ID, signature at tail */
     W5
+}
+
+/** TON staking pool types, detected via get methods on pool contract. */
+enum class TonPoolType {
+    NOMINATOR,
+    TONSTAKERS,
+    BEMO,
+    UNKNOWN
 }
 
 /**
@@ -66,7 +76,7 @@ private fun slip10DeriveEd25519(seed: ByteArray, path: IntArray): ByteArray {
 class TonManager(
     mnemonics: String,
     val walletVersion: WalletVersion = WalletVersion.W5
-) : BaseCoinManager(), ITokenAndNFT {
+) : BaseCoinManager(), ITokenAndNFT, IStakingManager {
 
     private val logger = Logger.withTag("TonManager")
     private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
@@ -842,5 +852,104 @@ class TonManager(
     ): String {
         logger.i { "Signing Bemo deposit: $masterAddress, amount: $amountNano" }
         return signTransaction(masterAddress, amountNano, seqno)
+    }
+
+    // ─── Pool Type Detection ──────────────────────────────────────────────────
+
+    /**
+     * Detect the type of a TON staking pool by calling get methods on the pool contract.
+     * Tries get_nominator_data → NOMINATOR, get_pool_full_data → TONSTAKERS,
+     * get_full_data → BEMO, else → UNKNOWN.
+     */
+    suspend fun detectPoolType(poolAddress: String, coinNetwork: CoinNetwork): TonPoolType {
+        logger.i { "Detecting pool type for: $poolAddress" }
+
+        // Try get_nominator_data → NOMINATOR
+        try {
+            val res = TonApiService.INSTANCE.runGetMethod(coinNetwork, poolAddress, "get_nominator_data")
+            if (res?.ok == true && res.result?.stack?.isNotEmpty() == true) {
+                logger.i { "Pool type detected: NOMINATOR" }
+                return TonPoolType.NOMINATOR
+            }
+        } catch (_: Exception) { /* not a nominator pool */ }
+
+        // Try get_pool_full_data → TONSTAKERS
+        try {
+            val res = TonApiService.INSTANCE.runGetMethod(coinNetwork, poolAddress, "get_pool_full_data")
+            if (res?.ok == true && res.result?.stack?.isNotEmpty() == true) {
+                logger.i { "Pool type detected: TONSTAKERS" }
+                return TonPoolType.TONSTAKERS
+            }
+        } catch (_: Exception) { /* not a tonstakers pool */ }
+
+        // Try get_full_data → BEMO
+        try {
+            val res = TonApiService.INSTANCE.runGetMethod(coinNetwork, poolAddress, "get_full_data")
+            if (res?.ok == true && res.result?.stack?.isNotEmpty() == true) {
+                logger.i { "Pool type detected: BEMO" }
+                return TonPoolType.BEMO
+            }
+        } catch (_: Exception) { /* not a bemo pool */ }
+
+        logger.w { "Pool type unknown for: $poolAddress" }
+        return TonPoolType.UNKNOWN
+    }
+
+    // ─── IStakingManager Implementation ───────────────────────────────────────
+
+    override suspend fun stake(
+        amount: Long,
+        poolAddress: String,
+        coinNetwork: CoinNetwork
+    ): TransferResponseModel {
+        logger.i { "IStakingManager.stake: amount=$amount, pool=$poolAddress" }
+        val poolType = detectPoolType(poolAddress, coinNetwork)
+        val seqno = getSeqno(coinNetwork)
+
+        val boc = when (poolType) {
+            TonPoolType.NOMINATOR -> signDepositToNominatorPool(poolAddress, amount, seqno)
+            TonPoolType.TONSTAKERS -> signTonstakersDeposit(poolAddress, amount, seqno)
+            TonPoolType.BEMO -> signBemoDeposit(poolAddress, amount, seqno)
+            TonPoolType.UNKNOWN -> throw WalletError.UnsupportedOperation(
+                "stake", "TON (unknown pool type for $poolAddress)"
+            )
+        }
+
+        val result = TonApiService.INSTANCE.sendBoc(coinNetwork, boc)
+        return if (result == "success") {
+            TransferResponseModel(success = true, error = null, txHash = "pending")
+        } else {
+            TransferResponseModel(success = false, error = "Failed to broadcast staking transaction", txHash = null)
+        }
+    }
+
+    override suspend fun unstake(amount: Long, coinNetwork: CoinNetwork): TransferResponseModel {
+        throw WalletError.UnsupportedOperation("unstake", "TON")
+    }
+
+    override suspend fun getStakingRewards(address: String, coinNetwork: CoinNetwork): Double {
+        logger.i { "IStakingManager.getStakingRewards: address=$address" }
+        // For TON, rewards are embedded in the staking balance query.
+        // We need a pool address to query, but the interface only provides address.
+        // Return 0.0 as rewards are returned via getStakingBalance.
+        return 0.0
+    }
+
+    override suspend fun getStakingBalance(
+        address: String,
+        poolAddress: String,
+        coinNetwork: CoinNetwork
+    ): Double {
+        logger.i { "IStakingManager.getStakingBalance: address=$address, pool=$poolAddress" }
+        val poolType = detectPoolType(poolAddress, coinNetwork)
+
+        val balance = when (poolType) {
+            TonPoolType.NOMINATOR -> getNominatorStakingBalance(poolAddress, coinNetwork)
+            TonPoolType.TONSTAKERS -> getTonstakersStakingBalance(poolAddress, coinNetwork)
+            TonPoolType.BEMO -> getBemoStakingBalance(poolAddress, coinNetwork)
+            TonPoolType.UNKNOWN -> null
+        }
+
+        return balance?.amount ?: 0.0
     }
 }

@@ -1,5 +1,7 @@
 package com.lybia.cryptowallet.errors
 
+import com.lybia.cryptowallet.enums.NetworkName
+
 /**
  * Base sealed class for wallet errors across all chains.
  */
@@ -40,4 +42,38 @@ sealed class RippleError(override val message: String) : Exception(message) {
 
     data class TransactionFailed(val engineResult: String, val engineResultMessage: String) :
         RippleError("Ripple transaction failed: $engineResult — $engineResultMessage")
+}
+
+/**
+ * Staking-specific errors.
+ */
+sealed class StakingError(override val message: String) : Exception(message) {
+    data class PoolNotFound(val poolAddress: String) :
+        StakingError("Stake pool not found: $poolAddress")
+
+    data class InsufficientStakingBalance(val available: Double, val required: Double) :
+        StakingError("Insufficient staking balance: available=$available, required=$required")
+
+    data class DelegationAlreadyActive(val currentPool: String) :
+        StakingError("Delegation already active to pool: $currentPool")
+
+    data class NoDelegationActive(val stakingAddress: String) :
+        StakingError("No active delegation for: $stakingAddress")
+}
+
+/**
+ * Bridge-specific errors.
+ */
+sealed class BridgeError(override val message: String) : Exception(message) {
+    data class UnsupportedBridgePair(val fromChain: NetworkName, val toChain: NetworkName) :
+        BridgeError("Unsupported bridge pair: $fromChain → $toChain")
+
+    data class BridgeServiceUnavailable(val service: String) :
+        BridgeError("Bridge service unavailable: $service")
+
+    data class BridgeTransactionFailed(val txHash: String, val reason: String) :
+        BridgeError("Bridge transaction failed: $txHash — $reason")
+
+    data class InsufficientBridgeBalance(val available: Double, val required: Double, val fee: Double) :
+        BridgeError("Insufficient balance for bridge: available=$available, required=$required (including fee=$fee)")
 }

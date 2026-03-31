@@ -164,6 +164,20 @@ class CardanoApiService(
     }
 
     /**
+     * Get account info for a staking address (delegation status, rewards, etc.).
+     * Uses Blockfrost `/accounts/{staking_address}` endpoint.
+     *
+     * @param stakingAddress Bech32-encoded staking (reward) address
+     * @return Account info including delegation status and rewards
+     */
+    suspend fun getAccountInfo(stakingAddress: String): CardanoAccountInfo {
+        logger.d { "getAccountInfo: $stakingAddress" }
+        return safeRequest<CardanoAccountInfo> {
+            get("$baseUrl/accounts/$stakingAddress") { applyAuth() }
+        }
+    }
+
+    /**
      * Get all native tokens held by an address.
      */
     suspend fun getAddressAssets(address: String): List<CardanoNativeToken> {
