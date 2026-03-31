@@ -5,8 +5,11 @@ import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.base.IWalletManager
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.CentralityApiService
+import com.lybia.cryptowallet.utils.ACTCrypto
+import com.lybia.cryptowallet.utils.fromHexToByteArray
 import com.lybia.cryptowallet.utils.toHexString
 import com.lybia.cryptowallet.wallets.centrality.model.*
+import com.lybia.cryptowallet.wallets.hdwallet.bip39.ACTBIP39
 
 /**
  * Centrality (CennzNet) wallet manager.
@@ -38,6 +41,16 @@ class CentralityManager(
             cachedAddress = apiService.getPublicAddress(seedHex)
         }
         return cachedAddress?.address ?: ""
+    }
+
+    /**
+     * Initialize the cached address by calling the external API.
+     * Must be called before getAddress() to ensure a non-empty result.
+     */
+    suspend fun initAddress() {
+        if (cachedAddress == null) {
+            getAddressAsync()
+        }
     }
 
     override suspend fun getBalance(address: String?, coinNetwork: CoinNetwork?): Double {
@@ -127,7 +140,15 @@ class CentralityManager(
         return hex.removePrefix("0x").toLong(16)
     }
 
+    /**
+     * Derive seed hex for Centrality (Sr25519) from mnemonic.
+     * Algorithm: PBKDF2-SHA512(entropy, "mnemonic", 2048, 32) → "0x" + hex
+     * Matches ACTHDWallet.calculateSeed for Sr25519 algorithm.
+     */
     private fun getSeedHex(): String {
-        return mnemonic
+        val entropyHex = ACTBIP39.entropyString(mnemonic, skipValidate = true)
+        val entropy = entropyHex.fromHexToByteArray()
+        val seed = ACTCrypto.pbkdf2SHA512(entropy, "mnemonic".encodeToByteArray(), 2048, 32)
+        return "0x" + seed.toHexString()
     }
 }

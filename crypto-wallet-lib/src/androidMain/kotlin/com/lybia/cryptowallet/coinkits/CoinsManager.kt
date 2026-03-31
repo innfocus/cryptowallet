@@ -250,9 +250,11 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
                 logger.d { "Generating Centrality address via commonManager" }
                 launch {
                     try {
-                        val addr = commonManager.getAddress(NetworkName.CENTRALITY)
-                        val actAddress = ACTAddress(addr, ACTNetwork(ACTCoin.Centrality, false))
-                        addressesManager[symbolName] = arrayOf(actAddress)
+                        val addr = commonManager.getAddressAsync(NetworkName.CENTRALITY)
+                        if (addr.isNotEmpty()) {
+                            val actAddress = ACTAddress(addr, ACTNetwork(ACTCoin.Centrality, false))
+                            addressesManager[symbolName] = arrayOf(actAddress)
+                        }
                     } catch (e: Exception) {
                         logger.e(e) { "Failed to get Centrality address" }
                     }

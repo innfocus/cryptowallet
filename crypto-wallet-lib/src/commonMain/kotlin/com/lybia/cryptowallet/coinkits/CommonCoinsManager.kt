@@ -96,6 +96,19 @@ class CommonCoinsManager(
         return getOrCreateManager(coin).getAddress()
     }
 
+    /**
+     * Get address with async initialization support.
+     * For chains like Centrality that require an API call to derive the address,
+     * this method ensures the address is initialized before returning.
+     */
+    suspend fun getAddressAsync(coin: NetworkName): String {
+        val manager = getOrCreateManager(coin)
+        if (coin == NetworkName.CENTRALITY && manager is CentralityManager) {
+            return manager.getAddressAsync()
+        }
+        return manager.getAddress()
+    }
+
     // ── Balance queries ─────────────────────────────────────────────────────
 
     suspend fun getBalance(coin: NetworkName, address: String? = null): BalanceResult {

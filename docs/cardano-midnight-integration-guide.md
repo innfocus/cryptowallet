@@ -548,8 +548,14 @@ Hướng dẫn cho app cũ đang dùng code trực tiếp từ `androidMain` chu
 |---|---|
 | `CoinsManager.shared.addresses(ACTCoin.Bitcoin)` | `manager.getAddress(NetworkName.BTC)` |
 | `CoinsManager.shared.getBalance(ACTCoin.Cardano, ...)` | `manager.getBalance(NetworkName.CARDANO)` |
+| `com.lybia.cryptowallet.coinkits.cardano.helpers.ADACoin` | `ACTCoin.Cardano.unitValue()` (= 1,000,000.0) |
+| `Gada.shared.addressUsed(addresses, handler)` | `CardanoApiService.getTransactionHistory()` + filter |
+| `ADAAddressUsedHandle` | Định nghĩa callback cục bộ trong app |
 | `CentralityNetwork.shared.sendCoin(...)` | `manager.sendCentrality(from, to, amount)` |
+| `CentralityNetwork.BASE_UNIT` | `CentralityManager.BASE_UNIT` (= 10000) |
 | `CentralityNetwork.shared.scanAccount(...)` | `manager.getCentralityBalance()` |
+| `CentralityNetwork.shared.transactions(...)` | `manager.getCentralityTransactions()` |
+| `CentralityNetwork.shared.getPublicAddress(seed, handler)` | `manager.getAddress(NetworkName.CENTRALITY)` hoặc `CentralityApiService.getPublicAddress(seed)` |
 | Callback-based (`completionHandler`) | Suspend functions (coroutines) |
 | Gson `@SerializedName` | kotlinx `@SerialName` |
 | `java.math.BigInteger` | `com.ionspin.kotlin.bignum.integer.BigInteger` |
@@ -591,6 +597,92 @@ import com.lybia.cryptowallet.wallets.centrality.codec.ScaleCodec
 import com.lybia.cryptowallet.wallets.centrality.model.*
 ```
 
+### ADACoin constant migration
+
+Hằng số `ADACoin` (giá trị `1000000`) trước đây nằm ở `com.lybia.cryptowallet.coinkits.cardano.helpers.ADACoin`, dùng để chuyển đổi giữa ADA và lovelace (1 ADA = 1,000,000 lovelace). Hằng số này đã bị xóa khỏi thư viện khi migrate.
+
+Cách thay thế (chọn 1 trong 2):
+
+```kotlin
+// ─── Cách 1 (recommended): Dùng ACTCoin.unitValue() ────────────────
+import com.lybia.cryptowallet.enums.ACTCoin
+
+// Trước:
+// import com.lybia.cryptowallet.coinkits.cardano.helpers.ADACoin
+// val ada = lovelace / ADACoin
+
+// Sau:
+val ada = lovelace / ACTCoin.Cardano.unitValue()  // unitValue() = 1_000_000.0
+val lovelace = (ada * ACTCoin.Cardano.unitValue()).toLong()
+
+// ─── Cách 2: Định nghĩa hằng số cục bộ trong app ──────────────────
+companion object {
+    const val ADA_COIN = 1_000_000L  // 1 ADA = 1,000,000 lovelace
+}
+val ada = lovelace.toDouble() / ADA_COIN
+```
+
+Các file trong app cần cập nhật: `StakedCoinsFragment`, `StakeDetailsFragment`, `WalletCardanoManager`, `WalletCardanoShelleyManager` — thay tất cả `ADACoin` bằng `ACTCoin.Cardano.unitValue()` hoặc hằng số cục bộ.
+
+### Gada.shared.addressUsed() migration
+
+`Gada.shared.addressUsed(addresses, handler)` trước đây gọi Cardano API để kiểm tra danh sách address nào đã có giao dịch (đã sử dụng). Class `Gada` và callback interface `ADAAddressUsedHandle` đã bị xóa khỏi thư viện.
+
+Trong commonMain, `CardanoApiService` không có method `addressUsed()` riêng. Thay vào đó, dùng `getTransactionHistory()` hoặc `getUtxos()` để kiểm tra:
+
+```kotlin
+// ─── Trước (androidMain, callback-based) ────────────────────────────
+import com.lybia.cryptowallet.coinkits.cardano.networking.Gada
+import com.lybia.cryptowallet.coinkits.cardano.networking.ADAAddressUsedHandle
+
+Gada.shared.addressUsed(addresses) { usedAddresses, error ->
+    // usedAddresses: Array<String> — danh sách address đã có giao dịch
+}
+
+// ─── Sau (commonMain, coroutine) ────────────────────────────────────
+import com.lybia.cryptowallet.services.CardanoApiService
+
+// Cách 1: Dùng CardanoApiService trực tiếp
+val cardanoApi = CardanoApiService(baseUrl = "...", apiKey = "...")
+
+suspend fun getUsedAddresses(addresses: List<String>): List<String> {
+    return addresses.filter { address ->
+        try {
+            val txs = cardanoApi.getTransactionHistory(listOf(address))
+            txs.isNotEmpty()
+        } catch (e: Exception) {
+            false
+        }
+    }
+}
+
+// Cách 2: Coroutine bridge trong app (giữ callback pattern cũ)
+fun checkAddressUsed(
+    addresses: List<String>,
+    callback: (usedAddresses: List<String>, error: Throwable?) -> Unit
+) {
+    lifecycleScope.launch {
+        try {
+            val used = getUsedAddresses(addresses)
+            callback(used, null)
+        } catch (e: Exception) {
+            callback(emptyList(), e)
+        }
+    }
+}
+```
+
+Nếu app cần callback interface tương tự `ADAAddressUsedHandle`, định nghĩa cục bộ:
+
+```kotlin
+// Định nghĩa trong app (không cần import từ thư viện)
+interface ADAAddressUsedHandle {
+    fun completionHandler(addressUsed: Array<String>, err: Throwable?)
+}
+```
+
+Các file cần cập nhật: `WalletCardanoManager`, `WalletCardanoShelleyManager`, `CoinAddressAdaFragment`.
+
 ### Centrality migration (chi tiết)
 
 Centrality đã được migrate hoàn toàn từ `androidMain` sang `commonMain`. Legacy code đã bị xóa.
@@ -616,6 +708,133 @@ launch {
     val send = manager.sendCentrality(from, to, amount, assetId)
 }
 ```
+
+Hằng số `CentralityNetwork.BASE_UNIT` (= `10000`) giờ nằm ở:
+
+```kotlin
+// Trước:
+// import com.lybia.cryptowallet.coinkits.centrality.CentralityNetwork
+// val cennz = rawBalance / CentralityNetwork.BASE_UNIT
+
+// Sau:
+import com.lybia.cryptowallet.wallets.centrality.CentralityManager
+val cennz = rawBalance.toDouble() / CentralityManager.BASE_UNIT  // 10000
+```
+
+`CentralityNetwork.shared.scanAccount(address, assetId, handler)` trước đây trả về balance qua callback. Giờ có 2 cách:
+
+```kotlin
+// ─── Trước (callback) ───────────────────────────────────────────────
+CentralityNetwork.shared.scanAccount(address, assetId) { balance, success ->
+    // balance: Double (đã chia BASE_UNIT)
+}
+
+// ─── Sau — Cách 1: Dùng CommonCoinsManager (recommended) ───────────
+launch {
+    val result = manager.getCentralityBalance(address)
+    // result.balance: Double (đã chia BASE_UNIT), result.success, result.error
+}
+
+// ─── Sau — Cách 2: Dùng CentralityApiService trực tiếp ─────────────
+import com.lybia.cryptowallet.services.CentralityApiService
+import com.lybia.cryptowallet.wallets.centrality.CentralityManager
+
+val api = CentralityApiService()
+launch {
+    val account = api.scanAccount(address)  // ScanAccount(address, nonce, balances)
+    val asset = account.balances.find { it.assetId == assetId }
+    val balance = (asset?.free?.toDouble() ?: 0.0) / CentralityManager.BASE_UNIT
+}
+```
+
+`CentralityNetwork.shared.sendCoin(from, to, amount, assetId, handler)` trước đây là callback hell 7 cấp. Giờ là suspend function:
+
+```kotlin
+// ─── Trước (callback hell) ──────────────────────────────────────────
+CentralityNetwork.shared.sendCoin(from, to, amount, assetId) { txHash, success, error ->
+    runOnUiThread { /* handle result */ }
+}
+
+// ─── Sau — Cách 1: Dùng CommonCoinsManager (recommended) ───────────
+launch {
+    val result = manager.sendCentrality(
+        fromAddress = "cX...",
+        toAddress = "cX...",
+        amount = 1.5,       // đơn vị CENNZ (tự nhân BASE_UNIT bên trong)
+        assetId = 1
+    )
+    // SendResult(txHash, success, error)
+    if (result.success) println("TX: ${result.txHash}")
+}
+
+// ─── Sau — Cách 2: Dùng CentralityManager trực tiếp ────────────────
+import com.lybia.cryptowallet.wallets.centrality.CentralityManager
+
+val centralityManager = CentralityManager(mnemonic = mnemonic)
+launch {
+    val result = centralityManager.sendCoin(from, to, amount, assetId)
+    // TransferResponseModel(success, error, txHash)
+    // Bên trong tự orchestrate: getRuntimeVersion → chainGetBlockHash →
+    //   chainGetFinalizedHead → chainGetHeader → systemAccountNextIndex →
+    //   build ExtrinsicBuilder → signMessage → submitExtrinsic
+}
+```
+
+`CentralityNetwork.shared.transactions(address, assetId, row, page, handler)` trước đây trả về lịch sử giao dịch qua callback:
+
+```kotlin
+// ─── Trước (callback) ───────────────────────────────────────────────
+CentralityNetwork.shared.transactions(address, assetId, 100, 0) { transfers, success ->
+    // transfers: List<CennzTransfer>
+}
+
+// ─── Sau — Cách 1: Dùng CommonCoinsManager (recommended) ───────────
+launch {
+    val txs = manager.getCentralityTransactions(address)
+    // Trả về List<CennzTransfer> (đã filter theo assetId và success=true)
+}
+
+// ─── Sau — Cách 2: Dùng CentralityApiService trực tiếp ─────────────
+import com.lybia.cryptowallet.services.CentralityApiService
+
+val api = CentralityApiService()
+launch {
+    val result = api.scanTransfers(address, row = 100, page = 0)
+    // ScanTransfer(transfers: List<CennzTransfer>, count: Long)
+    val filtered = result.transfers.filter { it.assetId == assetId && it.success }
+}
+```
+
+`CentralityNetwork.shared.getPublicAddress(seed, handler)` trước đây trả về address + publicKey qua callback:
+
+```kotlin
+// ─── Trước (callback) ───────────────────────────────────────────────
+CentralityNetwork.shared.getPublicAddress(seed) { address, publicKey ->
+    // address: String, publicKey: String
+}
+
+// ─── Sau — Cách 1: Dùng CommonCoinsManager (recommended) ───────────
+val address = manager.getAddress(NetworkName.CENTRALITY)  // synchronous (cached)
+
+// Lần đầu gọi getBalance/getCentralityBalance sẽ tự resolve address
+launch {
+    val balance = manager.getCentralityBalance()
+    // address đã được resolve và cache bên trong
+}
+
+// ─── Sau — Cách 2: Dùng CentralityApiService trực tiếp ─────────────
+import com.lybia.cryptowallet.services.CentralityApiService
+
+val api = CentralityApiService()
+launch {
+    val centralityAddress = api.getPublicAddress(seedHex)
+    // CentralityAddress(address: String, publicKey: ByteArray?)
+    val address = centralityAddress.address
+    val pubKey = centralityAddress.publicKey
+}
+```
+
+> Lưu ý: `manager.getAddress(NetworkName.CENTRALITY)` trả về `""` nếu chưa gọi suspend function nào (address chưa được resolve từ API). Gọi `getBalance()` hoặc `getCentralityBalance()` trước sẽ tự resolve và cache address.
 
 ### SCALE Codec migration
 
