@@ -14,4 +14,8 @@ object Urls {
         return "https://api.blockcypher.com/v1/btc/${network}/txs/new"
     }
 
+    fun getBitcoinApiSendTransaction(network: String): String{
+        return "https://api.blockcypher.com/v1/btc/${network}/txs/send"
+    }
+
 }

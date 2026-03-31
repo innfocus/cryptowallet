@@ -18,6 +18,7 @@ class CoinNetwork(
                     NetworkName.TON -> "https://toncenter.com/api/v2/jsonRPC"
                     NetworkName.CARDANO -> ""
                     NetworkName.MIDNIGHT -> ""
+                    NetworkName.XRP -> ""
                 }
             }
             Network.TESTNET -> {
@@ -28,6 +29,7 @@ class CoinNetwork(
                     NetworkName.TON -> "https://testnet.toncenter.com/api/v2/jsonRPC"
                     NetworkName.CARDANO -> ""
                     NetworkName.MIDNIGHT -> ""
+                    NetworkName.XRP -> ""
                 }
             }
         }
@@ -43,6 +45,7 @@ class CoinNetwork(
                     NetworkName.TON -> "https://tonscan.org"
                     NetworkName.CARDANO -> "https://cardanoscan.io"
                     NetworkName.MIDNIGHT -> "https://explorer.midnight.network"
+                    NetworkName.XRP -> ""
                 }
             }
             Network.TESTNET -> {
@@ -53,6 +56,7 @@ class CoinNetwork(
                     NetworkName.TON -> "https://testnet.tonscan.org"
                     NetworkName.CARDANO -> "https://preprod.cardanoscan.io"
                     NetworkName.MIDNIGHT -> "https://explorer.testnet.midnight.network"
+                    NetworkName.XRP -> ""
                 }
             }
         }
@@ -73,12 +77,10 @@ class CoinNetwork(
             NetworkName.TON -> ""
             NetworkName.CARDANO -> ""
             NetworkName.MIDNIGHT -> ""
+            NetworkName.XRP -> ""
         }
     }
 
-    /**
-     * Get the Blockfrost API base URL for Cardano.
-     */
     fun getBlockfrostUrl(): String {
         return when (Config.shared.getNetwork()) {
             Network.MAINNET -> "https://cardano-mainnet.blockfrost.io/api/v0"
@@ -86,13 +88,17 @@ class CoinNetwork(
         }
     }
 
-    /**
-     * Get the Midnight API base URL.
-     */
     fun getMidnightApiUrl(): String {
         return when (Config.shared.getNetwork()) {
             Network.MAINNET -> "https://midnight.api.midnight.network/api/v0"
             Network.TESTNET -> "https://midnight-testnet.api.midnight.network/api/v0"
+        }
+    }
+
+    fun getRippleRpcUrl(): String {
+        return when (Config.shared.getNetwork()) {
+            Network.MAINNET -> "https://s1.ripple.com:51234/"
+            Network.TESTNET -> "https://s.altnet.rippletest.net:51234/"
         }
     }
 }

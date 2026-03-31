@@ -5,6 +5,7 @@ import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import kotlin.test.BeforeTest
+import kotlin.test.Ignore
 import kotlin.test.Test
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -60,6 +61,7 @@ class BitcoinManagerTest {
     }
 
     @Test
+    @Ignore("Requires network access and funded testnet wallet")
     fun testTransactionHistory() = runBlocking {
         bitcoinManager.getNativeSegWitAddress()
         val transactionHistory = bitcoinManager.getTransactionHistory()

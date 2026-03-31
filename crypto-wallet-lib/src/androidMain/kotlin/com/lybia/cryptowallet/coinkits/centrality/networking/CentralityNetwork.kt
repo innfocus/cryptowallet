@@ -23,8 +23,8 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
 import com.lybia.cryptowallet.coinkits.CoinsManager
-import com.lybia.cryptowallet.coinkits.hdwallet.bip32.ACTCoin
-import com.lybia.cryptowallet.coinkits.hdwallet.bip32.ACTNetwork
+import com.lybia.cryptowallet.enums.ACTCoin
+import com.lybia.cryptowallet.enums.ACTNetwork
 
 class CENNZ_API {
     companion object {
@@ -151,6 +151,7 @@ private interface CentralityApiServices {
     }
 }
 
+@Deprecated("Centrality is Android-only legacy code. Will be migrated to commonMain in a future phase.", level = DeprecationLevel.WARNING)
 class CentralityNetwork {
 
     companion object {

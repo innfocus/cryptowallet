@@ -20,6 +20,9 @@ class BitcoinApiService {
         val INSTANCE: BitcoinApiService = BitcoinApiService()
     }
 
+    /**
+     * Get balance for a single address (in satoshis as string).
+     */
     suspend fun getBalance(address: String): String? {
         try {
             val network = when (Config.shared.getNetwork()) {
@@ -42,6 +45,25 @@ class BitcoinApiService {
             } else {
                 return null
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
+
+    /**
+     * Get combined balance for multiple addresses (returns total in satoshis as string).
+     */
+    suspend fun getMultiAddressBalance(addresses: List<String>): String? {
+        try {
+            var totalBalance = 0L
+            for (address in addresses) {
+                val balanceStr = getBalance(address)
+                if (balanceStr != null) {
+                    totalBalance += balanceStr.toLongOrNull() ?: 0L
+                }
+            }
+            return totalBalance.toString()
         } catch (e: Exception) {
             e.printStackTrace()
             return null
@@ -117,6 +139,34 @@ class BitcoinApiService {
             if (response.status.value in 200..299) {
                 val rpcResponse = response.body<BitcoinTransactionModel?>()
                 return rpcResponse
+            } else {
+                return null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
+
+    /**
+     * Send a signed Bitcoin transaction via BlockCypher.
+     */
+    suspend fun sendTransaction(signedTxModel: BitcoinTransactionModel): BitcoinTransactionModel? {
+        try {
+            val network = when (Config.shared.getNetwork()) {
+                Network.MAINNET -> "main"
+                else -> "test3"
+            }
+            val response =
+                HttpClientService.INSTANCE.client.post(Urls.getBitcoinApiSendTransaction(network)) {
+                    headers {
+                        append(HttpHeaders.Accept, "application/json")
+                    }
+                    contentType(ContentType.Application.Json)
+                    setBody(signedTxModel)
+                }
+            if (response.status.value in 200..299) {
+                return response.body<BitcoinTransactionModel?>()
             } else {
                 return null
             }

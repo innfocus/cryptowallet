@@ -98,21 +98,11 @@ kotlin {
 
                 implementation(libs.kotlin.unsigned)
                 implementation(libs.kotlin.stdlib.jdk8)
-                implementation(libs.cbor)
-                implementation(libs.spongycastle.core)
-                implementation(libs.prov)
-                implementation(libs.curve25519.android)
-                implementation(libs.guava)
-
-                implementation(libs.rxjava)
-                implementation(libs.rxandroid)
-                implementation(libs.rxkotlin)
 
                 implementation(libs.gson)
                 implementation(libs.retrofit)
                 implementation(libs.converter.gson)
                 implementation(libs.okhttp)
-                implementation(libs.adapter.rxjava2)
 
                 implementation(libs.mockito.core)
 

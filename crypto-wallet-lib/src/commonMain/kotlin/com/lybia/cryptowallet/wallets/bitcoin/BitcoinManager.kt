@@ -137,7 +137,8 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
 
             require(Crypto.verifySignature(data, encoded, publicKey)) { "Invalid signature" }
 
-            val sig = Crypto.compact2der(encoded)
+            // encoded is already in DER format in bitcoin-kmp 0.30+
+            val sig = encoded
 
             pubsKey.add(publicKey.value.toString())
 

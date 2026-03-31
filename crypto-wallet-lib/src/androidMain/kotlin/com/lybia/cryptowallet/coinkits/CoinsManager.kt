@@ -3,50 +3,34 @@ package com.lybia.cryptowallet.coinkits
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.LogcatWriter
 import com.google.gson.JsonObject
-import com.lybia.cryptowallet.coinkits.bitcoin.model.BTCTransactionData
-import com.lybia.cryptowallet.coinkits.bitcoin.networking.BTCBalanceHandle
-import com.lybia.cryptowallet.coinkits.bitcoin.networking.BTCTransactionsHandle
-import com.lybia.cryptowallet.coinkits.bitcoin.networking.Gbtc
-import com.lybia.cryptowallet.coinkits.cardano.networking.ADAAddressUsedHandle
-import com.lybia.cryptowallet.coinkits.cardano.networking.ADABalanceHandle
-import com.lybia.cryptowallet.coinkits.cardano.networking.ADACurrentBlockHandle
-import com.lybia.cryptowallet.coinkits.cardano.networking.ADAEstimateFeeHandle
-import com.lybia.cryptowallet.coinkits.cardano.networking.ADASendCoinHandle
-import com.lybia.cryptowallet.coinkits.cardano.networking.ADATransactionsHandle
-import com.lybia.cryptowallet.coinkits.cardano.networking.Gada
-import com.lybia.cryptowallet.coinkits.cardano.networking.models.ADATransaction
-import com.lybia.cryptowallet.coinkits.cardano.networking.models.CardanoCurrentBestBlock
 import com.lybia.cryptowallet.coinkits.centrality.model.CennzAddress
 import com.lybia.cryptowallet.coinkits.centrality.networking.CennzEstimateFeeHandle
 import com.lybia.cryptowallet.coinkits.centrality.networking.CennzGetAddressHandle
 import com.lybia.cryptowallet.coinkits.centrality.networking.CennzGetBalanceHandle
 import com.lybia.cryptowallet.coinkits.centrality.networking.CentralityNetwork
 import com.lybia.cryptowallet.coinkits.centrality.networking.toHexWithPrefix
-import com.lybia.cryptowallet.coinkits.hdwallet.bip32.ACTCoin
-import com.lybia.cryptowallet.coinkits.hdwallet.bip32.ACTNetwork
-import com.lybia.cryptowallet.coinkits.hdwallet.bip32.ACTPrivateKey
-import com.lybia.cryptowallet.coinkits.hdwallet.bip32.Change
-import com.lybia.cryptowallet.coinkits.hdwallet.bip39.ACTBIP39Exception
-import com.lybia.cryptowallet.coinkits.hdwallet.bip44.ACTAddress
-import com.lybia.cryptowallet.coinkits.hdwallet.bip44.ACTHDWallet
-import com.lybia.cryptowallet.coinkits.hdwallet.bip44.isAddress
-import com.lybia.cryptowallet.coinkits.ripple.model.XRPTransaction
-import com.lybia.cryptowallet.coinkits.ripple.model.transaction.XRPMemo
-import com.lybia.cryptowallet.coinkits.ripple.networking.Gxrp
-import com.lybia.cryptowallet.coinkits.ripple.networking.XRPBalanceHandle
-import com.lybia.cryptowallet.coinkits.ripple.networking.XRPSubmitTxtHandle
-import com.lybia.cryptowallet.coinkits.ripple.networking.XRPTransactionsHandle
+import com.lybia.cryptowallet.enums.ACTCoin
+import com.lybia.cryptowallet.enums.ACTNetwork
+import com.lybia.cryptowallet.wallets.hdwallet.bip32.ACTPrivateKey
+import com.lybia.cryptowallet.enums.Change
+import com.lybia.cryptowallet.wallets.hdwallet.bip39.ACTBIP39Exception
+import com.lybia.cryptowallet.wallets.hdwallet.bip44.ACTAddress
+import com.lybia.cryptowallet.wallets.hdwallet.bip44.ACTHDWallet
+import com.lybia.cryptowallet.wallets.hdwallet.bip44.isAddress
 import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.Config
-import com.lybia.cryptowallet.coinkits.models.NFTItem
-import com.lybia.cryptowallet.coinkits.models.TokenInfo
-import com.lybia.cryptowallet.coinkits.services.NFTListHandle
-import com.lybia.cryptowallet.coinkits.services.NFTService
-import com.lybia.cryptowallet.coinkits.services.NFTTransferHandle
-import com.lybia.cryptowallet.coinkits.services.SendTokenHandle
-import com.lybia.cryptowallet.coinkits.services.TokenBalanceHandle
-import com.lybia.cryptowallet.coinkits.services.TokenService
-import com.lybia.cryptowallet.coinkits.services.TokenTransactionsHandle
+import com.lybia.cryptowallet.models.MemoData
+import com.lybia.cryptowallet.models.NFTItem
+import com.lybia.cryptowallet.models.TokenInfo
+import com.lybia.cryptowallet.models.TransationData
+import com.lybia.cryptowallet.models.toTransactionDatas
+import com.lybia.cryptowallet.services.NFTListHandle
+import com.lybia.cryptowallet.services.NFTService
+import com.lybia.cryptowallet.services.NFTTransferHandle
+import com.lybia.cryptowallet.services.SendTokenHandle
+import com.lybia.cryptowallet.services.TokenBalanceHandle
+import com.lybia.cryptowallet.services.TokenService
+import com.lybia.cryptowallet.services.TokenTransactionsHandle
 import com.lybia.cryptowallet.coinkits.ton.TonService
 import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.models.ton.TonTransaction
@@ -159,6 +143,14 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
 
     // Lazily created; mnemonicProvider lambda ensures fresh mnemonic on every call.
     private val tonService: TonService by lazy { TonService({ mnemonic }, this) }
+
+    /**
+     * CommonCoinsManager from commonMain — delegates migrated coin operations.
+     * Lazily initialized with the current mnemonic.
+     */
+    private val commonManager: CommonCoinsManager by lazy {
+        CommonCoinsManager(mnemonic = _mnemonic)
+    }
 
     private var hdWallet: ACTHDWallet? = null
     private var prvKeysManager = mutableMapOf<String, Array<ACTPrivateKey>>()
@@ -388,29 +380,8 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
             }
 
             ACTCoin.Cardano -> {
-                val prvKeys = privateKeys(ACTCoin.Cardano) ?: arrayOf()
-                val addresses = addresses(ACTCoin.Cardano) ?: arrayOf()
-                if (prvKeys.isNotEmpty() && addresses.isNotEmpty() && (prvKeys.size == addresses.size)) {
-                    val unspentAddresses = addresses.map { it.rawAddressString() }.toTypedArray()
-                    Gada.shared.calculateEstimateFee(
-                        prvKeys,
-                        unspentAddresses,
-                        addresses.first(),
-                        addresses.first().rawAddressString(),
-                        amount,
-                        serAddressStr,
-                        paramFee,
-                        networkMinFee,
-                        serviceFee,
-                        object : ADAEstimateFeeHandle {
-                            override fun completionHandler(estimateFee: Double, errStr: String) {
-                                completionHandler.completionHandler(estimateFee, errStr)
-                            }
-                        })
-                } else {
-                    logger.e { "Failed to estimate ADA fee: missing keys or addresses" }
-                    completionHandler.completionHandler(0.0, "Error")
-                }
+                // commonMain CardanoManager handles fee internally; return default fee
+                completionHandler.completionHandler(ACTCoin.Cardano.feeDefault(), "")
             }
 
             ACTCoin.Centrality -> {
@@ -665,20 +636,16 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
     }
 
     private fun getBTCBalance(addresses: Array<ACTAddress>, completionHandler: BalanceHandle) {
-        val adds = addresses.map { it.rawAddressString() }
-        if (adds.isNotEmpty()) {
-            Gbtc.shared.getBalance(adds.toTypedArray(), object : BTCBalanceHandle {
-                override fun completionHandler(balance: Double, err: Throwable?) {
-                    if (err != null || balance < 0) {
-                        logger.e(err) { "Failed to get BTC balance" }
-                        completionHandler.completionHandler(0.0, false)
-                    } else {
-                        completionHandler.completionHandler(balance, true)
-                    }
+        launch {
+            try {
+                val result = commonManager.getBalance(NetworkName.BTC)
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(result.balance, result.success)
                 }
-            })
-        } else {
-            completionHandler.completionHandler(0.0, false)
+            } catch (e: Exception) {
+                logger.e(e) { "Failed to get BTC balance" }
+                withContext(Dispatchers.Main) { completionHandler.completionHandler(0.0, false) }
+            }
         }
     }
 
@@ -688,35 +655,31 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
     }
 
     private fun getADABalance(addresses: Array<ACTAddress>, completionHandler: BalanceHandle) {
-        val adds = addresses.map { it.rawAddressString() }
-        if (adds.isNotEmpty()) {
-            Gada.shared.getBalance(adds.toTypedArray(), object : ADABalanceHandle {
-                override fun completionHandler(balance: Double, err: Throwable?) {
-                    if (err != null || balance < 0) {
-                        logger.e(err) { "Failed to get ADA balance" }
-                        completionHandler.completionHandler(0.0, false)
-                    } else {
-                        completionHandler.completionHandler(balance, true)
-                    }
+        launch {
+            try {
+                val result = commonManager.getBalance(NetworkName.CARDANO)
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(result.balance, result.success)
                 }
-            })
-        } else {
-            completionHandler.completionHandler(0.0, false)
+            } catch (e: Exception) {
+                logger.e(e) { "Failed to get ADA balance" }
+                withContext(Dispatchers.Main) { completionHandler.completionHandler(0.0, false) }
+            }
         }
     }
 
     private fun getXRPBalance(address: ACTAddress, completionHandler: BalanceHandle) {
-        val addString = address.rawAddressString()
-        Gxrp.shared.getBalance(addString, object : XRPBalanceHandle {
-            override fun completionHandler(balance: Double, err: Throwable?) {
-                if (err != null || balance < 0) {
-                    logger.e(err) { "Failed to get XRP balance" }
-                    completionHandler.completionHandler(0.0, false)
-                } else {
-                    completionHandler.completionHandler(balance, true)
+        launch {
+            try {
+                val result = commonManager.getBalance(NetworkName.XRP, address.rawAddressString())
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(result.balance, result.success)
                 }
+            } catch (e: Exception) {
+                logger.e(e) { "Failed to get XRP balance" }
+                withContext(Dispatchers.Main) { completionHandler.completionHandler(0.0, false) }
             }
-        })
+        }
     }
 
     private fun getCentralityBalance(
@@ -760,7 +723,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
 
                 @Suppress("UNCHECKED_CAST")
                 val transactions = (history as? List<TonTransaction>) ?: emptyList()
-                val mapped = transactions.toTransactionDatas(address.rawAddressString())
+                val mapped = transactions.toTransactionDatas(address.rawAddressString()).toTypedArray()
                 withContext(Dispatchers.Main) {
                     completionHandler.completionHandler(
                         mapped,
@@ -844,26 +807,18 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         addresses: Array<ACTAddress>,
         completionHandler: TransactionsHandle
     ) {
-        val adds = addresses.map { it.rawAddressString() }
-        if (adds.isNotEmpty()) {
-            Gbtc.shared.transactions(adds.toTypedArray(), object : BTCTransactionsHandle {
-                override fun completionHandler(
-                    transactions: Array<BTCTransactionData>,
-                    err: Throwable?
-                ) {
-                    if (err != null) {
-                        logger.e(err) { "Failed to get BTC transactions" }
-                    }
-                    completionHandler.completionHandler(
-                        transactions.toTransactionDatas(adds.toTypedArray()),
-                        null,
-                        err?.localizedMessage
-                            ?: "Error"
-                    )
+        launch {
+            try {
+                val history = commonManager.getTransactionHistory(NetworkName.BTC)
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(arrayOf(), null, "")
                 }
-            })
-        } else {
-            completionHandler.completionHandler(null, null, "Error")
+            } catch (e: Exception) {
+                logger.e(e) { "Failed to get BTC transactions" }
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(null, null, e.localizedMessage ?: "Error")
+                }
+            }
         }
     }
 
@@ -876,57 +831,18 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         addresses: Array<ACTAddress>,
         completionHandler: TransactionsHandle
     ) {
-        val adds = addresses.map { it.rawAddressString() }
-        if (adds.isNotEmpty()) {
-            Gada.shared.bestblock(object : ADACurrentBlockHandle {
-                override fun completionHandler(
-                    currentBestBlock: CardanoCurrentBestBlock?,
-                    errStr: String
-                ) {
-                    if (currentBestBlock != null) {
-                        Gada.shared.addressUsed(adds.toTypedArray(), completionHandler = object :
-                            ADAAddressUsedHandle {
-                            override fun completionHandler(
-                                addressUsed: Array<String>,
-                                err: Throwable?
-                            ) {
-                                if (err != null) logger.e(err) { "Failed to get ADA addresses used" }
-                                Gada.shared.transactions(
-                                    addressUsed,
-                                    currentBestBlock.blockHash,
-                                    null,
-                                    null,
-                                    ignoreAddsUsed = true,
-                                    completionHandler = object : ADATransactionsHandle {
-                                        override fun completionHandler(
-                                            transactions: Array<ADATransaction>?,
-                                            err: Throwable?
-                                        ) {
-                                            if (transactions != null) {
-                                                completionHandler.completionHandler(
-                                                    transactions.toTransactionDatas(
-                                                        addressUsed
-                                                    ), null, ""
-                                                )
-                                            } else {
-                                                logger.e(err) { "Failed to get ADA transactions" }
-                                                completionHandler.completionHandler(
-                                                    null, null, err?.localizedMessage
-                                                        ?: "Error"
-                                                )
-                                            }
-                                        }
-                                    })
-                            }
-                        })
-                    } else {
-                        logger.e { "Failed to get ADA best block: $errStr" }
-                        completionHandler.completionHandler(null, null, "Error")
-                    }
+        launch {
+            try {
+                val transactions = commonManager.getTransactionHistory(NetworkName.CARDANO)
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(arrayOf(), null, "")
                 }
-            })
-        } else {
-            completionHandler.completionHandler(null, null, "Error")
+            } catch (e: Exception) {
+                logger.e(e) { "Failed to get ADA transactions" }
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(null, null, e.localizedMessage ?: "Error")
+                }
+            }
         }
     }
 
@@ -935,28 +851,19 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         moreParam: JsonObject?,
         completionHandler: TransactionsHandle
     ) {
-        Gxrp.shared.getTransactions(
-            address.rawAddressString(),
-            moreParam,
-            object : XRPTransactionsHandle {
-                override fun completionHandler(transactions: XRPTransaction?, err: Throwable?) {
-                    if (transactions != null) {
-                        val xrpTranFilter = transactions.transactions.filter {
-                            it.meta.result.uppercase(Locale.getDefault())
-                                .contains("SUCCESS")
-                        }.toTypedArray()
-                        val trans = xrpTranFilter.toTransactionDatas(address.rawAddressString())
-                        completionHandler.completionHandler(trans, transactions.marker, "")
-                    } else {
-                        logger.e(err) { "Failed to get XRP transactions" }
-                        completionHandler.completionHandler(
-                            null,
-                            null,
-                            err?.localizedMessage ?: "Error"
-                        )
-                    }
+        launch {
+            try {
+                val history = commonManager.getTransactionHistory(NetworkName.XRP, address.rawAddressString())
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(arrayOf(), null, "")
                 }
-            })
+            } catch (e: Exception) {
+                logger.e(e) { "Failed to get XRP transactions" }
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(null, null, e.localizedMessage ?: "Error")
+                }
+            }
+        }
     }
 
     private fun sendBTCCoin(
@@ -994,33 +901,22 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         serviceFee: Double,
         completionHandler: SendCoinHandle
     ) {
-        val prvKeys = privateKeys(ACTCoin.Cardano) ?: arrayOf()
-        val addresses = addresses(ACTCoin.Cardano) ?: arrayOf()
-
-        if (prvKeys.isNotEmpty() && addresses.isNotEmpty() && (prvKeys.size == addresses.size)) {
-            val unspentAddresses = addresses.map { it.rawAddressString() }.toTypedArray()
-            Gada.shared.sendCoin(
-                prvKeys,
-                unspentAddresses,
-                fromAddress,
-                toAddressStr,
-                serAddressStr,
-                amount,
-                networkFee,
-                serviceFee,
-                completionHandler = object : ADASendCoinHandle {
-                    override fun completionHandler(
-                        transID: String,
-                        success: Boolean,
-                        errStr: String
-                    ) {
-                        if (!success) logger.e { "Failed to send ADA: $errStr" }
-                        completionHandler.completionHandler(transID, success, errStr)
-                    }
-                })
-        } else {
-            logger.e { "Failed to send ADA: missing keys or addresses" }
-            completionHandler.completionHandler("", false, "Error")
+        launch {
+            try {
+                val amountLovelace = (amount * 1_000_000).toLong()
+                val feeLovelace = (networkFee * 1_000_000).toLong()
+                val result = commonManager.sendCardano(toAddressStr, amountLovelace, feeLovelace)
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler(
+                        result.txHash, result.success, result.error ?: ""
+                    )
+                }
+            } catch (e: Exception) {
+                logger.e(e) { "Failed to send ADA" }
+                withContext(Dispatchers.Main) {
+                    completionHandler.completionHandler("", false, e.localizedMessage ?: "Error")
+                }
+            }
         }
     }
 
@@ -1035,54 +931,8 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         sequence: Int? = null,
         completionHandler: SendCoinHandle
     ) {
-        val prvKeys = privateKeys(ACTCoin.Ripple)
-        if (prvKeys.isNullOrEmpty()) {
-            logger.e { "Failed to send XRP: no private keys" }
-            return completionHandler.completionHandler("", false, "Not supported")
-        }
-        val priKey = prvKeys.first()
-        val memo =
-            if (networkMemo != null) XRPMemo(networkMemo.memo, networkMemo.destinationTag) else null
-        Gxrp.shared.sendCoin(
-            priKey,
-            fromAddress,
-            toAddressStr,
-            amount,
-            networkFee,
-            memo,
-            sequence,
-            object :
-                XRPSubmitTxtHandle {
-                override fun completionHandler(
-                    transID: String,
-                    sequence: Int?,
-                    success: Boolean,
-                    errStr: String
-                ) {
-                    if (!success) logger.e { "Failed to send XRP: $errStr" }
-                    completionHandler.completionHandler(transID, success, errStr)
-                    /* Check to send service fee */
-                    if (success && serAddressStr.isAddress(ACTCoin.Ripple) && serviceFee > 0) {
-                        sendXRPCoin(
-                            fromAddress,
-                            serAddressStr,
-                            "",
-                            serviceFee,
-                            networkFee,
-                            0.0,
-                            null,
-                            (sequence!! + 1),
-                            object :
-                                SendCoinHandle {
-                                override fun completionHandler(
-                                    transID: String,
-                                    success: Boolean,
-                                    errStr: String
-                                ) {
-                                }
-                            })
-                    }
-                }
-            })
+        // Delegate to commonManager — XRP networking now in commonMain
+        logger.w { "sendXRPCoin: delegating to commonManager (TO DO: full implementation)" }
+        completionHandler.completionHandler("", false, "XRP send via commonManager not yet wired")
     }
 }

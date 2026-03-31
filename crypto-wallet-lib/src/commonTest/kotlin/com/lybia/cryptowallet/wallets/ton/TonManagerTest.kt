@@ -118,8 +118,10 @@ class TonManagerTest {
 
     @Test
     fun testSignDepositToNominatorPool() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
         val tonManager = TonManager(testMnemonic)
-        val poolAddress = "EQD4S93o-Jv-W-2n-Xp-V_2p-Xp-V_2p-Xp-V_2p-Xp-V_2p"
+        // Use a valid TON address in raw format (workchain:hex) for the pool
+        val poolAddress = "0:d8b602bb622aa7d78222d138d5ca421975e03c30419f2e794111f8be286d143a"
         val amount = 10_000_000_000L // 10 TON
         val seqno = 5
 
@@ -170,17 +172,18 @@ class TonManagerTest {
 
     @Test
     fun testW5MainnetAndTestnetAddressesDiffer() {
-        val mainnetManager = run {
-            Config.shared.setNetwork(Network.MAINNET)
-            TonManager(testMnemonic, WalletVersion.W5)
-        }
-        val testnetManager = run {
-            Config.shared.setNetwork(Network.TESTNET)
-            TonManager(testMnemonic, WalletVersion.W5)
-        }
-        // W5 encodes network in wallet_id → different addresses per network
-        val mainnetAddr = mainnetManager.address.toString(userFriendly = false)
-        val testnetAddr = testnetManager.address.toString(userFriendly = false)
+        // Create both managers (they precompute addresses for both networks at construction)
+        val manager = TonManager(testMnemonic, WalletVersion.W5)
+
+        // W5 encodes networkGlobalId in wallet_id → different addresses per network.
+        // The `address` property reads Config.shared at call time, so we must switch
+        // the global network before each access.
+        Config.shared.setNetwork(Network.MAINNET)
+        val mainnetAddr = manager.address.toString(userFriendly = false)
+
+        Config.shared.setNetwork(Network.TESTNET)
+        val testnetAddr = manager.address.toString(userFriendly = false)
+
         assertTrue(mainnetAddr != testnetAddr, "W5 mainnet/testnet raw addresses must differ")
         println("W5 mainnet raw: $mainnetAddr")
         println("W5 testnet raw: $testnetAddr")
@@ -190,7 +193,8 @@ class TonManagerTest {
     fun testW5SignTransaction() = runTest {
         Config.shared.setNetwork(Network.MAINNET)
         val manager = TonManager(testMnemonic, WalletVersion.W5)
-        val toAddress = "UQBWDfO6S5AGoqbk7i3_HBimCUMJHQqWTasCIPTiXGk0Rq_S"
+        // Use a valid TON address (non-bounceable, mainnet) as destination
+        val toAddress = "UQDYtgK7Yiqn14Ii0TjVykIZdeA8MUGZ8ueUEfi-KG0UOh-o"
         val boc = manager.signTransaction(toAddress, 1_000_000_000L, seqno = 5)
         assertTrue(boc.isNotEmpty(), "W5 signed BOC should not be empty")
         println("W5 signTransaction BOC (seqno=5): $boc")
@@ -200,7 +204,8 @@ class TonManagerTest {
     fun testW5SignTransactionSeqnoZero() = runTest {
         Config.shared.setNetwork(Network.MAINNET)
         val manager = TonManager(testMnemonic, WalletVersion.W5)
-        val toAddress = "UQBWDfO6S5AGoqbk7i3_HBimCUMJHQqWTasCIPTiXGk0Rq_S"
+        // Use a valid TON address (non-bounceable, mainnet) as destination
+        val toAddress = "UQDYtgK7Yiqn14Ii0TjVykIZdeA8MUGZ8ueUEfi-KG0UOh-o"
         val boc = manager.signTransaction(toAddress, 1_000_000_000L, seqno = 0)
         assertTrue(boc.isNotEmpty(), "W5 signed BOC (seqno=0, includes stateInit) should not be empty")
         println("W5 signTransaction BOC (seqno=0): $boc")

@@ -5,6 +5,7 @@ import com.lybia.cryptowallet.coinkits.hdwallet.core.helpers.fromHexToByteArray
 import com.lybia.cryptowallet.coinkits.centrality.networking.toHexWithPrefix
 import com.lybia.cryptowallet.coinkits.centrality.utils.U8a
 
+@Deprecated("Centrality is Android-only legacy code. Will be migrated to commonMain in a future phase.", level = DeprecationLevel.WARNING)
 class ExtrinsicBase {
     var version: Int = 132
     var signature: Signature = Signature()

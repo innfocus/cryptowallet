@@ -3,6 +3,7 @@ package com.lybia.cryptowallet.coinkits.centrality.utils
 import java.math.BigInteger
 import kotlin.math.ceil
 
+@Deprecated("Centrality is Android-only legacy code. Will be migrated to commonMain in a future phase.", level = DeprecationLevel.WARNING)
 object U8a {
     private var MAX_U8 = 2.toBigInteger().pow(8 - 2) - 1.toBigInteger()
     private var MAX_U16 = 2.toBigInteger().pow(16 - 2) - 1.toBigInteger()
