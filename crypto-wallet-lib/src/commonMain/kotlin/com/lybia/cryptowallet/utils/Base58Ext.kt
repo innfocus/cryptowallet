@@ -38,7 +38,7 @@ object Base58Ext {
         }
         while (outputStart < encoded.size && encoded[outputStart] == type.encodedZero()) ++outputStart
         repeat(zeros) { encoded[--outputStart] = type.encodedZero() }
-        return String(encoded, outputStart, encoded.size - outputStart)
+        return encoded.concatToString(outputStart, encoded.size)
     }
 
     fun decode(input: String, type: Base58Type = Base58Type.Basic): ByteArray {

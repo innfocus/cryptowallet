@@ -39,6 +39,7 @@ class WalletAppServiceTest {
     }
 
     @Test
+    @Ignore("Requires network access to staging API")
     fun testCheckOtpSuccess() = runTest {
 
         // Call the method to test
@@ -78,6 +79,7 @@ class WalletAppServiceTest {
     }
 
     @Test
+    @Ignore("Requires network access to staging API")
     fun testGetProfileFail() = runTest {
 
         val exception = assertFailsWith<RequestException> {
