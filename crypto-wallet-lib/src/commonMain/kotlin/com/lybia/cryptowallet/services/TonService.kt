@@ -1,20 +1,12 @@
-package com.lybia.cryptowallet.coinkits.ton
+package com.lybia.cryptowallet.services
 
 import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.models.NFTItem
 import com.lybia.cryptowallet.models.TokenInfo
 import com.lybia.cryptowallet.enums.ACTCoin
-import com.lybia.cryptowallet.services.NFTListHandle
-import com.lybia.cryptowallet.services.NFTService
-import com.lybia.cryptowallet.services.NFTTransferHandle
-import com.lybia.cryptowallet.services.SendTokenHandle
-import com.lybia.cryptowallet.services.TokenBalanceHandle
-import com.lybia.cryptowallet.services.TokenService
-import com.lybia.cryptowallet.services.TokenTransactionsHandle
 import com.lybia.cryptowallet.models.toTransactionDatas
 import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.models.ton.TonTransaction
-import com.lybia.cryptowallet.services.TonApiService
 import com.lybia.cryptowallet.wallets.ton.TonManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,9 +17,9 @@ import kotlin.math.pow
 /**
  * TON-specific implementation of [TokenService] and [NFTService].
  *
- * Wraps [TonManager] (KMP / suspend-based) and exposes Android-style
- * callback methods. Coroutines run on the provided [scope] (from CoinsManager)
- * so lifecycle and cancellation are managed centrally.
+ * Wraps [TonManager] (KMP / suspend-based) and exposes callback methods.
+ * Coroutines run on the provided [scope] so lifecycle and cancellation
+ * are managed centrally.
  *
  * @param mnemonicProvider lambda — always returns the current mnemonic so that
  *   a single TonService instance stays valid after mnemonic changes.
@@ -40,8 +32,6 @@ class TonService(
 
     private val coinNetwork = CoinNetwork(name = NetworkName.TON)
 
-    // Create a fresh TonManager for each operation so mnemonic changes are
-    // picked up without needing to restart TonService.
     private fun manager() = TonManager(mnemonicProvider())
 
     // ─── TokenService ─────────────────────────────────────────────────────────
@@ -54,23 +44,23 @@ class TonService(
         scope.launch {
             try {
                 val mgr = manager()
-                val balance  = mgr.getBalanceToken(address, contractAddress, coinNetwork)
+                val balance = mgr.getBalanceToken(address, contractAddress, coinNetwork)
                 val metadata = mgr.getJettonMetadata(contractAddress, coinNetwork)
                 val info = TokenInfo(
-                    coin            = ACTCoin.TON,
+                    coin = ACTCoin.TON,
                     contractAddress = contractAddress,
-                    name            = metadata?.name,
-                    symbol          = metadata?.symbol,
-                    decimals        = metadata?.decimals ?: 9,
-                    balance         = balance,
-                    imageUrl        = metadata?.image
+                    name = metadata?.name,
+                    symbol = metadata?.symbol,
+                    decimals = metadata?.decimals ?: 9,
+                    balance = balance,
+                    imageUrl = metadata?.image
                 )
                 withContext(Dispatchers.Main) {
                     completionHandler.completionHandler(info, true, "")
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    completionHandler.completionHandler(null, false, e.localizedMessage ?: "Error")
+                    completionHandler.completionHandler(null, false, e.message ?: "Error")
                 }
             }
         }
@@ -85,14 +75,14 @@ class TonService(
             try {
                 val history = manager().getTransactionHistoryToken(address, contractAddress, coinNetwork)
                 @Suppress("UNCHECKED_CAST")
-                val txList  = (history as? List<TonTransaction>) ?: emptyList()
-                val mapped  = txList.toTransactionDatas(address)
+                val txList = (history as? List<TonTransaction>) ?: emptyList()
+                val mapped = txList.toTransactionDatas(address)
                 withContext(Dispatchers.Main) {
                     completionHandler.completionHandler(mapped, "")
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    completionHandler.completionHandler(null, e.localizedMessage ?: "Error")
+                    completionHandler.completionHandler(null, e.message ?: "Error")
                 }
             }
         }
@@ -108,16 +98,16 @@ class TonService(
     ) {
         scope.launch {
             try {
-                val mgr        = manager()
-                val seqno      = mgr.getSeqno(coinNetwork)
+                val mgr = manager()
+                val seqno = mgr.getSeqno(coinNetwork)
                 val amountNano = (amount * 10.0.pow(decimals)).toLong()
-                val boc        = mgr.signJettonTransaction(
+                val boc = mgr.signJettonTransaction(
                     jettonMasterAddress = contractAddress,
-                    toAddress           = toAddress,
-                    jettonAmountNano    = amountNano,
-                    seqno               = seqno,
-                    coinNetwork         = coinNetwork,
-                    memo                = memo?.takeIf { it.isNotEmpty() }
+                    toAddress = toAddress,
+                    jettonAmountNano = amountNano,
+                    seqno = seqno,
+                    coinNetwork = coinNetwork,
+                    memo = memo?.takeIf { it.isNotEmpty() }
                 )
                 val txHash = mgr.TransferToken(boc, coinNetwork)
                 withContext(Dispatchers.Main) {
@@ -129,7 +119,7 @@ class TonService(
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    completionHandler.completionHandler("", false, e.localizedMessage ?: "Error")
+                    completionHandler.completionHandler("", false, e.message ?: "Error")
                 }
             }
         }
@@ -141,16 +131,16 @@ class TonService(
         scope.launch {
             try {
                 val items = TonApiService.INSTANCE.getNFTItems(coinNetwork, address)
-                val nfts  = items?.map { item ->
+                val nfts = items?.map { item ->
                     NFTItem(
-                        coin              = ACTCoin.TON,
-                        address           = item.address,
+                        coin = ACTCoin.TON,
+                        address = item.address,
                         collectionAddress = item.collectionAddress,
-                        index             = item.index?.toLongOrNull() ?: 0L,
-                        name              = item.content?.name,
-                        description       = item.content?.description,
-                        imageUrl          = item.content?.image,
-                        attributes        = item.content?.attributes
+                        index = item.index?.toLongOrNull() ?: 0L,
+                        name = item.content?.name,
+                        description = item.content?.description,
+                        imageUrl = item.content?.image,
+                        attributes = item.content?.attributes
                             ?.associate { it.traitType to it.value }
                     )
                 }?.toTypedArray() ?: emptyArray()
@@ -159,7 +149,7 @@ class TonService(
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    completionHandler.completionHandler(null, e.localizedMessage ?: "Error")
+                    completionHandler.completionHandler(null, e.message ?: "Error")
                 }
             }
         }
@@ -173,13 +163,13 @@ class TonService(
     ) {
         scope.launch {
             try {
-                val mgr   = manager()
+                val mgr = manager()
                 val seqno = mgr.getSeqno(coinNetwork)
-                val boc   = mgr.signNFTTransfer(
+                val boc = mgr.signNFTTransfer(
                     nftAddress = nftAddress,
-                    toAddress  = toAddress,
-                    seqno      = seqno,
-                    memo       = memo?.takeIf { it.isNotEmpty() }
+                    toAddress = toAddress,
+                    seqno = seqno,
+                    memo = memo?.takeIf { it.isNotEmpty() }
                 )
                 val result = mgr.transfer(boc, coinNetwork)
                 withContext(Dispatchers.Main) {
@@ -191,7 +181,7 @@ class TonService(
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    completionHandler.completionHandler("", false, e.localizedMessage ?: "Error")
+                    completionHandler.completionHandler("", false, e.message ?: "Error")
                 }
             }
         }

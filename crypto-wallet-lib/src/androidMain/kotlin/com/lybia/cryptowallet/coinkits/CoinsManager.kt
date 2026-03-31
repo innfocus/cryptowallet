@@ -25,7 +25,7 @@ import com.lybia.cryptowallet.services.SendTokenHandle
 import com.lybia.cryptowallet.services.TokenBalanceHandle
 import com.lybia.cryptowallet.services.TokenService
 import com.lybia.cryptowallet.services.TokenTransactionsHandle
-import com.lybia.cryptowallet.coinkits.ton.TonService
+import com.lybia.cryptowallet.services.TonService
 import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.models.ton.TonTransaction
 import com.lybia.cryptowallet.wallets.ton.TonManager
