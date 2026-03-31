@@ -76,7 +76,7 @@ class TonService(
                 val history = manager().getTransactionHistoryToken(address, contractAddress, coinNetwork)
                 @Suppress("UNCHECKED_CAST")
                 val txList = (history as? List<TonTransaction>) ?: emptyList()
-                val mapped = txList.toTransactionDatas(address)
+                val mapped: Array<Any?> = txList.toTransactionDatas(address).toTypedArray()
                 withContext(Dispatchers.Main) {
                     completionHandler.completionHandler(mapped, "")
                 }
