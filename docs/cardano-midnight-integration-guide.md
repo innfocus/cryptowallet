@@ -45,7 +45,11 @@ val manager = CommonCoinsManager(mnemonic = mnemonic)
 
 ### 3. Khởi tạo với custom API service (tuỳ chọn)
 
+Có 2 cách cài đặt apiKey cho Cardano (Blockfrost):
+
 ```kotlin
+// ─── Cách 1: Inject CardanoApiService trực tiếp ─────────────────────
+// Linh hoạt — control hoàn toàn service instance (provider, custom client)
 import com.lybia.cryptowallet.services.CardanoApiService
 import com.lybia.cryptowallet.services.CardanoApiProvider
 import com.lybia.cryptowallet.CoinNetwork
@@ -61,7 +65,28 @@ val manager = CommonCoinsManager(
     mnemonic = mnemonic,
     cardanoApiService = cardanoApi
 )
+
+// ─── Cách 2: Dùng configs map (gọn hơn) ────────────────────────────
+// ChainManagerFactory tự tạo CardanoApiService bên trong
+import com.lybia.cryptowallet.coinkits.ChainConfig
+
+val manager = CommonCoinsManager(
+    mnemonic = mnemonic,
+    configs = mapOf(
+        NetworkName.CARDANO to ChainConfig(
+            apiBaseUrl = "https://cardano-mainnet.blockfrost.io/api/v0",
+            apiKey = "your-blockfrost-project-id"
+        ),
+        // Thêm config cho chain khác nếu cần
+        NetworkName.MIDNIGHT to ChainConfig(
+            apiBaseUrl = "https://midnight-api.example.com",
+            apiKey = "your-midnight-api-key"
+        )
+    )
+)
 ```
+
+> Nếu không truyền apiKey, `ChainConfig.default(CARDANO)` dùng URL mặc định với `apiKey = null` — Blockfrost sẽ reject vì thiếu `project_id`.
 
 ---
 
@@ -556,6 +581,10 @@ Hướng dẫn cho app cũ đang dùng code trực tiếp từ `androidMain` chu
 | `CentralityNetwork.shared.scanAccount(...)` | `manager.getCentralityBalance()` |
 | `CentralityNetwork.shared.transactions(...)` | `manager.getCentralityTransactions()` |
 | `CentralityNetwork.shared.getPublicAddress(seed, handler)` | `manager.getAddress(NetworkName.CENTRALITY)` hoặc `CentralityApiService.getPublicAddress(seed)` |
+| `CoinsManager.shared.setNetworks(networks)` | `Config.shared.setNetwork(Network.MAINNET)` + tạo mới `CommonCoinsManager` |
+| `CoinsManager.shared.cleanAll()` | Tạo mới instance `CommonCoinsManager(mnemonic)` |
+| `CoinsManager.shared.estimateFee(...)` | `ACTCoin.feeDefault()` hoặc chain manager trực tiếp |
+| `CoinsManager.shared.firstAddress(coin)` | `manager.getAddress(NetworkName.XXX)` |
 | Callback-based (`completionHandler`) | Suspend functions (coroutines) |
 | Gson `@SerializedName` | kotlinx `@SerialName` |
 | `java.math.BigInteger` | `com.ionspin.kotlin.bignum.integer.BigInteger` |
@@ -836,6 +865,72 @@ launch {
 
 > Lưu ý: `manager.getAddress(NetworkName.CENTRALITY)` trả về `""` nếu chưa gọi suspend function nào (address chưa được resolve từ API). Gọi `getBalance()` hoặc `getCentralityBalance()` trước sẽ tự resolve và cache address.
 
+### CoinsManager.shared.setNetworks / cleanAll / estimateFee migration
+
+```kotlin
+// ─── setNetworks ────────────────────────────────────────────────────
+// Trước: CoinsManager.shared.setNetworks(arrayOf(network1, network2))
+//   → reset wallet, set coin networks
+
+// Sau: Config global + tạo mới CommonCoinsManager
+Config.shared.setNetwork(Network.MAINNET)  // hoặc Network.TESTNET
+val manager = CommonCoinsManager(mnemonic = mnemonic)
+// CommonCoinsManager tự tạo managers lazy theo Config.shared network
+
+// ─── cleanAll ───────────────────────────────────────────────────────
+// Trước: CoinsManager.shared.cleanAll()
+//   → xóa hdWallet, addresses, cached data
+
+// Sau: Tạo mới instance (CommonCoinsManager không có mutable state cần clean)
+val freshManager = CommonCoinsManager(mnemonic = newMnemonic)
+// Hoặc nếu đổi mnemonic trong androidMain CoinsManager:
+// CoinsManager.shared.updateMnemonic(newMnemonic)  // đã có method này
+
+// ─── estimateFee ────────────────────────────────────────────────────
+// Trước:
+// CoinsManager.shared.estimateFee(amount, address, paramFee, serviceFee, network, handler)
+
+// Sau — Cardano/Centrality: dùng feeDefault (không cần gọi network)
+val cardanoFee = ACTCoin.Cardano.feeDefault()      // 0.2 ADA
+val centralityFee = ACTCoin.Centrality.feeDefault() // fixed fee
+
+// Sau — Ethereum/Arbitrum: dùng EthereumManager trực tiếp
+launch {
+    if (manager.supportsFeeEstimation(NetworkName.ETHEREUM)) {
+        // Cast sang IFeeEstimator cho fee estimation chi tiết
+        val ethManager = ChainManagerFactory.createWalletManager(
+            NetworkName.ETHEREUM, mnemonic
+        ) as IFeeEstimator
+        val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+        val fee = ethManager.estimateFee(
+            FeeEstimateParams(fromAddress, toAddress, amount),
+            coinNetwork
+        )
+        // FeeEstimate(fee, gasLimit, gasPrice, unit)
+    }
+}
+
+// Sau — TON: dùng TonManager.estimateFee trực tiếp
+launch {
+    val tonManager = TonManager(mnemonic)
+    val coinNetwork = CoinNetwork(NetworkName.TON)
+    val fee = TonApiService.INSTANCE.estimateFee(coinNetwork, address, bocBase64)
+    // fee: Long? (nanoton)
+}
+```
+
+```kotlin
+// ─── firstAddress ───────────────────────────────────────────────────
+// Trước: CoinsManager.shared.firstAddress(ACTCoin.Cardano)
+//   → ACTAddress? (object chứa address string + network info)
+
+// Sau: CommonCoinsManager.getAddress trả về String trực tiếp
+val address = manager.getAddress(NetworkName.CARDANO)   // "addr1q..."
+val btcAddr = manager.getAddress(NetworkName.BTC)       // "bc1q..."
+val ethAddr = manager.getAddress(NetworkName.ETHEREUM)   // "0x..."
+// Không cần unwrap ACTAddress — trả về String luôn
+```
+
 ### SCALE Codec migration
 
 ```kotlin
@@ -914,6 +1009,167 @@ lifecycleScope.launch {
 
 ---
 
+## Xóa CoinsManager — Chuyển hoàn toàn sang CommonCoinsManager
+
+Hướng dẫn thay thế từng method của `CoinsManager` (androidMain) bằng `CommonCoinsManager` (commonMain) để xóa `CoinsManager.kt` và thống nhất KMP cho Android + iOS.
+
+### Khác biệt chính
+
+| | CoinsManager (cũ) | CommonCoinsManager (mới) |
+|---|---|---|
+| Source set | androidMain | commonMain (Android + iOS + JVM) |
+| Pattern | Singleton `CoinsManager.shared` | Instance `CommonCoinsManager(mnemonic)` |
+| API style | Callback (`BalanceHandle`, `SendCoinHandle`) | Suspend functions + Result wrappers |
+| Address type | `ACTAddress` (object) | `String` (trực tiếp) |
+| Coin type | `ACTCoin` enum | `NetworkName` enum |
+| Network config | `ACTNetwork` + `setNetworks()` | `Config.shared.setNetwork()` + `ChainConfig` |
+| State | Mutable singleton (hdWallet, caches) | Stateless facade (lazy managers) |
+
+### ICoinsManager methods
+
+```kotlin
+// ─── getHDWallet() ──────────────────────────────────────────────────
+// Trước: CoinsManager.shared.getHDWallet()
+// Sau: Không cần — CommonCoinsManager quản lý bên trong
+//      Nếu cần trực tiếp: ACTHDWallet(mnemonic)
+
+// ─── setNetworks(networks) ──────────────────────────────────────────
+// Trước: CoinsManager.shared.setNetworks(arrayOf(network1, network2))
+// Sau:
+Config.shared.setNetwork(Network.MAINNET)
+val manager = CommonCoinsManager(mnemonic = mnemonic)
+
+// ─── currentNetwork(coin) ───────────────────────────────────────────
+// Trước: CoinsManager.shared.currentNetwork(ACTCoin.Cardano) → ACTNetwork?
+// Sau: Không cần — dùng Config.shared.getNetwork() nội bộ
+//      Nếu cần: ACTNetwork(ACTCoin.Cardano, Config.shared.isTestnet())
+
+// ─── cleanAll() ─────────────────────────────────────────────────────
+// Trước: CoinsManager.shared.cleanAll()
+// Sau: Tạo mới instance
+val freshManager = CommonCoinsManager(mnemonic = newMnemonic)
+
+// ─── firstAddress(coin) / addresses(coin) ───────────────────────────
+// Trước: CoinsManager.shared.firstAddress(ACTCoin.Cardano) → ACTAddress?
+// Sau:
+val address: String = manager.getAddress(NetworkName.CARDANO)
+// Centrality (cần resolve từ API):
+launch { val addr = manager.getAddressAsync(NetworkName.CENTRALITY) }
+
+// ─── getBalance(coin, handler) ──────────────────────────────────────
+// Trước:
+CoinsManager.shared.getBalance(ACTCoin.Cardano, object : BalanceHandle {
+    override fun completionHandler(balance: Double, success: Boolean) { }
+})
+// Sau:
+launch {
+    val result = manager.getBalance(NetworkName.CARDANO)
+    // BalanceResult(balance, success, error)
+}
+
+// ─── getTransactions(coin, moreParam, handler) ──────────────────────
+// Trước:
+CoinsManager.shared.getTransactions(ACTCoin.Ripple, null, object : TransactionsHandle {
+    override fun completionHandler(txs: Array<TransationData>?, more: JsonObject?, err: String) { }
+})
+// Sau:
+launch {
+    val txs = manager.getTransactionHistory(NetworkName.XRP)
+    // Any? — cast theo chain
+}
+
+// ─── sendCoin(from, to, ser, amount, fee, serviceFee, memo, handler)
+// Trước:
+CoinsManager.shared.sendCoin(fromAddr, toStr, serStr, amount, fee, sFee, memo,
+    object : SendCoinHandle {
+        override fun completionHandler(txID: String, success: Boolean, err: String) { }
+    })
+// Sau (per-coin):
+launch {
+    val eth = manager.transfer(NetworkName.ETHEREUM, signedTxHex)
+    val ada = manager.sendCardano(toAddress, amountLovelace, feeLovelace)
+    val cen = manager.sendCentrality(from, to, amount, assetId)
+    val mid = manager.sendMidnight(toAddress, amount)
+    // TON: dùng TonManager trực tiếp
+}
+
+// ─── estimateFee(...) ───────────────────────────────────────────────
+// Trước: CoinsManager.shared.estimateFee(amount, ser, fee, 0.0, 0.0, network, handler)
+// Sau:
+val fee = ACTCoin.Cardano.feeDefault()  // Cardano, Centrality, Ripple
+// Ethereum: IFeeEstimator, TON: TonApiService.estimateFee()
+```
+
+### ITokenManager methods
+
+```kotlin
+// ─── getTokenBalance ────────────────────────────────────────────────
+// Trước: CoinsManager.shared.getTokenBalance(ACTCoin.TON, addr, contract, handler)
+// Sau:
+launch { val result = manager.getTokenBalance(NetworkName.TON, addr, contract) }
+
+// ─── getTokenTransactions ───────────────────────────────────────────
+// Trước: CoinsManager.shared.getTokenTransactions(ACTCoin.TON, addr, contract, handler)
+// Sau: Dùng chain manager trực tiếp
+launch {
+    val tonManager = TonManager(mnemonic)
+    val txs = tonManager.getTokenTransactionHistory(addr, contract, coinNetwork)
+}
+
+// ─── sendToken ──────────────────────────────────────────────────────
+// Trước: CoinsManager.shared.sendToken(ACTCoin.TON, to, contract, amount, decimals, memo, handler)
+// Sau:
+launch { val result = manager.sendToken(NetworkName.TON, signedTokenTxData) }
+// Cardano native token:
+launch { val result = manager.sendToken(to, policyId, assetName, amount, fee) }
+```
+
+### INFTManager methods
+
+```kotlin
+// ─── getNFTs ────────────────────────────────────────────────────────
+// Trước: CoinsManager.shared.getNFTs(ACTCoin.TON, addr, handler)
+// Sau:
+launch { val nfts = manager.getNFTs(NetworkName.TON, addr) }
+
+// ─── transferNFT ────────────────────────────────────────────────────
+// Trước: CoinsManager.shared.transferNFT(ACTCoin.TON, nftAddr, toAddr, memo, handler)
+// Sau:
+launch { val result = manager.transferNFT(NetworkName.TON, nftAddr, toAddr, memo) }
+```
+
+### Properties & Config
+
+```kotlin
+// ─── mnemonic ───────────────────────────────────────────────────────
+// Trước: CoinsManager.shared.mnemonic = "..."
+// Sau:
+val manager = CommonCoinsManager(mnemonic = "...")
+
+// ─── API keys ───────────────────────────────────────────────────────
+// Trước: CoinsManager.shared.apiKeyInfura = "..."
+// Sau (Config global, đã có trong commonMain):
+Config.shared.apiKeyInfura = "..."
+Config.shared.apiKeyExplorer = "..."
+Config.shared.apiKeyOwlRacle = "..."
+Config.shared.apiKeyToncenter = "..."
+```
+
+### Checklist xóa CoinsManager
+
+1. Thay tất cả `CoinsManager.shared.xxx` → `CommonCoinsManager` methods
+2. Thay `ACTCoin.Xxx` → `NetworkName.XXX`
+3. Thay callback interfaces → coroutine `launch { }`
+4. Thay `ACTAddress` → `String`
+5. Thay `CoinsManager.shared.mnemonic = "..."` → `CommonCoinsManager(mnemonic = "...")`
+6. Thay `CoinsManager.shared.apiKeyXxx` → `Config.shared.apiKeyXxx`
+7. Xóa `CoinsManager.kt` khỏi androidMain
+8. Xóa `TonService.kt` khỏi androidMain (đã tích hợp trong CommonCoinsManager)
+9. Xóa callback interfaces: `BalanceHandle`, `TransactionsHandle`, `SendCoinHandle`, `EstimateFeeHandle`
+10. Verify compile trên Android, iOS, JVM
+
+---
+
 ## Lưu ý quan trọng
 
 1. Tất cả hàm network là `suspend fun` — cần gọi trong coroutine scope
@@ -922,6 +1178,6 @@ lifecycleScope.launch {
 4. Module tự phát hiện Byron vs Shelley address khi gửi ADA
 5. Code legacy trong `androidMain` đã bị xóa cho: Cardano, Bitcoin, Ripple, Centrality, HD Wallet
 6. Ethereum web3j code trong `androidMain` giữ nguyên (không xóa)
-7. `CoinsManager` (androidMain) vẫn tồn tại — delegate sang `CommonCoinsManager`
+7. Sau khi xóa `CoinsManager`, Android app dùng `CommonCoinsManager` trực tiếp — cùng API với iOS
 8. Bridge operations hiện dùng simulated responses — chờ API thật sẵn sàng
-9. TON `unstake()` trả về `UnsupportedOperation` — TON staking protocols không hỗ trợ unstake trực tiếp
+9. TON `unstake()` trả về `UnsupportedOperation`
