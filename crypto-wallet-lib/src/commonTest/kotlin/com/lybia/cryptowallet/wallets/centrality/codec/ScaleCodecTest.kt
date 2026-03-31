@@ -129,6 +129,42 @@ class ScaleCodecTest {
         }
     }
 
+    // Feature: crypto-wallet-module, Property 8: SCALE encoding round-trip
+    // For any valid non-negative BigInteger value, encodeCompact → decodeCompact
+    // produces the equivalent value, across all 4 modes.
+    // **Validates: Requirements 24.5**
+    @Test
+    fun scaleCompactEncodingRoundTripAllModes() = runTest {
+        // Single-byte mode: 0..63
+        checkAll(100, arbSingleByte()) { value ->
+            val encoded = ScaleCodec.compactToU8a(value)
+            val (decoded, bytesConsumed) = ScaleCodec.compactFromU8a(encoded)
+            assertEquals(value, decoded, "Single-byte round-trip failed for $value")
+            assertEquals(encoded.size, bytesConsumed, "Bytes consumed mismatch for single-byte $value")
+        }
+        // Two-byte mode: 64..16383
+        checkAll(100, arbTwoByte()) { value ->
+            val encoded = ScaleCodec.compactToU8a(value)
+            val (decoded, bytesConsumed) = ScaleCodec.compactFromU8a(encoded)
+            assertEquals(value, decoded, "Two-byte round-trip failed for $value")
+            assertEquals(encoded.size, bytesConsumed, "Bytes consumed mismatch for two-byte $value")
+        }
+        // Four-byte mode: 16384..1073741823
+        checkAll(100, arbFourByte()) { value ->
+            val encoded = ScaleCodec.compactToU8a(value)
+            val (decoded, bytesConsumed) = ScaleCodec.compactFromU8a(encoded)
+            assertEquals(value, decoded, "Four-byte round-trip failed for $value")
+            assertEquals(encoded.size, bytesConsumed, "Bytes consumed mismatch for four-byte $value")
+        }
+        // Big-integer mode: >1073741823
+        checkAll(100, arbBigInteger()) { value ->
+            val encoded = ScaleCodec.compactToU8a(value)
+            val (decoded, bytesConsumed) = ScaleCodec.compactFromU8a(encoded)
+            assertEquals(value, decoded, "Big-integer round-trip failed for $value")
+            assertEquals(encoded.size, bytesConsumed, "Bytes consumed mismatch for big-integer $value")
+        }
+    }
+
     // ---- Unit Tests: Boundary Values (Task 1.4) ----
 
     @Test

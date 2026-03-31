@@ -4,6 +4,7 @@ import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.models.ExplorerModel
 import com.lybia.cryptowallet.models.GasPrice
+import com.lybia.cryptowallet.models.NFTTransaction
 import com.lybia.cryptowallet.models.Transaction
 import com.lybia.cryptowallet.models.TransactionToken
 import io.ktor.client.call.body
@@ -135,6 +136,45 @@ class ExplorerRpcService {
         }
 
     }
+    suspend fun getNFTTransactions(
+        coin: CoinNetwork,
+        address: String,
+    ): ExplorerModel<List<NFTTransaction>>? {
+        val apiKey = Config.shared.apiKeyExplorer
+        require(!apiKey.isNullOrEmpty()) { "API key Explorer is null" }
+        try {
+            val response = HttpClientService.INSTANCE.client.get(coin.getExplorerEndpoint()) {
+                url {
+                    parameters.append("address", address)
+                    parameters.append("module", "account")
+                    parameters.append("action", "tokennfttx")
+                    parameters.append("startblock", "0")
+                    parameters.append("endblock", "99999999")
+                    parameters.append("sort", "asc")
+                    parameters.append("apikey", apiKey)
+                }
+
+                headers {
+                    append(HttpHeaders.Accept, "application/json")
+                }
+            }
+
+            return if (response.status.value in 200..299) {
+                val rpcResponse = response.body<ExplorerModel<List<NFTTransaction>>?>()
+                if (rpcResponse != null && rpcResponse.status == "1") {
+                    rpcResponse
+                } else {
+                    null
+                }
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
+
     suspend fun getAllGasPrice(coin: CoinNetwork): GasPrice?{
         val apiKey = Config.shared.apiKeyExplorer
         require(!apiKey.isNullOrEmpty()) { "API key Explorer is null" }

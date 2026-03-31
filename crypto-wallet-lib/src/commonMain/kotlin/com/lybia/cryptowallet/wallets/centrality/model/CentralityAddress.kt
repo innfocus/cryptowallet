@@ -53,6 +53,26 @@ class CentralityAddress {
          * 7. Validate checksum bytes
          * 8. Return public key bytes or null
          */
+        /**
+         * Encode a public key into an SS58 address string.
+         *
+         * Algorithm (inverse of parseAddress):
+         * 1. Prepend network prefix byte to public key
+         * 2. Compute Blake2b-512 of "SS58PRE" + prefix + publicKey
+         * 3. Append first 2 checksum bytes
+         * 4. Base58 encode the result
+         *
+         * @param publicKey 32-byte public key
+         * @param networkPrefix SS58 network prefix byte (default 42 for Substrate generic)
+         * @return SS58 encoded address string
+         */
+        fun encodeSS58(publicKey: ByteArray, networkPrefix: Byte = 42): String {
+            val payload = byteArrayOf(networkPrefix) + publicKey
+            val hash = Blake2b.hash(SS58_PREFIX + payload, 64)
+            val complete = payload + hash.copyOfRange(0, 2)
+            return Base58.encode(complete)
+        }
+
         fun parseAddress(address: String): ByteArray? {
             val decoded: ByteArray
             try {

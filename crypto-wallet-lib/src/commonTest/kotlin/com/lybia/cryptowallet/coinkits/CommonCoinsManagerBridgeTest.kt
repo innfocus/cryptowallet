@@ -1,8 +1,10 @@
 package com.lybia.cryptowallet.coinkits
 
 import com.lybia.cryptowallet.enums.NetworkName
+import com.lybia.cryptowallet.models.bridge.BridgeStatus
 import com.lybia.cryptowallet.wallets.bridge.BridgeManagerFactory
 import io.kotest.property.Arb
+import io.kotest.property.PropTestConfig
 import io.kotest.property.arbitrary.of
 import io.kotest.property.checkAll
 import kotlinx.coroutines.test.runTest
@@ -27,6 +29,85 @@ class CommonCoinsManagerBridgeTest {
         NetworkName.ETHEREUM to NetworkName.ARBITRUM,
         NetworkName.ARBITRUM to NetworkName.ETHEREUM
     )
+
+    /**
+     * Valid status values that getBridgeStatus() may return.
+     * Includes the four BridgeStatus enum values plus "unknown" which
+     * CommonCoinsManager returns when no bridge manager handles the hash
+     * or an exception occurs.
+     */
+    private val validBridgeStatuses = BridgeStatus.entries.map { it.value }.toSet() + "unknown"
+
+    // ── Property 12: Bridge status valid values ─────────────────────────
+
+    // Feature: crypto-wallet-module, Property 12: Bridge status valid values
+    // **Validates: Requirements 29.2**
+
+    /**
+     * **Property 12: Bridge status là giá trị hợp lệ**
+     *
+     * For any supported bridge pair and any non-blank txHash,
+     * getBridgeStatus(txHash) ∈ {"pending", "confirming", "completed", "failed", "unknown"}.
+     */
+    @Test
+    fun getBridgeStatusAlwaysReturnsValidValue() = runTest {
+        val manager = CommonCoinsManager(mnemonic = testMnemonic)
+
+        // Generate txHash values that mimic real bridge transaction IDs
+        val sampleTxHashes = listOf(
+            "bridge_mint_5000000_sim_1",
+            "bridge_deposit_ethereum_1000000_sim_1",
+            "bridge_burn_midnight_2000000_sim_1",
+            "bridge_withdrawal_arbitrum_500000_sim_1",
+            "sim_42",
+            "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            "abc123",
+            "tx_unknown_hash"
+        )
+
+        checkAll(
+            PropTestConfig(iterations = 100),
+            Arb.of(sampleTxHashes)
+        ) { txHash ->
+            val status = manager.getBridgeStatus(txHash)
+            assertTrue(
+                status in validBridgeStatuses,
+                "getBridgeStatus('$txHash') returned '$status' which is not in $validBridgeStatuses"
+            )
+        }
+    }
+
+    /**
+     * Property 12 (bridge-level): For each bridge implementation directly,
+     * getBridgeStatus returns a valid BridgeStatus value.
+     */
+    @Test
+    fun bridgeManagerGetBridgeStatusReturnsValidValue() = runTest {
+        val bridgeStatusValues = BridgeStatus.entries.map { it.value }.toSet()
+
+        val sampleTxHashes = listOf(
+            "bridge_mint_5000000_sim_1",
+            "bridge_deposit_ethereum_1000000_sim_1",
+            "sim_1",
+            "0xdeadbeef",
+            "some_tx_hash"
+        )
+
+        checkAll(
+            PropTestConfig(iterations = 100),
+            Arb.of(supportedBridgePairs),
+            Arb.of(sampleTxHashes)
+        ) { (fromChain, toChain), txHash ->
+            val bridgeManager = BridgeManagerFactory.createBridgeManager(
+                fromChain, toChain, testMnemonic
+            )!!
+            val status = bridgeManager.getBridgeStatus(txHash)
+            assertTrue(
+                status in bridgeStatusValues,
+                "getBridgeStatus('$txHash') on $fromChain→$toChain returned '$status' which is not in $bridgeStatusValues"
+            )
+        }
+    }
 
     // ── Property 13: CommonCoinsManager bridge methods delegate đúng bridge manager ──
 

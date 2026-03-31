@@ -160,7 +160,31 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
         dataSigned: String,
         coinNetwork: CoinNetwork
     ): TransferResponseModel {
-        TODO("Not yet implemented")
+        return try {
+            val signedTxModel = kotlinx.serialization.json.Json {
+                ignoreUnknownKeys = true
+            }.decodeFromString<BitcoinTransactionModel>(dataSigned)
+            val result = BitcoinApiService.INSTANCE.sendTransaction(signedTxModel)
+            if (result != null) {
+                TransferResponseModel(
+                    success = true,
+                    error = null,
+                    txHash = result.tx.hash
+                )
+            } else {
+                TransferResponseModel(
+                    success = false,
+                    error = "Failed to broadcast Bitcoin transaction",
+                    txHash = null
+                )
+            }
+        } catch (e: Exception) {
+            TransferResponseModel(
+                success = false,
+                error = e.message,
+                txHash = null
+            )
+        }
     }
 
     override suspend fun getChainId(coinNetwork: CoinNetwork): String {

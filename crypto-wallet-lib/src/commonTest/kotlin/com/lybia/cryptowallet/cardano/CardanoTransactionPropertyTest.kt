@@ -1,5 +1,7 @@
 package com.lybia.cryptowallet.cardano
 
+import com.lybia.cryptowallet.utils.cbor.CborDecoder
+import com.lybia.cryptowallet.utils.cbor.CborValue
 import com.lybia.cryptowallet.wallets.cardano.*
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.*
@@ -233,6 +235,69 @@ class CardanoTransactionPropertyTest {
                 "VKey witness count should match: expected ${vkeyWitnesses.size}, got ${deserialized.vkeyWitnesses.size}")
             assertEquals(bootstrapWitnesses.size, deserialized.bootstrapWitnesses.size,
                 "Bootstrap witness count should match: expected ${bootstrapWitnesses.size}, got ${deserialized.bootstrapWitnesses.size}")
+        }
+    }
+
+    // Feature: crypto-wallet-module, Property 7: Cardano transaction CBOR round-trip
+    // Serialize Shelley tx → CBOR → deserialize → same inputs, outputs, fee, ttl
+    // **Validates: Requirements 14.6**
+    @Test
+    fun shelleyTransactionCborRoundTrip() = runTest {
+        checkAll(
+            100,
+            arbTransactionBody(),
+            Arb.list(arbVKeyWitness(), 1..3)
+        ) { body, vkeys ->
+            // Build a full signed transaction
+            val witnessSet = CardanoWitnessSet(vkeys, emptyList())
+            val signedTx = CardanoSignedTransaction(body, witnessSet)
+
+            // Serialize full transaction to CBOR
+            val serialized = signedTx.serialize()
+            assertTrue(serialized.isNotEmpty(), "Serialized signed tx should not be empty")
+
+            // Decode the CBOR array: [body_map, witness_set_map, metadata_or_null]
+            val decoder = CborDecoder()
+            val topLevel = decoder.decode(serialized)
+            assertTrue(topLevel is CborValue.CborArray, "Signed tx should be a CBOR array")
+            val items = (topLevel as CborValue.CborArray).items
+            assertEquals(3, items.size, "Signed tx array should have 3 elements")
+
+            // Re-encode body from decoded CBOR and deserialize
+            val bodyBytes = com.lybia.cryptowallet.utils.cbor.CborEncoder().encode(items[0])
+            val deserializedBody = CardanoTransactionBody.deserialize(bodyBytes)
+
+            // Verify inputs round-trip
+            assertEquals(body.inputs.size, deserializedBody.inputs.size, "Input count mismatch")
+            body.inputs.zip(deserializedBody.inputs).forEach { (orig, deser) ->
+                assertTrue(orig.txHash.contentEquals(deser.txHash), "Input txHash mismatch")
+                assertEquals(orig.index, deser.index, "Input index mismatch")
+            }
+
+            // Verify outputs round-trip
+            assertEquals(body.outputs.size, deserializedBody.outputs.size, "Output count mismatch")
+            body.outputs.zip(deserializedBody.outputs).forEach { (orig, deser) ->
+                assertTrue(orig.addressBytes.contentEquals(deser.addressBytes), "Output address mismatch")
+                assertEquals(orig.lovelace, deser.lovelace, "Output lovelace mismatch")
+            }
+
+            // Verify fee and ttl round-trip
+            assertEquals(body.fee, deserializedBody.fee, "Fee mismatch after round-trip")
+            assertEquals(body.ttl, deserializedBody.ttl, "TTL mismatch after round-trip")
+
+            // Re-encode witness set from decoded CBOR and deserialize
+            val witnessBytes = com.lybia.cryptowallet.utils.cbor.CborEncoder().encode(items[1])
+            val deserializedWitness = CardanoWitnessSet.deserialize(witnessBytes)
+            assertEquals(vkeys.size, deserializedWitness.vkeyWitnesses.size, "VKey witness count mismatch")
+
+            // Verify metadata is null
+            assertTrue(items[2] is CborValue.CborSimple, "Metadata should be CBOR null")
+
+            // Verify transaction ID is deterministic across serializations
+            val txId1 = signedTx.getTransactionId()
+            val txId2 = signedTx.getTransactionId()
+            assertEquals(txId1, txId2, "Transaction ID should be deterministic")
+            assertEquals(64, txId1.length, "Transaction ID should be 64 hex chars (32 bytes)")
         }
     }
 }

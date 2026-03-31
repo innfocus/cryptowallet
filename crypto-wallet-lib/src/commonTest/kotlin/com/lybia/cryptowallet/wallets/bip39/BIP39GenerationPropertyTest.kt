@@ -11,10 +11,11 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 
 /**
- * **Validates: Requirements 3.2**
+ * **Validates: Requirements 2.1, 2.2**
  *
- * Property 5: BIP39 mnemonic generation validity
- * For any valid strength: word count == strength/32*3 and entropyString does not throw
+ * Property 1: BIP39 mnemonic generation tạo đúng số từ
+ * For any strength ∈ {128, 160, 192, 224, 256}, word count = (strength/32)*3
+ * and the generated mnemonic passes BIP39 validation (entropyString does not throw).
  */
 class BIP39GenerationPropertyTest {
 

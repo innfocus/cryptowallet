@@ -109,6 +109,60 @@ class CborPropertyTest {
         }
     }
 
+    // Feature: crypto-wallet-module, Property 6: CBOR serialization round-trip
+    // **Validates: Requirements 9.4**
+    /**
+     * For any valid CBOR value (unsigned integer, negative integer, byte string,
+     * text string, array, map, tag), CborDecoder.decode(CborEncoder.encode(value))
+     * must produce a value equivalent to the original.
+     */
+    @Test
+    fun cborSerializationRoundTripAllTypes() = runTest {
+        // Test each CBOR type individually to ensure full coverage
+        // Unsigned integers
+        checkAll(100, arbCborUInt()) { original ->
+            val decoded = decoder.decode(encoder.encode(original))
+            assertTrue(cborEquals(original, decoded),
+                "Round-trip failed for unsigned int: $original")
+        }
+        // Negative integers
+        checkAll(100, arbCborNegInt()) { original ->
+            val decoded = decoder.decode(encoder.encode(original))
+            assertTrue(cborEquals(original, decoded),
+                "Round-trip failed for negative int: $original")
+        }
+        // Byte strings
+        checkAll(100, arbCborByteString()) { original ->
+            val decoded = decoder.decode(encoder.encode(original))
+            assertTrue(cborEquals(original, decoded),
+                "Round-trip failed for byte string: $original")
+        }
+        // Text strings
+        checkAll(100, arbCborTextString()) { original ->
+            val decoded = decoder.decode(encoder.encode(original))
+            assertTrue(cborEquals(original, decoded),
+                "Round-trip failed for text string: $original")
+        }
+        // Arrays (with nested values)
+        checkAll(100, arbCborArray(maxDepth = 2)) { original ->
+            val decoded = decoder.decode(encoder.encode(original))
+            assertTrue(cborEquals(original, decoded),
+                "Round-trip failed for array: $original")
+        }
+        // Maps (with nested values)
+        checkAll(100, arbCborMap(maxDepth = 2)) { original ->
+            val decoded = decoder.decode(encoder.encode(original))
+            assertTrue(cborEquals(original, decoded),
+                "Round-trip failed for map: $original")
+        }
+        // Tags (with nested values)
+        checkAll(100, arbCborTag(maxDepth = 2)) { original ->
+            val decoded = decoder.decode(encoder.encode(original))
+            assertTrue(cborEquals(original, decoded),
+                "Round-trip failed for tag: $original")
+        }
+    }
+
     // Feature: cardano-midnight-support, Property 2: CBOR Pretty Printer Produces Structured Output
     // **Validates: Requirements 7.3, 4.6**
     @Test

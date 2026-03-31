@@ -8,6 +8,7 @@ import com.lybia.cryptowallet.base.ITokenAndNFT
 import com.lybia.cryptowallet.base.ITokenManager
 import com.lybia.cryptowallet.base.ITransactionFee
 import com.lybia.cryptowallet.base.IWalletManager
+import com.lybia.cryptowallet.enums.ACTCoin
 import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.models.ExplorerModel
 import com.lybia.cryptowallet.models.FeeEstimate
@@ -130,8 +131,25 @@ class EthereumManager : BaseCoinManager(), ITokenManager, INFTManager, IFeeEstim
     // ── INFTManager ─────────────────────────────────────────────────
 
     override suspend fun getNFTs(address: String, coinNetwork: CoinNetwork): List<NFTItem>? {
-        // NFT listing via Explorer API — placeholder for future implementation
-        return emptyList()
+        return try {
+            ExplorerRpcService.INSTANCE.getNFTTransactions(coinNetwork, address)
+                ?.result
+                ?.distinctBy { it.contractAddress + it.tokenID }
+                ?.map { nft ->
+                    NFTItem(
+                        coin = ACTCoin.Ethereum,
+                        address = nft.contractAddress,
+                        collectionAddress = nft.contractAddress,
+                        index = nft.tokenID.toLongOrNull() ?: 0L,
+                        name = nft.tokenName,
+                        description = null,
+                        imageUrl = null
+                    )
+                }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
     }
 
     override suspend fun transferNFT(
@@ -140,12 +158,21 @@ class EthereumManager : BaseCoinManager(), ITokenManager, INFTManager, IFeeEstim
         memo: String?,
         coinNetwork: CoinNetwork
     ): TransferResponseModel {
-        // ERC-721 transfer — requires signed transaction data
-        return TransferResponseModel(
-            success = false,
-            error = "NFT transfer requires pre-signed transaction data",
-            txHash = null
-        )
+        return try {
+            val txHash = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, nftAddress)
+            TransferResponseModel(
+                success = true,
+                error = null,
+                txHash = txHash
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            TransferResponseModel(
+                success = false,
+                error = e.message,
+                txHash = null
+            )
+        }
     }
 
     // ── IFeeEstimator ───────────────────────────────────────────────

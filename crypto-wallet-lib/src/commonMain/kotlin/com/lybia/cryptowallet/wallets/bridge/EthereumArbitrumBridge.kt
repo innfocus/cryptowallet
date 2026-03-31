@@ -196,6 +196,14 @@ class EthereumArbitrumBridge(
     /**
      * Simulate a deposit transaction on Ethereum to the Arbitrum bridge contract.
      * In production, this would build and send a signed transaction via InfuraRpcService.
+     *
+     * TODO(BRIDGE-G5): Replace with real InfuraRpcService.sendSignedTransaction(depositTx).
+     *   - Build an Ethereum transaction calling the Arbitrum Inbox contract's depositEth().
+     *   - Sign with the user's Ethereum private key derived from mnemonic.
+     *   - Submit via InfuraRpcService.sendSignedTransaction(coinNetwork, signedTxHex).
+     *   - Return the actual on-chain transaction hash from the RPC response.
+     *   - Handle network errors with BridgeError.BridgeServiceUnavailable.
+     *   - Blocked by: Arbitrum bridge contract ABI integration.
      */
     private fun simulateDepositTransaction(chain: NetworkName, amount: Long): String {
         return "bridge_deposit_${chain.name.lowercase()}_${amount}_${generateSimulatedTxId()}"
@@ -204,6 +212,14 @@ class EthereumArbitrumBridge(
     /**
      * Simulate a withdrawal transaction on Arbitrum.
      * In production, this would build and send a signed transaction via InfuraRpcService.
+     *
+     * TODO(BRIDGE-G5): Replace with real InfuraRpcService.sendSignedTransaction(withdrawalTx).
+     *   - Build an Arbitrum transaction calling the ArbSys precompile's withdrawEth().
+     *   - Sign with the user's Ethereum private key derived from mnemonic.
+     *   - Submit via InfuraRpcService.sendSignedTransaction(coinNetwork, signedTxHex).
+     *   - Return the actual on-chain transaction hash from the RPC response.
+     *   - Note: Arbitrum → ETH withdrawals have a ~7-day challenge period.
+     *   - Blocked by: Arbitrum bridge contract ABI integration.
      */
     private fun simulateWithdrawalTransaction(chain: NetworkName, amount: Long): String {
         return "bridge_withdrawal_${chain.name.lowercase()}_${amount}_${generateSimulatedTxId()}"
@@ -212,6 +228,13 @@ class EthereumArbitrumBridge(
     /**
      * Query transaction receipt status from the RPC service.
      * In production, this would call InfuraRpcService.getTransactionReceipt().
+     *
+     * TODO(BRIDGE-G5): Replace with real InfuraRpcService.getTransactionReceipt(txHash).
+     *   - Call eth_getTransactionReceipt via InfuraRpcService for the given txHash.
+     *   - Map receipt status field: 0x1 → COMPLETED, 0x0 → FAILED, null → PENDING.
+     *   - For Arbitrum → ETH withdrawals, also check L2-to-L1 message status.
+     *   - Throw BridgeError.BridgeTransactionFailed if receipt indicates failure.
+     *   - Blocked by: Arbitrum bridge contract ABI integration.
      */
     private fun queryTransactionReceiptStatus(txHash: String): String {
         // In production, would query the Ethereum/Arbitrum RPC for transaction receipt

@@ -7,6 +7,7 @@ import io.kotest.property.checkAll
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 /**
  * Property 2: ACTCoin enum equivalence
@@ -59,6 +60,56 @@ class ACTCoinPropertyTest {
             assertEquals(expected.minimumAmount, coin.minimumAmount(), "minimumAmount mismatch for $coin")
             assertEquals(expected.supportMemo, coin.supportMemo(), "supportMemo mismatch for $coin")
             assertEquals(expected.allowNewAddress, coin.allowNewAddress(), "allowNewAddress mismatch for $coin")
+        }
+    }
+
+    // Feature: crypto-wallet-module, Property 13: ACTCoin metadata consistency
+    // Validates: Requirements 8.1-8.5
+
+    @Test
+    fun actCoinUnitValueIsPositive() = runTest {
+        checkAll(PropTestConfig(iterations = 100), Arb.enum<ACTCoin>()) { coin ->
+            assertTrue(coin.unitValue() > 0, "unitValue must be > 0 for $coin, got ${coin.unitValue()}")
+        }
+    }
+
+    @Test
+    fun actCoinMinimumValueIsNonNegative() = runTest {
+        checkAll(PropTestConfig(iterations = 100), Arb.enum<ACTCoin>()) { coin ->
+            assertTrue(coin.minimumValue() >= 0, "minimumValue must be >= 0 for $coin, got ${coin.minimumValue()}")
+        }
+    }
+
+    @Test
+    fun actCoinRegexIsValidPattern() = runTest {
+        checkAll(PropTestConfig(iterations = 100), Arb.enum<ACTCoin>()) { coin ->
+            val pattern = coin.regex()
+            assertTrue(pattern.isNotBlank(), "regex must not be blank for $coin")
+            // Verify regex compiles without throwing
+            val regex = Regex(pattern)
+            assertTrue(regex.pattern == pattern, "regex pattern should round-trip for $coin")
+        }
+    }
+
+    @Test
+    fun actCoinNameAndSymbolAreNonBlank() = runTest {
+        checkAll(PropTestConfig(iterations = 100), Arb.enum<ACTCoin>()) { coin ->
+            assertTrue(coin.nameCoin().isNotBlank(), "nameCoin must not be blank for $coin")
+            assertTrue(coin.symbolName().isNotBlank(), "symbolName must not be blank for $coin")
+        }
+    }
+
+    @Test
+    fun actCoinFeeDefaultIsNonNegative() = runTest {
+        checkAll(PropTestConfig(iterations = 100), Arb.enum<ACTCoin>()) { coin ->
+            assertTrue(coin.feeDefault() >= 0, "feeDefault must be >= 0 for $coin, got ${coin.feeDefault()}")
+        }
+    }
+
+    @Test
+    fun actCoinMinimumAmountIsNonNegative() = runTest {
+        checkAll(PropTestConfig(iterations = 100), Arb.enum<ACTCoin>()) { coin ->
+            assertTrue(coin.minimumAmount() >= 0, "minimumAmount must be >= 0 for $coin, got ${coin.minimumAmount()}")
         }
     }
 }

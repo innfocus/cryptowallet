@@ -1,25 +1,31 @@
 package com.lybia.cryptowallet.coinkits
 
+import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.enums.NetworkName
+import com.lybia.cryptowallet.wallets.bridge.BridgeManagerFactory
 import io.kotest.property.Arb
 import io.kotest.property.PropTestConfig
+import io.kotest.property.arbitrary.enum
 import io.kotest.property.arbitrary.of
 import io.kotest.property.checkAll
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
- * **Property 15: CommonCoinsManager capability checking**
+ * **Property 11: Capability matrix consistency**
  *
- * supportsTokens: Cardano=true, Ethereum=true, TON=true, Bitcoin=false, Ripple=false, Midnight=false
- * supportsNFTs: Ethereum=true, TON=true, others=false
- * supportsFeeEstimation: Ethereum=true, others=false
+ * supportsTokens/NFTs/FeeEstimation/Staking/Bridge trả về đúng cho mọi NetworkName.
+ * ChainManagerFactory.createStakingManager trả về null cho chain không hỗ trợ.
+ * ChainManagerFactory.createWalletManager trả về non-null cho mọi NetworkName.
  *
- * **Validates: Requirements 10.5**
+ * **Validates: Requirements 5.7, 6.1, 6.7, 6.8, 7.7, 7.8, 34.1-34.8**
  */
+// Feature: crypto-wallet-module, Property 11: Capability matrix consistency
 class CapabilityCheckPropertyTest {
 
     private val testMnemonic =
@@ -41,6 +47,18 @@ class CapabilityCheckPropertyTest {
     private val feeEstimationCapableNetworks = setOf(
         NetworkName.ETHEREUM,
         NetworkName.ARBITRUM
+    )
+
+    private val stakingCapableNetworks = setOf(
+        NetworkName.CARDANO,
+        NetworkName.TON
+    )
+
+    private val supportedBridgePairs = setOf(
+        NetworkName.CARDANO to NetworkName.MIDNIGHT,
+        NetworkName.MIDNIGHT to NetworkName.CARDANO,
+        NetworkName.ETHEREUM to NetworkName.ARBITRUM,
+        NetworkName.ARBITRUM to NetworkName.ETHEREUM
     )
 
     private val allNetworks = NetworkName.entries.toList()
@@ -126,5 +144,87 @@ class CapabilityCheckPropertyTest {
         assertTrue(manager.supportsTokens(NetworkName.ETHEREUM))
         assertTrue(manager.supportsNFTs(NetworkName.ETHEREUM))
         assertTrue(manager.supportsFeeEstimation(NetworkName.ETHEREUM))
+    }
+
+    // ── Staking capability ──────────────────────────────────────────────
+
+    @Test
+    fun supportsStakingMatchesExpectedCapabilities() = runTest {
+        val manager = CommonCoinsManager(mnemonic = testMnemonic)
+
+        checkAll(
+            PropTestConfig(iterations = 100),
+            Arb.of(allNetworks)
+        ) { network ->
+            val expected = network in stakingCapableNetworks
+            assertEquals(
+                expected,
+                manager.supportsStaking(network),
+                "supportsStaking($network) should be $expected"
+            )
+        }
+    }
+
+    // ── Bridge capability ───────────────────────────────────────────────
+
+    @Test
+    fun supportsBridgeMatchesExpectedCapabilities() = runTest {
+        val manager = CommonCoinsManager(mnemonic = testMnemonic)
+
+        checkAll(
+            PropTestConfig(iterations = 100),
+            Arb.enum<NetworkName>(),
+            Arb.enum<NetworkName>()
+        ) { from, to ->
+            val expected = (from to to) in supportedBridgePairs
+            assertEquals(
+                expected,
+                manager.supportsBridge(from, to),
+                "supportsBridge($from, $to) should be $expected"
+            )
+        }
+    }
+
+    // ── ChainManagerFactory: createWalletManager non-null for all ────────
+
+    @Test
+    fun createWalletManagerReturnsNonNullForAllNetworks() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            Arb.enum<NetworkName>()
+        ) { coin ->
+            val manager = ChainManagerFactory.createWalletManager(coin, testMnemonic)
+            assertNotNull(
+                manager,
+                "createWalletManager($coin) should return non-null"
+            )
+        }
+    }
+
+    // ── ChainManagerFactory: createStakingManager null for unsupported ───
+
+    @Test
+    fun createStakingManagerReturnsNullForUnsupportedChains() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            Arb.enum<NetworkName>()
+        ) { coin ->
+            val manager = ChainManagerFactory.createStakingManager(coin, testMnemonic)
+            if (coin in stakingCapableNetworks) {
+                assertNotNull(
+                    manager,
+                    "createStakingManager($coin) should return non-null for staking chain"
+                )
+                assertTrue(
+                    manager is IStakingManager,
+                    "createStakingManager($coin) should return IStakingManager"
+                )
+            } else {
+                assertNull(
+                    manager,
+                    "createStakingManager($coin) should return null for non-staking chain"
+                )
+            }
+        }
     }
 }

@@ -212,6 +212,13 @@ class CardanoMidnightBridge(
     /**
      * Simulate locking assets on the source chain.
      * In production, this would build and submit a lock transaction via CardanoApiService.
+     *
+     * TODO(BRIDGE-G4): Replace with real CardanoApiService.submitLockTransaction(chain, amount).
+     *   - Build a Shelley transaction that locks ADA into the bridge contract address.
+     *   - Use CardanoApiService to submit the signed transaction.
+     *   - Return the actual on-chain transaction hash from the API response.
+     *   - Handle network errors with BridgeError.BridgeServiceUnavailable.
+     *   - Blocked by: Midnight bridge contract deployment on Cardano.
      */
     private fun simulateLockTransaction(chain: NetworkName, amount: Long): String {
         // Would use CardanoApiService to submit a lock transaction
@@ -221,6 +228,12 @@ class CardanoMidnightBridge(
     /**
      * Simulate burning assets on the source chain.
      * In production, this would call MidnightApiService to burn tDUST.
+     *
+     * TODO(BRIDGE-G4): Replace with real MidnightApiService.submitBurnTransaction(chain, amount).
+     *   - Call Midnight API to burn tDUST on the Midnight network.
+     *   - Return the actual Midnight transaction hash from the API response.
+     *   - Handle network errors with BridgeError.BridgeServiceUnavailable.
+     *   - Blocked by: Midnight burn API endpoint availability.
      */
     private fun simulateBurnTransaction(chain: NetworkName, amount: Long): String {
         // Would use MidnightApiService to submit a burn transaction
@@ -230,6 +243,12 @@ class CardanoMidnightBridge(
     /**
      * Simulate initiating a mint on Midnight.
      * In production, this would call MidnightApiService.initiateMint().
+     *
+     * TODO(BRIDGE-G4): Replace with real MidnightApiService.initiateMint(lockTxHash, amount).
+     *   - Submit the Cardano lock tx hash as proof to the Midnight bridge service.
+     *   - Midnight bridge verifies the lock and mints equivalent tDUST.
+     *   - Return the bridge transaction ID for status tracking.
+     *   - Blocked by: Midnight mint API endpoint availability.
      */
     private fun simulateInitiateMint(lockTxHash: String, amount: Long): String {
         return "bridge_mint_${amount}_${generateSimulatedTxId()}"
@@ -238,6 +257,12 @@ class CardanoMidnightBridge(
     /**
      * Simulate initiating an unlock on Cardano.
      * In production, this would call CardanoApiService to unlock ADA.
+     *
+     * TODO(BRIDGE-G4): Replace with real CardanoApiService.initiateUnlock(burnTxHash, amount).
+     *   - Submit the Midnight burn tx hash as proof to the Cardano bridge contract.
+     *   - Bridge contract verifies the burn and releases locked ADA.
+     *   - Return the bridge transaction ID for status tracking.
+     *   - Blocked by: Midnight bridge contract deployment on Cardano.
      */
     private fun simulateInitiateUnlock(burnTxHash: String, amount: Long): String {
         return "bridge_unlock_${amount}_${generateSimulatedTxId()}"
@@ -246,6 +271,12 @@ class CardanoMidnightBridge(
     /**
      * Query bridge status from the bridge service.
      * In production, this would query MidnightApiService for bridge transaction status.
+     *
+     * TODO(BRIDGE-G4): Replace with real MidnightApiService.getBridgeTransactionStatus(txHash).
+     *   - Query the Midnight bridge API for the current status of the bridge transaction.
+     *   - Map API response to BridgeStatus enum values (pending/confirming/completed/failed).
+     *   - Throw BridgeError.BridgeTransactionFailed if tx not found.
+     *   - Blocked by: Midnight bridge status API endpoint availability.
      */
     private fun queryBridgeStatusFromService(txHash: String): String {
         // In production, would query the Midnight bridge API

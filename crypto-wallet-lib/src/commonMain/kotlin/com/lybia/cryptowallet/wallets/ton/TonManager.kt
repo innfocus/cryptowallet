@@ -26,8 +26,11 @@ import fr.acinq.bitcoin.MnemonicCode
 import org.ton.bitstring.BitString
 import org.ton.tlb.CellRef
 import org.ton.tlb.constructor.AnyTlbConstructor
+import com.lybia.cryptowallet.base.INFTManager
 import com.lybia.cryptowallet.base.IStakingManager
+import com.lybia.cryptowallet.enums.ACTCoin
 import com.lybia.cryptowallet.errors.WalletError
+import com.lybia.cryptowallet.models.NFTItem
 
 /** Wallet contract version. W5 (V5R1) is the current standard and default. */
 enum class WalletVersion {
@@ -76,7 +79,7 @@ private fun slip10DeriveEd25519(seed: ByteArray, path: IntArray): ByteArray {
 class TonManager(
     mnemonics: String,
     val walletVersion: WalletVersion = WalletVersion.W5
-) : BaseCoinManager(), ITokenAndNFT, IStakingManager {
+) : BaseCoinManager(), ITokenAndNFT, IStakingManager, INFTManager {
 
     private val logger = Logger.withTag("TonManager")
     private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
@@ -382,7 +385,7 @@ class TonManager(
     }
 
     override suspend fun getNFT() {
-        // TODO
+        logger.w { "getNFT() (ITokenAndNFT legacy) called — use getNFTs(address, coinNetwork) instead" }
     }
 
     override suspend fun TransferToken(dataSigned: String, coinNetwork: CoinNetwork): String? {
@@ -509,6 +512,49 @@ class TonManager(
             WalletVersion.W4 -> signTransferV4(transfer, seqno)
             WalletVersion.W5 -> signTransferV5(transfer, seqno)
         }.also { logger.i { "Signed NFT transfer BOC: $it" } }
+    }
+
+    // ─── INFTManager Implementation ──────────────────────────────────────────
+
+    override suspend fun getNFTs(address: String, coinNetwork: CoinNetwork): List<NFTItem>? {
+        return try {
+            TonApiService.INSTANCE.getNFTItems(coinNetwork, address)
+                ?.map { nft ->
+                    NFTItem(
+                        coin = ACTCoin.TON,
+                        address = nft.address,
+                        collectionAddress = nft.collectionAddress,
+                        index = nft.index?.toLongOrNull() ?: 0L,
+                        name = nft.content?.name,
+                        description = nft.content?.description,
+                        imageUrl = nft.content?.image
+                    )
+                }
+        } catch (e: Exception) {
+            logger.e(e) { "Error getting NFTs" }
+            null
+        }
+    }
+
+    override suspend fun transferNFT(
+        nftAddress: String,
+        toAddress: String,
+        memo: String?,
+        coinNetwork: CoinNetwork
+    ): TransferResponseModel {
+        return try {
+            val seqno = getSeqno(coinNetwork)
+            val boc = signNFTTransfer(nftAddress, toAddress, seqno, memo = memo)
+            val result = TonApiService.INSTANCE.sendBoc(coinNetwork, boc)
+            if (result == "success") {
+                TransferResponseModel(success = true, error = null, txHash = "pending")
+            } else {
+                TransferResponseModel(success = false, error = "NFT transfer failed", txHash = null)
+            }
+        } catch (e: Exception) {
+            logger.e(e) { "Error transferring NFT" }
+            TransferResponseModel(success = false, error = e.message, txHash = null)
+        }
     }
 
     // ─── Private signing helpers ──────────────────────────────────────────────

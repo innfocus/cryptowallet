@@ -1,6 +1,9 @@
 package com.lybia.cryptowallet.wallets.centrality.model
 
 import io.kotest.property.Arb
+import io.kotest.property.arbitrary.byte
+import io.kotest.property.arbitrary.byteArray
+import io.kotest.property.arbitrary.constant
 import io.kotest.property.arbitrary.map
 import io.kotest.property.arbitrary.string
 import io.kotest.property.arbitrary.stringPattern
@@ -71,6 +74,42 @@ class CentralityAddressTest {
                 addr.publicKey,
                 "String with non-Base58 chars should produce null publicKey: $invalidString"
             )
+        }
+    }
+
+    // Feature: crypto-wallet-module, Property 9: SS58 address round-trip
+    // **Validates: Requirements 25.4**
+    @Test
+    fun ss58AddressRoundTrip() = runTest {
+        // For known valid SS58 addresses, parse → publicKey → re-encode → parse again
+        // must yield the same public key bytes.
+        // We also generate addresses from random 32-byte public keys to broaden coverage.
+
+        // Part 1: Known valid addresses round-trip
+        for (addr in knownValidAddresses) {
+            val parsed = CentralityAddress(addr)
+            assertNotNull(parsed.publicKey, "Known address should parse successfully: $addr")
+
+            // Re-encode the extracted public key back to SS58
+            val reEncoded = CentralityAddress.encodeSS58(parsed.publicKey)
+            val reParsed = CentralityAddress(reEncoded)
+            assertNotNull(reParsed.publicKey, "Re-encoded address should parse successfully")
+            assertTrue(
+                parsed.publicKey.contentEquals(reParsed.publicKey),
+                "Round-trip public key should match for address: $addr"
+            )
+        }
+
+        // Part 2: Property — random 32-byte public keys round-trip through SS58
+        checkAll(200, Arb.byteArray(Arb.constant(32), Arb.byte())) { randomKey ->
+            val encoded = CentralityAddress.encodeSS58(randomKey)
+            val parsed = CentralityAddress(encoded)
+            assertNotNull(parsed.publicKey, "Encoded address should parse back successfully")
+            assertTrue(
+                randomKey.contentEquals(parsed.publicKey),
+                "Round-trip: parse(encode(key)) should equal original key"
+            )
+            assertEquals(32, parsed.publicKey.size, "Public key should be 32 bytes")
         }
     }
 
