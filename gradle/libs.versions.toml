@@ -1,5 +1,6 @@
 [versions]
 androidGradlePlugin = "9.1.0"
+bignum = "0.3.8"
 bitcoinKmp = "0.30.0"
 cbor = "0.9"
 krypto = "4.0.10"
@@ -49,6 +50,7 @@ ton-kotlin-tvm = { module = "org.ton.kotlin:ton-kotlin-tvm", version.ref = "tonK
 ton-kotlin-tlb = { module = "org.ton.kotlin:ton-kotlin-tlb", version.ref = "tonKotlin" }
 ton-kotlin-block-tlb = { module = "org.ton.kotlin:ton-kotlin-block-tlb", version.ref = "tonKotlin" }
 adapter-rxjava2 = { module = "com.squareup.retrofit2:adapter-rxjava2", version.ref = "retrofit" }
+bignum = { module = "com.ionspin.kotlin:bignum", version.ref = "bignum" }
 bitcoin-kmp = { module = "fr.acinq.bitcoin:bitcoin-kmp", version.ref = "bitcoinKmp" }
 cbor = { module = "co.nstant.in:cbor", version.ref = "cbor" }
 converter-gson = { module = "com.squareup.retrofit2:converter-gson", version.ref = "retrofit" }

@@ -19,6 +19,7 @@ class CoinNetwork(
                     NetworkName.CARDANO -> ""
                     NetworkName.MIDNIGHT -> ""
                     NetworkName.XRP -> ""
+                    NetworkName.CENTRALITY -> ""
                 }
             }
             Network.TESTNET -> {
@@ -30,6 +31,7 @@ class CoinNetwork(
                     NetworkName.CARDANO -> ""
                     NetworkName.MIDNIGHT -> ""
                     NetworkName.XRP -> ""
+                    NetworkName.CENTRALITY -> ""
                 }
             }
         }
@@ -46,6 +48,7 @@ class CoinNetwork(
                     NetworkName.CARDANO -> "https://cardanoscan.io"
                     NetworkName.MIDNIGHT -> "https://explorer.midnight.network"
                     NetworkName.XRP -> ""
+                    NetworkName.CENTRALITY -> ""
                 }
             }
             Network.TESTNET -> {
@@ -57,6 +60,7 @@ class CoinNetwork(
                     NetworkName.CARDANO -> "https://preprod.cardanoscan.io"
                     NetworkName.MIDNIGHT -> "https://explorer.testnet.midnight.network"
                     NetworkName.XRP -> ""
+                    NetworkName.CENTRALITY -> ""
                 }
             }
         }
@@ -78,6 +82,7 @@ class CoinNetwork(
             NetworkName.CARDANO -> ""
             NetworkName.MIDNIGHT -> ""
             NetworkName.XRP -> ""
+            NetworkName.CENTRALITY -> ""
         }
     }
 

@@ -11,5 +11,6 @@ enum class NetworkName {
     TON,
     CARDANO,
     MIDNIGHT,
-    XRP
+    XRP,
+    CENTRALITY
 }

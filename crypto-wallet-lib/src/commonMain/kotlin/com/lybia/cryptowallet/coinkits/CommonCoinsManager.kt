@@ -16,6 +16,7 @@ import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.wallets.cardano.CardanoAddress
 import com.lybia.cryptowallet.wallets.cardano.CardanoAddressType
 import com.lybia.cryptowallet.wallets.cardano.CardanoError
+import com.lybia.cryptowallet.wallets.centrality.CentralityManager
 
 /**
  * Result wrapper for balance queries.
@@ -511,6 +512,32 @@ class CommonCoinsManager(
             SendResult(txHash = txHash, success = true)
         } catch (e: Exception) {
             logger.e(e) { "Failed to send Midnight" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    // ── Centrality-specific operations ──────────────────────────────────────
+
+    suspend fun getCentralityBalance(address: String? = null): BalanceResult {
+        return getBalance(NetworkName.CENTRALITY, address)
+    }
+
+    suspend fun getCentralityTransactions(address: String? = null): Any? {
+        return getTransactionHistory(NetworkName.CENTRALITY, address)
+    }
+
+    suspend fun sendCentrality(
+        fromAddress: String,
+        toAddress: String,
+        amount: Double,
+        assetId: Int = 1
+    ): SendResult {
+        return try {
+            val manager = getOrCreateManager(NetworkName.CENTRALITY)
+            val centralityManager = manager as CentralityManager
+            val result = centralityManager.sendCoin(fromAddress, toAddress, amount, assetId)
+            SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
+        } catch (e: Exception) {
             SendResult(txHash = "", success = false, error = e.message)
         }
     }

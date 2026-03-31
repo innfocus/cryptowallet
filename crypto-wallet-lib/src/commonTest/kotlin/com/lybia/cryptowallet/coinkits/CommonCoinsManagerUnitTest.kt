@@ -154,4 +154,35 @@ class CommonCoinsManagerUnitTest {
         assertFalse(manager.supportsFeeEstimation(NetworkName.TON))
         assertFalse(manager.supportsFeeEstimation(NetworkName.MIDNIGHT))
     }
+
+    // ── Centrality delegation tests ─────────────────────────────────────────
+
+    @Test
+    fun getBalanceCentralityDelegatesToCentralityManager() = runTest {
+        val manager = CommonCoinsManager(mnemonic = testMnemonic)
+        // getBalance delegates to CentralityManager which calls the API.
+        // Without a mock, the network call will fail, but delegation should still work
+        // (returning a failure result rather than throwing).
+        val result = manager.getBalance(NetworkName.CENTRALITY, "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY")
+        // The call should not throw — it returns a BalanceResult with success=false on network error
+        assertNotNull(result)
+    }
+
+    @Test
+    fun getTransactionHistoryCentralityDelegatesToCentralityManager() = runTest {
+        val manager = CommonCoinsManager(mnemonic = testMnemonic)
+        // Without a mock, the network call will fail, returning null
+        val result = manager.getTransactionHistory(NetworkName.CENTRALITY, "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY")
+        // Should not throw — returns null on network error
+    }
+
+    @Test
+    fun transferCentralityDelegatesToCentralityManager() = runTest {
+        val manager = CommonCoinsManager(mnemonic = testMnemonic)
+        // Without a mock, the network call will fail, but delegation should still work
+        val result = manager.transfer(NetworkName.CENTRALITY, "0xdeadbeef")
+        assertNotNull(result)
+        // Network error expected, so success should be false
+        assertFalse(result.success)
+    }
 }

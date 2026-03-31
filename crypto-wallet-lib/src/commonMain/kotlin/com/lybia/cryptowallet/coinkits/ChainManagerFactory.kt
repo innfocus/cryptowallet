@@ -17,6 +17,8 @@ import com.lybia.cryptowallet.wallets.ethereum.EthereumManager
 import com.lybia.cryptowallet.wallets.midnight.MidnightManager
 import com.lybia.cryptowallet.wallets.ripple.RippleManager
 import com.lybia.cryptowallet.wallets.ton.TonManager
+import com.lybia.cryptowallet.wallets.centrality.CentralityManager
+import com.lybia.cryptowallet.services.CentralityApiService
 
 /**
  * Configuration for a chain manager.
@@ -63,6 +65,10 @@ object ChainManagerFactory {
                 apiService = MidnightApiService(baseUrl = config.apiBaseUrl)
             )
             NetworkName.XRP -> RippleManager(mnemonic)
+            NetworkName.CENTRALITY -> CentralityManager(
+                mnemonic = mnemonic,
+                apiService = CentralityApiService()
+            )
         }
     }
 

@@ -5,6 +5,7 @@ import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.wallets.bridge.CardanoMidnightBridge
 import com.lybia.cryptowallet.wallets.bridge.EthereumArbitrumBridge
+import com.lybia.cryptowallet.wallets.centrality.CentralityManager
 import io.kotest.property.Arb
 import io.kotest.property.arbitrary.enum
 import io.kotest.property.checkAll
@@ -35,6 +36,18 @@ class ChainManagerFactoryTest {
         NetworkName.ETHEREUM to NetworkName.ARBITRUM,
         NetworkName.ARBITRUM to NetworkName.ETHEREUM
     )
+
+    // ── Unit test: CENTRALITY creates CentralityManager ──
+
+    @Test
+    fun createWalletManagerCentralityReturnsCentralityManager() {
+        val manager = ChainManagerFactory.createWalletManager(
+            NetworkName.CENTRALITY, testMnemonic
+        )
+        assertNotNull(manager, "createWalletManager(CENTRALITY) should return non-null")
+        assertIs<CentralityManager>(manager,
+            "createWalletManager(CENTRALITY) should return CentralityManager instance")
+    }
 
     // ── Property 14: Factory createStakingManager trả về đúng kết quả ──
 

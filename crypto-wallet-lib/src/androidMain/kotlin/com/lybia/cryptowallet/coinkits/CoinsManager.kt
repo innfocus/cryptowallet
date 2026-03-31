@@ -3,12 +3,6 @@ package com.lybia.cryptowallet.coinkits
 import co.touchlab.kermit.Logger
 import co.touchlab.kermit.LogcatWriter
 import com.google.gson.JsonObject
-import com.lybia.cryptowallet.coinkits.centrality.model.CennzAddress
-import com.lybia.cryptowallet.coinkits.centrality.networking.CennzEstimateFeeHandle
-import com.lybia.cryptowallet.coinkits.centrality.networking.CennzGetAddressHandle
-import com.lybia.cryptowallet.coinkits.centrality.networking.CennzGetBalanceHandle
-import com.lybia.cryptowallet.coinkits.centrality.networking.CentralityNetwork
-import com.lybia.cryptowallet.coinkits.centrality.networking.toHexWithPrefix
 import com.lybia.cryptowallet.enums.ACTCoin
 import com.lybia.cryptowallet.enums.ACTNetwork
 import com.lybia.cryptowallet.wallets.hdwallet.bip32.ACTPrivateKey
@@ -253,25 +247,17 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
 
         return when (coin) {
             ACTCoin.Centrality -> {
-                logger.d { "Generating Centrality address" }
-                val wallet = getHDWallet() ?: return null
-                val seed = wallet.calculateSeed(ACTNetwork(ACTCoin.Centrality, false))
-                CentralityNetwork.shared.getPublicAddress(
-                    seed.toHexWithPrefix(),
-                    object : CennzGetAddressHandle {
-                        override fun completionHandler(address: CennzAddress?, error: String) {
-                            if (address != null) {
-                                val actAddress = ACTAddress(
-                                    address.address,
-                                    ACTNetwork(ACTCoin.Centrality, false)
-                                )
-                                addressesManager[symbolName] = arrayOf(actAddress)
-                            } else {
-                                logger.e { "Failed to get Centrality address: $error" }
-                            }
-                        }
-                    })
-                null
+                logger.d { "Generating Centrality address via commonManager" }
+                launch {
+                    try {
+                        val addr = commonManager.getAddress(NetworkName.CENTRALITY)
+                        val actAddress = ACTAddress(addr, ACTNetwork(ACTCoin.Centrality, false))
+                        addressesManager[symbolName] = arrayOf(actAddress)
+                    } catch (e: Exception) {
+                        logger.e(e) { "Failed to get Centrality address" }
+                    }
+                }
+                addressesManager[symbolName]
             }
 
             ACTCoin.TON -> {
@@ -312,11 +298,19 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
             ACTCoin.Ethereum -> getETHBalance(adds.first(), completionHandler)
             ACTCoin.Cardano -> getADABalance(adds, completionHandler)
             ACTCoin.Ripple -> getXRPBalance(adds.first(), completionHandler)
-            ACTCoin.Centrality -> getCentralityBalance(
-                adds.first().rawAddressString(),
-                coin.assetId,
-                completionHandler
-            )
+            ACTCoin.Centrality -> {
+                launch {
+                    try {
+                        val result = commonManager.getBalance(NetworkName.CENTRALITY, adds.first().rawAddressString())
+                        withContext(Dispatchers.Main) {
+                            completionHandler.completionHandler(result.balance, result.success)
+                        }
+                    } catch (e: Exception) {
+                        logger.e(e) { "Failed to get Centrality balance" }
+                        withContext(Dispatchers.Main) { completionHandler.completionHandler(0.0, false) }
+                    }
+                }
+            }
 
             ACTCoin.TON -> getTonBalance(adds.first(), completionHandler)
             else -> {
@@ -385,11 +379,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
             }
 
             ACTCoin.Centrality -> {
-                CentralityNetwork.shared.calculateEstimateFee(object : CennzEstimateFeeHandle {
-                    override fun completionHandler(estimateFee: Long, error: String) {
-                        completionHandler.completionHandler(estimateFee.toDouble(), error)
-                    }
-                })
+                completionHandler.completionHandler(ACTCoin.Centrality.feeDefault(), "")
             }
 
             ACTCoin.TON -> {
@@ -468,6 +458,24 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
 
             ACTCoin.TON -> {
                 sendTonCoin(toAddressStr, amount, networkMemo, completionHandler)
+            }
+
+            ACTCoin.Centrality -> {
+                launch {
+                    try {
+                        val result = commonManager.sendCentrality(
+                            fromAddress.rawAddressString(), toAddressStr, amount, coin.assetId
+                        )
+                        withContext(Dispatchers.Main) {
+                            completionHandler.completionHandler(result.txHash, result.success, result.error ?: "")
+                        }
+                    } catch (e: Exception) {
+                        logger.e(e) { "Failed to send Centrality" }
+                        withContext(Dispatchers.Main) {
+                            completionHandler.completionHandler("", false, e.message ?: "Error")
+                        }
+                    }
+                }
             }
 
             else -> {
@@ -680,21 +688,6 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
                 withContext(Dispatchers.Main) { completionHandler.completionHandler(0.0, false) }
             }
         }
-    }
-
-    private fun getCentralityBalance(
-        address: String,
-        assetId: Int,
-        completionHandler: BalanceHandle
-    ) {
-        CentralityNetwork.shared.scanAccount(address, assetId, object : CennzGetBalanceHandle {
-            override fun completionHandler(balance: Long, error: String) {
-                if (error.isNotEmpty()) {
-                    logger.e { "Failed to get Centrality balance: $error" }
-                }
-                completionHandler.completionHandler(balance.toDouble(), error.isEmpty())
-            }
-        })
     }
 
     private fun tonCoinNetwork() = CoinNetwork(name = NetworkName.TON)
