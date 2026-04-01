@@ -79,7 +79,7 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
     - Khi có service fee: thêm output bổ sung đến `serviceAddress` với `serviceFeeAmount` trong UTXO transaction
     - _Requirements: 2.2_
 
-  - [-] 5.3 Viết unit tests cho BitcoinManager service fee
+  - [x] 5.3 Viết unit tests cho BitcoinManager service fee
     - Test BitcoinManager tạo transaction với service fee output
     - Test tương thích ngược khi không có service fee
     - _Requirements: 1.4, 2.2_
@@ -90,7 +90,7 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
     - Khi có service fee: thêm output bổ sung đến `serviceAddress` trong Cardano transaction
     - _Requirements: 2.2_
 
-  - [ ] 6.2 Viết unit tests cho CardanoManager service fee
+  - [x] 6.2 Viết unit tests cho CardanoManager service fee
     - Test CardanoManager tạo transaction với service fee output
     - Test tương thích ngược khi không có service fee
     - _Requirements: 2.2_
@@ -125,19 +125,19 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
     - Khi `hasServiceFee == false` (serviceAddress rỗng/null hoặc serviceFee = 0): chỉ giao dịch chính, không thay đổi hành vi
     - _Requirements: 2.3, 2.4, 5.4_
 
-  - [ ] 9.3 Viết property test cho Account Chain gửi hai giao dịch
+  - [x] 9.3 Viết property test cho Account Chain gửi hai giao dịch
     - **Property 4: Account Chain gửi hai giao dịch**
     - **Validates: Requirements 2.1**
 
-  - [~] 9.4 Viết property test cho chia đôi phí mạng lưới
+  - [x] 9.4 Viết property test cho chia đôi phí mạng lưới
     - **Property 7: Chia đôi phí mạng lưới cho Account Chain**
     - **Validates: Requirements 3.1, 3.2**
 
-  - [~] 9.5 Viết property test cho giao dịch chính thất bại
+  - [x] 9.5 Viết property test cho giao dịch chính thất bại
     - **Property 6: Giao dịch chính thất bại ngăn giao dịch phí dịch vụ**
     - **Validates: Requirements 2.5**
 
-  - [~] 9.6 Viết property test cho giao dịch phí dịch vụ thất bại
+  - [x] 9.6 Viết property test cho giao dịch phí dịch vụ thất bại
     - **Property 9: Giao dịch phí dịch vụ thất bại bảo toàn giao dịch chính**
     - **Validates: Requirements 6.1**
 
@@ -150,7 +150,7 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
     - Convert `serviceFee` từ ADA sang lovelace và truyền vào `buildAndSignTransaction`
     - _Requirements: 2.2_
 
-  - [ ]* 10.3 Viết property test cho UTXO Chain bao gồm service fee output
+  - [x]* 10.3 Viết property test cho UTXO Chain bao gồm service fee output
     - **Property 5: UTXO Chain bao gồm service fee output**
     - **Validates: Requirements 2.2**
 
@@ -158,7 +158,7 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
   - Đảm bảo tất cả tests pass, hỏi người dùng nếu có thắc mắc.
 
 - [ ] 12. End-to-end integration tests
-  - [ ] 12.1 Viết unit tests end-to-end cho service fee flow
+  - [x] 12.1 Viết unit tests end-to-end cho service fee flow
     - Test `estimateFee` → `validateSufficientBalance` → `sendCoin` flow cho Account Chain (ETH, XRP, TON)
     - Test `estimateFee` → `validateSufficientBalance` → `sendCoin` flow cho UTXO Chain (BTC, Cardano)
     - Test flow khi không có service fee (tương thích ngược)

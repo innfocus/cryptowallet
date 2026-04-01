@@ -319,11 +319,37 @@ launch {
 
 ### estimateFee (unified)
 
-`estimateFee` trả về phí giao dịch ước tính cho mỗi chain. ETH/Arbitrum dùng gas estimation thực tế, các chain khác trả về default fee.
+`estimateFee` ước tính phí giao dịch cho mỗi chain. Hỗ trợ tham số `serviceAddress` và `serviceFee` để tính phí bao gồm giao dịch phí dịch vụ.
+
+#### Chữ ký hàm
+
+```kotlin
+suspend fun estimateFee(
+    coin: NetworkName,
+    amount: Double = 0.0,
+    fromAddress: String? = null,
+    toAddress: String? = null,
+    serviceAddress: String? = null,    // Địa chỉ nhận phí dịch vụ (null = không có)
+    serviceFee: Double = 0.0           // Số tiền phí dịch vụ (0.0 = không có)
+): FeeEstimateResult
+```
+
+> Tham số `serviceAddress` và `serviceFee` có giá trị mặc định — tương thích ngược hoàn toàn. Code cũ gọi `estimateFee(coin, amount)` vẫn hoạt động bình thường.
+
+#### Cách hoạt động với Service Fee
+
+| Loại chain | Khi có service fee | Khi không có service fee |
+|---|---|---|
+| **Account Chain** (ETH, Arbitrum, XRP, TON) | Phí × `FEE_MULTIPLIER` (= 2) — dự trù cho cả giao dịch chính và giao dịch phí dịch vụ | Phí bình thường (hệ số 1) |
+| **UTXO Chain** (BTC, Cardano) | Truyền `serviceAddress` vào chain manager để tính thêm output bổ sung | Phí bình thường |
+
+Service fee được kích hoạt khi `serviceAddress` không rỗng/null **VÀ** `serviceFee > 0`.
+
+#### Ví dụ sử dụng
 
 ```kotlin
 launch {
-    // ─── Ethereum (gas-based, cần fromAddress + toAddress) ──────────
+    // ─── Không có service fee (hành vi cũ, không thay đổi) ──────────
     val ethFee = manager.estimateFee(
         coin = NetworkName.ETHEREUM,
         amount = 0.1,
@@ -331,39 +357,119 @@ launch {
         toAddress = "0xTo..."
     )
     // FeeEstimateResult(fee, gasLimit, gasPrice, unit, success, error)
-    if (ethFee.success) {
-        println("ETH fee: ${ethFee.fee} ${ethFee.unit}")
-        println("Gas limit: ${ethFee.gasLimit}, Gas price: ${ethFee.gasPrice}")
-    }
 
-    // ─── TON (estimate qua dummy BOC) ───────────────────────────────
+    // ─── Có service fee — Account Chain (phí × 2) ──────────────────
+    val ethFeeWithService = manager.estimateFee(
+        coin = NetworkName.ETHEREUM,
+        amount = 0.1,
+        fromAddress = "0xFrom...",
+        toAddress = "0xTo...",
+        serviceAddress = "0xServiceWallet...",
+        serviceFee = 0.005  // 0.005 ETH phí dịch vụ
+    )
+    // ethFeeWithService.fee ≈ ethFee.fee × 2
+
+    // ─── Có service fee — UTXO Chain (thêm output) ─────────────────
+    val btcFeeWithService = manager.estimateFee(
+        coin = NetworkName.BTC,
+        amount = 0.001,
+        toAddress = "bc1q...",
+        serviceAddress = "bc1qServiceWallet...",
+        serviceFee = 0.0001  // 0.0001 BTC phí dịch vụ
+    )
+    // btcFeeWithService.fee >= btcFee.fee (thêm output tăng kích thước TX)
+
+    // ─── TON với service fee ────────────────────────────────────────
     val tonFee = manager.estimateFee(
         coin = NetworkName.TON,
-        amount = 0.5
+        amount = 0.5,
+        serviceAddress = "EQServiceWallet...",
+        serviceFee = 0.01
     )
-    if (tonFee.success) println("TON fee: ${tonFee.fee} ${tonFee.unit}")
+    // tonFee.fee ≈ baseFee × 2
 
-    // ─── Cardano, Centrality, XRP, Midnight (static default) ────────
+    // ─── XRP với service fee ────────────────────────────────────────
+    val xrpFee = manager.estimateFee(
+        coin = NetworkName.XRP,
+        serviceAddress = "rServiceWallet...",
+        serviceFee = 1.0
+    )
+    // xrpFee.fee ≈ baseFee × 2
+
+    // ─── Static default (không ảnh hưởng bởi service fee) ───────────
     val adaFee = manager.estimateFee(coin = NetworkName.CARDANO)
     val cenFee = manager.estimateFee(coin = NetworkName.CENTRALITY)
-    val xrpFee = manager.estimateFee(coin = NetworkName.XRP)
     val midFee = manager.estimateFee(coin = NetworkName.MIDNIGHT)
-
-    println("ADA fee: ${adaFee.fee}")   // ACTCoin.Cardano.feeDefault()
-    println("CENNZ fee: ${cenFee.fee}") // ACTCoin.Centrality.feeDefault()
-    println("XRP fee: ${xrpFee.fee}")   // ACTCoin.Ripple.feeDefault()
 }
 ```
 
-| Chain | Estimation | Ghi chú |
+| Chain | Estimation | Service Fee |
 |---|---|---|
-| ETH / Arbitrum | ✅ Dynamic | Gas estimation qua IFeeEstimator |
-| TON | ✅ Dynamic | Estimate qua TonApiService (dummy BOC) |
-| Cardano | Static | `ACTCoin.Cardano.feeDefault()` |
-| Midnight | Static | `ACTCoin.Midnight.feeDefault()` |
-| XRP | ✅ Dynamic | `fee` RPC method (open_ledger_fee, fallback 12 drops) |
-| Centrality | Static | `ACTCoin.Centrality.feeDefault()` |
-| BTC | ✅ Dynamic | BlockCypher `/txs/new` hoặc Local builder (Esplora + mempool.space) |
+| ETH / Arbitrum | ✅ Dynamic (gas) | Phí × 2 |
+| TON | ✅ Dynamic (BOC) | Phí × 2 |
+| XRP | ✅ Dynamic (RPC) | Phí × 2 |
+| BTC | ✅ Dynamic (UTXO) | Thêm output |
+| Cardano | Static default | Thêm output (tính khi send) |
+| Midnight | Static default | — |
+| Centrality | Static default | — |
+
+### validateSufficientBalance (mới)
+
+Kiểm tra số dư đủ để thực hiện giao dịch bao gồm phí dịch vụ. Dùng kết quả từ `estimateFee` (đã nhân đôi cho Account chains).
+
+```kotlin
+fun validateSufficientBalance(
+    coin: NetworkName,
+    amount: Double,
+    networkFee: Double,     // Kết quả từ estimateFee (đã × 2 cho Account chains)
+    serviceFee: Double,
+    balance: Double
+): BalanceValidationResult
+// BalanceValidationResult(sufficient: Boolean, totalRequired: Double, deficit: Double)
+```
+
+#### Ví dụ sử dụng
+
+```kotlin
+launch {
+    // Bước 1: Ước tính phí
+    val feeResult = manager.estimateFee(
+        coin = NetworkName.ETHEREUM,
+        amount = 1.0,
+        fromAddress = "0xFrom...",
+        toAddress = "0xTo...",
+        serviceAddress = "0xService...",
+        serviceFee = 0.01
+    )
+    // feeResult.fee đã × 2 cho Account chain
+
+    // Bước 2: Kiểm tra đủ số dư
+    val validation = manager.validateSufficientBalance(
+        coin = NetworkName.ETHEREUM,
+        amount = 1.0,
+        networkFee = feeResult.fee,   // Đã bao gồm phí cho cả 2 giao dịch
+        serviceFee = 0.01,
+        balance = 1.5
+    )
+
+    if (!validation.sufficient) {
+        println("Thiếu ${validation.deficit} ETH (cần ${validation.totalRequired})")
+        return@launch
+    }
+
+    // Bước 3: Gửi giao dịch
+    val result = manager.sendCoin(
+        coin = NetworkName.ETHEREUM,
+        toAddress = "0xTo...",
+        amount = 1.0,
+        networkFee = feeResult.fee,
+        serviceFee = 0.01,
+        serviceAddress = "0xService..."
+    )
+}
+```
+
+> Công thức: `totalRequired = amount + networkFee + serviceFee`. Áp dụng giống nhau cho cả UTXO và Account chains vì `estimateFee` đã xử lý nhân đôi phí cho Account chains.
 
 ---
 
@@ -1485,33 +1591,31 @@ val freshManager = CommonCoinsManager(mnemonic = newMnemonic)
 // Trước:
 // CoinsManager.shared.estimateFee(amount, address, paramFee, serviceFee, network, handler)
 
-// Sau — Cardano/Centrality: dùng feeDefault (không cần gọi network)
+// Sau — Unified estimateFee (recommended, hỗ trợ service fee)
+launch {
+    // Không có service fee (tương thích ngược)
+    val fee = manager.estimateFee(coin = NetworkName.ETHEREUM, amount = 0.1,
+        fromAddress = "0x...", toAddress = "0x...")
+
+    // Có service fee — Account chain tự nhân × 2
+    val feeWithService = manager.estimateFee(
+        coin = NetworkName.ETHEREUM, amount = 0.1,
+        fromAddress = "0x...", toAddress = "0x...",
+        serviceAddress = "0xService...", serviceFee = 0.005
+    )
+    // feeWithService.fee ≈ fee.fee × 2
+
+    // Kiểm tra đủ số dư (mới)
+    val validation = manager.validateSufficientBalance(
+        coin = NetworkName.ETHEREUM, amount = 0.1,
+        networkFee = feeWithService.fee, serviceFee = 0.005, balance = 1.0
+    )
+    // BalanceValidationResult(sufficient, totalRequired, deficit)
+}
+
+// Sau — Static default (vẫn hoạt động)
 val cardanoFee = ACTCoin.Cardano.feeDefault()      // 0.2 ADA
 val centralityFee = ACTCoin.Centrality.feeDefault() // fixed fee
-
-// Sau — Ethereum/Arbitrum: dùng EthereumManager trực tiếp
-launch {
-    if (manager.supportsFeeEstimation(NetworkName.ETHEREUM)) {
-        // Cast sang IFeeEstimator cho fee estimation chi tiết
-        val ethManager = ChainManagerFactory.createWalletManager(
-            NetworkName.ETHEREUM, mnemonic
-        ) as IFeeEstimator
-        val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
-        val fee = ethManager.estimateFee(
-            FeeEstimateParams(fromAddress, toAddress, amount),
-            coinNetwork
-        )
-        // FeeEstimate(fee, gasLimit, gasPrice, unit)
-    }
-}
-
-// Sau — TON: dùng TonManager.estimateFee trực tiếp
-launch {
-    val tonManager = TonManager(mnemonic)
-    val coinNetwork = CoinNetwork(NetworkName.TON)
-    val fee = TonApiService.INSTANCE.estimateFee(coinNetwork, address, bocBase64)
-    // fee: Long? (nanoton)
-}
 ```
 
 ```kotlin
@@ -1763,23 +1867,35 @@ launch {
 
 // ─── estimateFee(...) ───────────────────────────────────────────────
 // Trước: CoinsManager.shared.estimateFee(amount, ser, fee, 0.0, 0.0, network, handler)
-// Sau — Cách 1: Unified estimateFee (recommended)
+// Sau — Unified estimateFee (recommended, hỗ trợ service fee)
 launch {
+    // Không có service fee (tương thích ngược)
     val fee = manager.estimateFee(coin = NetworkName.CARDANO)
     // FeeEstimateResult(fee, gasLimit?, gasPrice?, unit, success, error?)
-    println("Fee: ${fee.fee} ${fee.unit}")
 
     // ETH/Arbitrum: dynamic gas estimation
     val ethFee = manager.estimateFee(
-        coin = NetworkName.ETHEREUM,
-        amount = 0.1,
-        fromAddress = "0x...",
-        toAddress = "0x..."
+        coin = NetworkName.ETHEREUM, amount = 0.1,
+        fromAddress = "0x...", toAddress = "0x..."
     )
+
+    // Có service fee — phí tự nhân × 2 cho Account chains
+    val ethFeeWithService = manager.estimateFee(
+        coin = NetworkName.ETHEREUM, amount = 0.1,
+        fromAddress = "0x...", toAddress = "0x...",
+        serviceAddress = "0xService...", serviceFee = 0.005
+    )
+
     // TON: dynamic estimation via dummy BOC
     val tonFee = manager.estimateFee(coin = NetworkName.TON, amount = 0.5)
+
+    // Kiểm tra đủ số dư (mới)
+    val validation = manager.validateSufficientBalance(
+        coin = NetworkName.ETHEREUM, amount = 0.1,
+        networkFee = ethFeeWithService.fee, serviceFee = 0.005, balance = 1.0
+    )
 }
-// Sau — Cách 2: Static default (vẫn hoạt động)
+// Sau — Static default (vẫn hoạt động)
 val fee = ACTCoin.Cardano.feeDefault()  // Cardano, Centrality, Ripple
 ```
 
