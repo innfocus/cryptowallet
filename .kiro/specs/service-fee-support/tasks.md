@@ -7,21 +7,21 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
 ## Tasks
 
 - [ ] 1. Thêm helper functions và hằng số cho service fee
-  - [-] 1.1 Thêm hằng số `FEE_MULTIPLIER`, `UTXO_CHAINS`, `ACCOUNT_CHAINS` vào companion object của `CommonCoinsManager`
+  - [x] 1.1 Thêm hằng số `FEE_MULTIPLIER`, `UTXO_CHAINS`, `ACCOUNT_CHAINS` vào companion object của `CommonCoinsManager`
     - Thêm `const val FEE_MULTIPLIER = 2`
     - Thêm `val UTXO_CHAINS = setOf(NetworkName.BTC, NetworkName.CARDANO)`
     - Thêm `val ACCOUNT_CHAINS = setOf(NetworkName.ETHEREUM, NetworkName.ARBITRUM, NetworkName.XRP, NetworkName.TON)`
     - _Requirements: 1.2, 1.3, 1.4_
 
-  - [~] 1.2 Thêm helper function `isUtxoChain(coin: NetworkName): Boolean`
+  - [x] 1.2 Thêm helper function `isUtxoChain(coin: NetworkName): Boolean`
     - Trả về `coin in UTXO_CHAINS`
     - _Requirements: 1.4, 2.2, 4.4_
 
-  - [~] 1.3 Thêm helper function `hasServiceFee(serviceAddress: String?, serviceFee: Double): Boolean`
+  - [x] 1.3 Thêm helper function `hasServiceFee(serviceAddress: String?, serviceFee: Double): Boolean`
     - Trả về `!serviceAddress.isNullOrBlank() && serviceFee > 0.0`
     - _Requirements: 5.1, 5.2, 5.3, 2.3, 2.4_
 
-  - [~] 1.4 Viết property test cho `hasServiceFee`
+  - [-] 1.4 Viết property test cho `hasServiceFee`
     - **Property 1: Phát hiện hasServiceFee**
     - **Validates: Requirements 5.1, 5.2, 5.3, 2.3, 2.4**
 

@@ -80,6 +80,18 @@ class CommonCoinsManager(
     private val managers = mutableMapOf<NetworkName, IWalletManager>()
 
     companion object {
+        /** Hệ số nhân phí mạng lưới cho Account chains khi có service fee */
+        const val FEE_MULTIPLIER = 2
+
+        /** Các chain UTXO-based */
+        val UTXO_CHAINS = setOf(NetworkName.BTC, NetworkName.CARDANO)
+
+        /** Các chain Account-based hỗ trợ service fee */
+        val ACCOUNT_CHAINS = setOf(
+            NetworkName.ETHEREUM, NetworkName.ARBITRUM,
+            NetworkName.XRP, NetworkName.TON
+        )
+
         /**
          * Shared singleton instance — mirrors CoinsManager.shared pattern.
          *
@@ -163,6 +175,24 @@ class CommonCoinsManager(
                 coin, mnemonic, configs[coin] ?: ChainConfig.default(coin)
             )
         }
+    }
+
+    /**
+     * Xác định chain có phải UTXO-based không.
+     * UTXO chains (Bitcoin, Cardano) xử lý service fee bằng cách thêm output bổ sung
+     * trong cùng giao dịch, khác với Account chains gửi giao dịch riêng biệt.
+     */
+    private fun isUtxoChain(coin: NetworkName): Boolean {
+        return coin in UTXO_CHAINS
+    }
+
+    /**
+     * Xác định có phí dịch vụ hay không.
+     * Trả về true khi serviceAddress không null/blank VÀ serviceFee > 0.
+     * Khi false, toàn bộ logic phí dịch vụ được bỏ qua.
+     */
+    private fun hasServiceFee(serviceAddress: String?, serviceFee: Double): Boolean {
+        return !serviceAddress.isNullOrBlank() && serviceFee > 0.0
     }
 
     /**
