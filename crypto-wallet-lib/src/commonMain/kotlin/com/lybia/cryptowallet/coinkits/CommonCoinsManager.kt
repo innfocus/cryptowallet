@@ -986,16 +986,20 @@ class CommonCoinsManager(
      * @param amount Transaction amount in the chain's major unit
      * @param fromAddress Sender address (required for ETH/Arbitrum gas estimation)
      * @param toAddress Recipient address (required for ETH/Arbitrum gas estimation)
+     * @param serviceAddress Service fee recipient address (null = no service fee)
+     * @param serviceFee Service fee amount in the chain's major unit (0.0 = no service fee)
      * @return FeeEstimateResult with fee in the chain's major unit
      */
     suspend fun estimateFee(
         coin: NetworkName,
         amount: Double = 0.0,
         fromAddress: String? = null,
-        toAddress: String? = null
+        toAddress: String? = null,
+        serviceAddress: String? = null,
+        serviceFee: Double = 0.0
     ): FeeEstimateResult {
         return try {
-            when (coin) {
+            val baseResult = when (coin) {
                 NetworkName.ETHEREUM, NetworkName.ARBITRUM -> {
                     val manager = getOrCreateManager(coin)
                     val feeEstimator = manager as? IFeeEstimator
@@ -1034,6 +1038,10 @@ class CommonCoinsManager(
                 }
 
                 NetworkName.CARDANO -> {
+                    // TODO (Task 7.2): When hasServiceFee is true, Cardano fee estimation
+                    // should account for the additional service fee output in the transaction.
+                    // CardanoManager currently uses a static default fee; once it supports
+                    // dynamic estimation with serviceAddress, pass it here.
                     FeeEstimateResult(
                         fee = ACTCoin.Cardano.feeDefault(),
                         unit = "ADA",
@@ -1071,6 +1079,9 @@ class CommonCoinsManager(
                     val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
                     val to = toAddress ?: btcManager.getAddress()
                     val amountSatoshi = doubleToSmallestUnit(amount, 100_000_000L)
+                    // TODO (Task 7.2): Pass serviceAddress to btcManager.estimateFee
+                    // to account for the additional UTXO output when hasServiceFee is true.
+                    // BitcoinManager.estimateFee needs a serviceAddress parameter first.
                     val feeSatoshi = btcManager.estimateFee(to, amountSatoshi)
                     if (feeSatoshi != null) {
                         FeeEstimateResult(
@@ -1091,6 +1102,15 @@ class CommonCoinsManager(
                 else -> {
                     FeeEstimateResult(fee = 0.0, success = false, error = "Fee estimation not supported for $coin")
                 }
+            }
+
+            // Apply service fee multiplier for Account chains:
+            // Account chains need two separate transactions (main + service fee),
+            // so the network fee is doubled to cover both.
+            if (baseResult.success && hasServiceFee(serviceAddress, serviceFee) && !isUtxoChain(coin)) {
+                baseResult.copy(fee = baseResult.fee * FEE_MULTIPLIER)
+            } else {
+                baseResult
             }
         } catch (e: Exception) {
             logger.e(e) { "Failed to estimate fee for $coin" }

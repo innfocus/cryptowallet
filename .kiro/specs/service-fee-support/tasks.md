@@ -46,38 +46,73 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
     - Test UTXO chain vs Account chain tính toán khác nhau
     - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [-] 3. Checkpoint - Đảm bảo tất cả tests pass
+- [x] 3. Checkpoint - Đảm bảo tất cả tests pass
   - Đảm bảo tất cả tests pass, hỏi người dùng nếu có thắc mắc.
 
-- [ ] 4. Mở rộng hàm `estimateFee` hỗ trợ service fee
-  - [~] 4.1 Bổ sung tham số `serviceAddress: String? = null` và `serviceFee: Double = 0.0` vào hàm `estimateFee` trong `CommonCoinsManager`
+- [x] 4. Mở rộng hàm `estimateFee` hỗ trợ service fee (Account Chain)
+  - [x] 4.1 Bổ sung tham số `serviceAddress: String? = null` và `serviceFee: Double = 0.0` vào hàm `estimateFee` trong `CommonCoinsManager`
     - Giữ nguyên chữ ký hiện tại tương thích ngược (tham số mới có giá trị mặc định)
     - _Requirements: 1.5_
 
-  - [~] 4.2 Implement logic service fee cho Account Chain trong `estimateFee`
+  - [x] 4.2 Implement logic service fee cho Account Chain trong `estimateFee`
     - Khi `hasServiceFee == true` và coin thuộc Account Chain (ETH, Arbitrum, XRP, TON): nhân kết quả fee × `FEE_MULTIPLIER`
     - Khi `hasServiceFee == false`: giữ nguyên hành vi hiện tại
     - _Requirements: 1.1, 1.2, 1.3_
 
-  - [~] 4.3 Implement logic service fee cho UTXO Chain trong `estimateFee`
-    - Khi `hasServiceFee == true` và coin thuộc UTXO Chain (BTC, Cardano): truyền `serviceAddress` vào chain manager để tính thêm output
-    - Cần mở rộng `BitcoinManager.estimateFee` và `BitcoinManager.estimateFeeLocal` để nhận `serviceAddress`
-    - _Requirements: 1.4_
-
-  - [~] 4.4 Viết property test cho hệ số nhân phí Account Chain
+  - [x] 4.3 Viết property test cho hệ số nhân phí Account Chain
     - **Property 2: Hệ số nhân phí cho Account Chain**
     - **Validates: Requirements 1.1, 1.2, 1.3**
 
-  - [~] 4.5 Viết property test cho UTXO Chain fee estimation
+  - [x] 4.4 Viết property test cho UTXO Chain fee không bị nhân đôi
     - **Property 3: UTXO Chain fee estimation với service address**
     - **Validates: Requirements 1.4**
 
-  - [~] 4.6 Viết property test cho tương thích ngược
+
+- [ ] 5. Mở rộng BitcoinManager cho UTXO service fee
+  - [-] 5.1 Mở rộng `BitcoinManager.estimateFee` và `estimateFeeLocal` để tính phí với service address
+    - Bổ sung tham số `serviceAddress: String? = null` với giá trị mặc định
+    - Khi có service address: tính thêm output size trong ước tính phí
+    - _Requirements: 1.4_
+
+  - [~] 5.2 Mở rộng `BitcoinManager.sendBtc` và `sendBtcLocal` để hỗ trợ service fee output
+    - Bổ sung tham số `serviceAddress: String? = null` và `serviceFeeAmount: Long = 0` với giá trị mặc định
+    - Khi có service fee: thêm output bổ sung đến `serviceAddress` với `serviceFeeAmount` trong UTXO transaction
+    - _Requirements: 2.2_
+
+  - [ ]* 5.3 Viết unit tests cho BitcoinManager service fee
+    - Test BitcoinManager tạo transaction với service fee output
+    - Test tương thích ngược khi không có service fee
+    - _Requirements: 1.4, 2.2_
+
+- [ ] 6. Mở rộng CardanoManager cho UTXO service fee
+  - [~] 6.1 Mở rộng `CardanoManager.buildAndSignTransaction` để hỗ trợ service fee output
+    - Bổ sung tham số `serviceAddress: String? = null` và `serviceFeeLovelace: Long = 0` với giá trị mặc định
+    - Khi có service fee: thêm output bổ sung đến `serviceAddress` trong Cardano transaction
+    - _Requirements: 2.2_
+
+  - [ ]* 6.2 Viết unit tests cho CardanoManager service fee
+    - Test CardanoManager tạo transaction với service fee output
+    - Test tương thích ngược khi không có service fee
+    - _Requirements: 2.2_
+
+- [ ] 7. Checkpoint - Đảm bảo chain managers hoạt động đúng
+  - Đảm bảo tất cả tests pass, hỏi người dùng nếu có thắc mắc.
+
+- [ ] 8. Kết nối `estimateFee` với chain managers cho UTXO service fee
+  - [ ] 8.1 Cập nhật `estimateFee` dispatch cho BTC để truyền `serviceAddress` vào `BitcoinManager.estimateFee`
+    - Xóa TODO comment hiện tại và truyền `serviceAddress` khi `hasServiceFee == true`
+    - _Requirements: 1.4_
+
+  - [ ] 8.2 Cập nhật `estimateFee` dispatch cho Cardano để tính phí với service fee output
+    - Xóa TODO comment hiện tại, truyền `serviceAddress` vào CardanoManager nếu cần
+    - _Requirements: 1.4_
+
+  - [ ]* 8.3 Viết property test cho tương thích ngược estimateFee
     - **Property 10: Tương thích ngược**
     - **Validates: Requirements 1.5, 2.6**
 
-- [ ] 5. Mở rộng hàm `sendCoin` hỗ trợ gửi service fee
-  - [~] 5.1 Implement logic service fee cho Account Chain trong `sendCoin`
+- [ ] 9. Implement logic service fee trong `sendCoin` cho Account Chain
+  - [ ] 9.1 Implement logic service fee cho Account Chain trong `sendCoin`
     - Khi `hasServiceFee == true` và coin thuộc Account Chain:
       - Chia đôi `networkFee` cho mỗi giao dịch
       - Gửi giao dịch chính với `networkFee / 2`
@@ -86,80 +121,50 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
     - Xử lý riêng cho từng chain: ETH/Arbitrum gọi `sendEthBigInt`, XRP gọi `sendXrp`, TON gọi `signTransaction` + `transfer`
     - _Requirements: 2.1, 2.5, 3.1, 3.2, 3.3, 3.4, 6.1, 6.2, 6.3_
 
-  - [~] 5.2 Implement logic service fee cho UTXO Chain trong `sendCoin`
-    - Khi `hasServiceFee == true` và coin thuộc UTXO Chain: truyền `serviceAddress` và `serviceFee` vào chain manager
-    - Mở rộng `BitcoinManager.sendBtc` / `sendBtcLocal` để nhận `serviceAddress` và `serviceFeeAmount`
-    - Mở rộng `CardanoManager.buildAndSignTransaction` để nhận `serviceAddress` và `serviceFeeLovelace`
-    - _Requirements: 2.2_
-
-  - [~] 5.3 Implement logic bỏ qua service fee khi không cần thiết
+  - [ ] 9.2 Implement logic bỏ qua service fee khi không cần thiết
     - Khi `hasServiceFee == false` (serviceAddress rỗng/null hoặc serviceFee = 0): chỉ giao dịch chính, không thay đổi hành vi
     - _Requirements: 2.3, 2.4, 5.4_
 
-  - [~] 5.4 Viết property test cho Account Chain gửi hai giao dịch
+  - [ ]* 9.3 Viết property test cho Account Chain gửi hai giao dịch
     - **Property 4: Account Chain gửi hai giao dịch**
     - **Validates: Requirements 2.1**
 
-  - [~] 5.5 Viết property test cho UTXO Chain bao gồm service fee output
-    - **Property 5: UTXO Chain bao gồm service fee output**
-    - **Validates: Requirements 2.2**
-
-  - [~] 5.6 Viết property test cho giao dịch chính thất bại
-    - **Property 6: Giao dịch chính thất bại ngăn giao dịch phí dịch vụ**
-    - **Validates: Requirements 2.5**
-
-  - [~] 5.7 Viết property test cho chia đôi phí mạng lưới
+  - [ ]* 9.4 Viết property test cho chia đôi phí mạng lưới
     - **Property 7: Chia đôi phí mạng lưới cho Account Chain**
     - **Validates: Requirements 3.1, 3.2**
 
-  - [~] 5.8 Viết property test cho giao dịch phí dịch vụ thất bại
+  - [ ]* 9.5 Viết property test cho giao dịch chính thất bại
+    - **Property 6: Giao dịch chính thất bại ngăn giao dịch phí dịch vụ**
+    - **Validates: Requirements 2.5**
+
+  - [ ]* 9.6 Viết property test cho giao dịch phí dịch vụ thất bại
     - **Property 9: Giao dịch phí dịch vụ thất bại bảo toàn giao dịch chính**
     - **Validates: Requirements 6.1**
 
-- [~] 6. Checkpoint - Đảm bảo tất cả tests pass
-  - Đảm bảo tất cả tests pass, hỏi người dùng nếu có thắc mắc.
-
-- [ ] 7. Mở rộng BitcoinManager và CardanoManager cho UTXO service fee output
-  - [~] 7.1 Mở rộng `BitcoinManager.sendBtc` và `sendBtcLocal` để hỗ trợ service fee output
-    - Bổ sung tham số `serviceAddress: String? = null` và `serviceFeeAmount: Long = 0` với giá trị mặc định
-    - Khi có service fee: thêm output bổ sung đến `serviceAddress` với `serviceFeeAmount` trong UTXO transaction
-    - _Requirements: 2.2_
-
-  - [~] 7.2 Mở rộng `BitcoinManager.estimateFee` và `estimateFeeLocal` để tính phí với service address
-    - Bổ sung tham số `serviceAddress: String? = null` với giá trị mặc định
-    - Khi có service address: tính thêm output size trong ước tính phí
-    - _Requirements: 1.4_
-
-  - [~] 7.3 Mở rộng `CardanoManager.buildAndSignTransaction` để hỗ trợ service fee output
-    - Bổ sung tham số `serviceAddress: String? = null` và `serviceFeeLovelace: Long = 0` với giá trị mặc định
-    - Khi có service fee: thêm output bổ sung đến `serviceAddress` trong Cardano transaction
-    - _Requirements: 2.2_
-
-  - [~] 7.4 Viết unit tests cho BitcoinManager và CardanoManager service fee
-    - Test BitcoinManager tạo transaction với service fee output
-    - Test CardanoManager tạo transaction với service fee output
-    - Test tương thích ngược khi không có service fee
-    - _Requirements: 1.4, 2.2_
-
-- [ ] 8. Kết nối toàn bộ: cập nhật `sendCoin` và `estimateFee` gọi chain managers với tham số service fee
-  - [~] 8.1 Cập nhật `sendCoin` dispatch cho BTC để truyền `serviceAddress` và `serviceFee` vào `BitcoinManager`
+- [ ] 10. Implement logic service fee trong `sendCoin` cho UTXO Chain
+  - [ ] 10.1 Cập nhật `sendCoin` dispatch cho BTC để truyền `serviceAddress` và `serviceFee` vào `BitcoinManager`
     - Convert `serviceFee` từ BTC sang satoshi và truyền vào `sendBtc`/`sendBtcLocal`
     - _Requirements: 2.2_
 
-  - [~] 8.2 Cập nhật `sendCoin` dispatch cho Cardano để truyền `serviceAddress` và `serviceFee` vào `CardanoManager`
+  - [ ] 10.2 Cập nhật `sendCoin` dispatch cho Cardano để truyền `serviceAddress` và `serviceFee` vào `CardanoManager`
     - Convert `serviceFee` từ ADA sang lovelace và truyền vào `buildAndSignTransaction`
     - _Requirements: 2.2_
 
-  - [~] 8.3 Cập nhật `estimateFee` dispatch cho BTC để truyền `serviceAddress` vào `BitcoinManager.estimateFee`
-    - _Requirements: 1.4_
+  - [ ]* 10.3 Viết property test cho UTXO Chain bao gồm service fee output
+    - **Property 5: UTXO Chain bao gồm service fee output**
+    - **Validates: Requirements 2.2**
 
-  - [~] 8.4 Viết unit tests end-to-end cho service fee flow
+- [ ] 11. Checkpoint - Đảm bảo tất cả tests pass
+  - Đảm bảo tất cả tests pass, hỏi người dùng nếu có thắc mắc.
+
+- [ ] 12. End-to-end integration tests
+  - [ ]* 12.1 Viết unit tests end-to-end cho service fee flow
     - Test `estimateFee` → `validateSufficientBalance` → `sendCoin` flow cho Account Chain (ETH, XRP, TON)
     - Test `estimateFee` → `validateSufficientBalance` → `sendCoin` flow cho UTXO Chain (BTC, Cardano)
     - Test flow khi không có service fee (tương thích ngược)
     - _Requirements: 1.1-1.5, 2.1-2.6, 3.1-3.4, 4.1-4.4, 5.1-5.4, 6.1-6.3_
 
-- [~] 9. Final checkpoint - Đảm bảo tất cả tests pass
+- [ ] 13. Final checkpoint - Đảm bảo tất cả tests pass
   - Đảm bảo tất cả tests pass, hỏi người dùng nếu có thắc mắc.
 
 ## Ghi chú

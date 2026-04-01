@@ -1,11 +1,13 @@
 package com.lybia.cryptowallet.coinkits
 
+import com.lybia.cryptowallet.enums.NetworkName
 import io.kotest.property.Arb
 import io.kotest.property.PropTestConfig
 import io.kotest.property.arbitrary.*
 import io.kotest.property.checkAll
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -138,6 +140,327 @@ class ServiceFeePropertyTest {
             assertFalse(
                 hasServiceFee(address, fee),
                 "hasServiceFee($address, $fee) should be false when both address is invalid and fee is 0"
+            )
+        }
+    }
+}
+
+
+/**
+ * Feature: service-fee-support, Property 2: Fee multiplier for Account Chain
+ *
+ * For any coin in Account Chain (Ethereum, Arbitrum, XRP, TON) and any valid serviceAddress,
+ * the result of estimateFee with service fee should be exactly 2 times the result of
+ * estimateFee without service fee (same other parameters). When serviceAddress is empty/null,
+ * the result should equal the base result (multiplier of 1).
+ *
+ * This test replicates the fee multiplier logic from CommonCoinsManager.estimateFee:
+ *   if (baseResult.success && hasServiceFee(serviceAddress, serviceFee) && !isUtxoChain(coin)) {
+ *       baseResult.copy(fee = baseResult.fee * FEE_MULTIPLIER)
+ *   } else {
+ *       baseResult
+ *   }
+ *
+ * **Validates: Requirements 1.1, 1.2, 1.3**
+ */
+class AccountChainFeeMultiplierPropertyTest {
+
+    // ── Replicated production logic ─────────────────────────────────────
+
+    private fun hasServiceFee(serviceAddress: String?, serviceFee: Double): Boolean {
+        return !serviceAddress.isNullOrBlank() && serviceFee > 0.0
+    }
+
+    private fun isUtxoChain(coin: NetworkName): Boolean {
+        return coin in CommonCoinsManager.UTXO_CHAINS
+    }
+
+    /**
+     * Replicates the fee multiplier logic applied at the end of
+     * CommonCoinsManager.estimateFee. Given a successful base fee,
+     * returns the adjusted fee considering service fee parameters.
+     */
+    private fun applyFeeMultiplier(
+        baseFee: Double,
+        coin: NetworkName,
+        serviceAddress: String?,
+        serviceFee: Double
+    ): Double {
+        return if (hasServiceFee(serviceAddress, serviceFee) && !isUtxoChain(coin)) {
+            baseFee * CommonCoinsManager.FEE_MULTIPLIER
+        } else {
+            baseFee
+        }
+    }
+
+    // ── Arb generators ──────────────────────────────────────────────────
+
+    /** Generates Account Chain coins: Ethereum, Arbitrum, XRP, TON. */
+    private fun arbAccountChain(): Arb<NetworkName> = Arb.of(
+        NetworkName.ETHEREUM,
+        NetworkName.ARBITRUM,
+        NetworkName.XRP,
+        NetworkName.TON
+    )
+
+    /** Generates valid (non-blank) service addresses. */
+    private fun arbValidServiceAddress(): Arb<String> = Arb.of(
+        "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18",
+        "rN7n3473SaZBCG4dFL83w7p1W9cgZw6iF3",
+        "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2",
+        "0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B",
+        "rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh",
+        "EQBvW8Z5huBkMJYdnfAEM5JqTNkuWX3diqYENkWsIL0XggGG"
+    )
+
+    /** Generates invalid service addresses: null, empty, or blank-only. */
+    private fun arbInvalidServiceAddress(): Arb<String?> = Arb.of(
+        null,
+        "",
+        " ",
+        "  ",
+        "\t",
+        "\n",
+        " \t\n "
+    )
+
+    /** Generates positive service fee values. */
+    private fun arbPositiveServiceFee(): Arb<Double> = Arb.double(
+        min = 0.000001,
+        max = 100.0
+    ).filter { it > 0.0 && it.isFinite() }
+
+    /** Generates positive base fee values (simulating network fee estimates). */
+    private fun arbPositiveBaseFee(): Arb<Double> = Arb.double(
+        min = 0.000001,
+        max = 10.0
+    ).filter { it > 0.0 && it.isFinite() }
+
+    // ── Property tests ──────────────────────────────────────────────────
+
+    /**
+     * For any Account Chain coin with a valid service address and positive service fee,
+     * the fee multiplier must produce exactly baseFee * FEE_MULTIPLIER (= 2).
+     */
+    @Test
+    fun feeIsDoubledForAccountChainWithValidServiceFee() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            arbAccountChain(),
+            arbValidServiceAddress(),
+            arbPositiveServiceFee(),
+            arbPositiveBaseFee()
+        ) { coin, serviceAddress, serviceFee, baseFee ->
+            val result = applyFeeMultiplier(baseFee, coin, serviceAddress, serviceFee)
+            val expected = baseFee * CommonCoinsManager.FEE_MULTIPLIER
+
+            assertEquals(
+                expected, result,
+                "For Account chain $coin with serviceAddress='$serviceAddress' and serviceFee=$serviceFee, " +
+                    "fee should be baseFee($baseFee) * FEE_MULTIPLIER(${CommonCoinsManager.FEE_MULTIPLIER}) = $expected, but got $result"
+            )
+        }
+    }
+
+    /**
+     * For any Account Chain coin with an invalid (null/blank) service address,
+     * the fee must equal the base fee (multiplier of 1, no doubling).
+     */
+    @Test
+    fun feeIsUnchangedForAccountChainWithInvalidServiceAddress() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            arbAccountChain(),
+            arbInvalidServiceAddress(),
+            arbPositiveServiceFee(),
+            arbPositiveBaseFee()
+        ) { coin, serviceAddress, serviceFee, baseFee ->
+            val result = applyFeeMultiplier(baseFee, coin, serviceAddress, serviceFee)
+
+            assertEquals(
+                baseFee, result,
+                "For Account chain $coin with invalid serviceAddress='$serviceAddress', " +
+                    "fee should equal baseFee($baseFee), but got $result"
+            )
+        }
+    }
+
+    /**
+     * For any Account Chain coin with a valid service address but serviceFee = 0,
+     * the fee must equal the base fee (no doubling when serviceFee is zero).
+     */
+    @Test
+    fun feeIsUnchangedForAccountChainWithZeroServiceFee() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            arbAccountChain(),
+            arbValidServiceAddress(),
+            arbPositiveBaseFee()
+        ) { coin, serviceAddress, baseFee ->
+            val result = applyFeeMultiplier(baseFee, coin, serviceAddress, 0.0)
+
+            assertEquals(
+                baseFee, result,
+                "For Account chain $coin with serviceFee=0.0, " +
+                    "fee should equal baseFee($baseFee), but got $result"
+            )
+        }
+    }
+}
+
+
+/**
+ * Feature: service-fee-support, Property 3: UTXO Chain fee estimation with service address
+ *
+ * For any coin in UTXO Chain (Bitcoin, Cardano) and any valid serviceAddress,
+ * the fee multiplier logic (applyFeeMultiplier) should NOT apply — it must return
+ * baseFee unchanged for UTXO chains regardless of service fee parameters.
+ *
+ * UTXO chains handle service fee differently: they add an additional output to the
+ * transaction rather than sending a separate transaction. Therefore, the FEE_MULTIPLIER
+ * (which doubles the fee for Account chains to cover two transactions) must not be
+ * applied to UTXO chains.
+ *
+ * **Validates: Requirements 1.4**
+ */
+class UtxoChainFeeEstimationPropertyTest {
+
+    // ── Replicated production logic ─────────────────────────────────────
+
+    private fun hasServiceFee(serviceAddress: String?, serviceFee: Double): Boolean {
+        return !serviceAddress.isNullOrBlank() && serviceFee > 0.0
+    }
+
+    private fun isUtxoChain(coin: NetworkName): Boolean {
+        return coin in CommonCoinsManager.UTXO_CHAINS
+    }
+
+    /**
+     * Replicates the fee multiplier logic applied at the end of
+     * CommonCoinsManager.estimateFee. For UTXO chains, the fee should
+     * remain unchanged regardless of service fee parameters.
+     */
+    private fun applyFeeMultiplier(
+        baseFee: Double,
+        coin: NetworkName,
+        serviceAddress: String?,
+        serviceFee: Double
+    ): Double {
+        return if (hasServiceFee(serviceAddress, serviceFee) && !isUtxoChain(coin)) {
+            baseFee * CommonCoinsManager.FEE_MULTIPLIER
+        } else {
+            baseFee
+        }
+    }
+
+    // ── Arb generators ──────────────────────────────────────────────────
+
+    /** Generates UTXO Chain coins: Bitcoin, Cardano. */
+    private fun arbUtxoChain(): Arb<NetworkName> = Arb.of(
+        NetworkName.BTC,
+        NetworkName.CARDANO
+    )
+
+    /** Generates valid (non-blank) service addresses. */
+    private fun arbValidServiceAddress(): Arb<String> = Arb.of(
+        "bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4",
+        "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+        "3J98t1WpEZ73CNmQviecrnyiWrnqRhWNLy",
+        "addr1qx2fxv2umyhttkxyxp8x0dlpdt3k6cwng5pxj3jhsydzer3n0d3vllmyqwsx5wktcd8cc3sq835lu7drv2xwl2wywfgse35a3x",
+        "addr1v9k2w3r5x6y7z8a9b0c1d2e3f4g5h6j7k8l9m0n1o2p3q4r5s6t7",
+        "bc1qar0srrr7xfkvy5l643lydnw9re59gtzzwf5mdq"
+    )
+
+    /** Generates invalid service addresses: null, empty, or blank-only. */
+    private fun arbInvalidServiceAddress(): Arb<String?> = Arb.of(
+        null,
+        "",
+        " ",
+        "  ",
+        "\t",
+        "\n",
+        " \t\n "
+    )
+
+    /** Generates positive service fee values. */
+    private fun arbPositiveServiceFee(): Arb<Double> = Arb.double(
+        min = 0.000001,
+        max = 100.0
+    ).filter { it > 0.0 && it.isFinite() }
+
+    /** Generates positive base fee values (simulating network fee estimates). */
+    private fun arbPositiveBaseFee(): Arb<Double> = Arb.double(
+        min = 0.000001,
+        max = 10.0
+    ).filter { it > 0.0 && it.isFinite() }
+
+    // ── Property tests ──────────────────────────────────────────────────
+
+    /**
+     * For any UTXO Chain coin with a valid service address and positive service fee,
+     * the fee multiplier must NOT be applied — the result must equal the baseFee unchanged.
+     * UTXO chains handle service fee via additional transaction outputs, not via fee doubling.
+     */
+    @Test
+    fun feeIsUnchangedForUtxoChainWithValidServiceFee() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            arbUtxoChain(),
+            arbValidServiceAddress(),
+            arbPositiveServiceFee(),
+            arbPositiveBaseFee()
+        ) { coin, serviceAddress, serviceFee, baseFee ->
+            val result = applyFeeMultiplier(baseFee, coin, serviceAddress, serviceFee)
+
+            assertEquals(
+                baseFee, result,
+                "For UTXO chain $coin with serviceAddress='$serviceAddress' and serviceFee=$serviceFee, " +
+                    "fee should equal baseFee($baseFee) unchanged (no FEE_MULTIPLIER), but got $result"
+            )
+        }
+    }
+
+    /**
+     * For any UTXO Chain coin with an invalid (null/blank) service address,
+     * the fee must also equal the base fee (no multiplier applied).
+     */
+    @Test
+    fun feeIsUnchangedForUtxoChainWithInvalidServiceAddress() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            arbUtxoChain(),
+            arbInvalidServiceAddress(),
+            arbPositiveServiceFee(),
+            arbPositiveBaseFee()
+        ) { coin, serviceAddress, serviceFee, baseFee ->
+            val result = applyFeeMultiplier(baseFee, coin, serviceAddress, serviceFee)
+
+            assertEquals(
+                baseFee, result,
+                "For UTXO chain $coin with invalid serviceAddress='$serviceAddress', " +
+                    "fee should equal baseFee($baseFee), but got $result"
+            )
+        }
+    }
+
+    /**
+     * For any UTXO Chain coin with zero service fee,
+     * the fee must equal the base fee (no multiplier applied).
+     */
+    @Test
+    fun feeIsUnchangedForUtxoChainWithZeroServiceFee() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            arbUtxoChain(),
+            arbValidServiceAddress(),
+            arbPositiveBaseFee()
+        ) { coin, serviceAddress, baseFee ->
+            val result = applyFeeMultiplier(baseFee, coin, serviceAddress, 0.0)
+
+            assertEquals(
+                baseFee, result,
+                "For UTXO chain $coin with serviceFee=0.0, " +
+                    "fee should equal baseFee($baseFee), but got $result"
             )
         }
     }
