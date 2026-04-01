@@ -64,6 +64,60 @@ class CommonCoinsManager(
     private val logger = Logger.withTag("CommonCoinsManager")
     private val managers = mutableMapOf<NetworkName, IWalletManager>()
 
+    companion object {
+        /**
+         * Shared singleton instance — mirrors CoinsManager.shared pattern.
+         *
+         * Must call [initialize] before using. Thread-safe via @Volatile + synchronized.
+         *
+         * Usage:
+         * ```kotlin
+         * // App startup
+         * CommonCoinsManager.initialize("your mnemonic here")
+         *
+         * // Anywhere in the app
+         * val address = CommonCoinsManager.shared.getAddress(NetworkName.BTC)
+         * ```
+         */
+        @Volatile
+        private var _shared: CommonCoinsManager? = null
+
+        val shared: CommonCoinsManager
+            get() = _shared ?: throw IllegalStateException(
+                "CommonCoinsManager not initialized. Call CommonCoinsManager.initialize(mnemonic) first."
+            )
+
+        /**
+         * Initialize the shared singleton with a mnemonic.
+         * Call this once at app startup (e.g. Application.onCreate or after user login).
+         *
+         * @param mnemonic BIP-39 mnemonic phrase
+         * @param configs Optional per-chain configuration (API keys, endpoints)
+         */
+        fun initialize(
+            mnemonic: String,
+            configs: Map<NetworkName, ChainConfig> = emptyMap()
+        ) {
+            synchronized(this) {
+                _shared = CommonCoinsManager(mnemonic, configs)
+            }
+        }
+
+        /**
+         * Check if the shared instance has been initialized.
+         */
+        val isInitialized: Boolean get() = _shared != null
+
+        /**
+         * Reset the shared instance (e.g. on logout or wallet switch).
+         */
+        fun reset() {
+            synchronized(this) {
+                _shared = null
+            }
+        }
+    }
+
     /**
      * Secondary constructor for backward compatibility with existing tests.
      * Accepts optional CardanoApiService and MidnightApiService for DI/testing.
@@ -94,6 +148,26 @@ class CommonCoinsManager(
                 coin, mnemonic, configs[coin] ?: ChainConfig.default(coin)
             )
         }
+    }
+
+    /**
+     * Get the underlying chain manager for advanced operations.
+     *
+     * Use this when you need access to chain-specific methods not exposed
+     * by the unified CommonCoinsManager API. Cast the result to the
+     * concrete manager type (e.g. BitcoinManager, EthereumManager).
+     *
+     * Example:
+     * ```kotlin
+     * val btcManager = manager.getChainManager(NetworkName.BTC) as BitcoinManager
+     * val result = btcManager.sendBtcLocal(toAddress, amountSat)
+     * ```
+     *
+     * @param coin Target chain
+     * @return IWalletManager instance (cast to concrete type as needed)
+     */
+    fun getChainManager(coin: NetworkName): IWalletManager {
+        return getOrCreateManager(coin)
     }
 
     // ── Address generation ──────────────────────────────────────────────────
@@ -1035,6 +1109,78 @@ class CommonCoinsManager(
     ): String {
         val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
         return btcManager.getAddressByType(addressType, accountIndex)
+    }
+
+    /**
+     * Send BTC using the local transaction builder (no BlockCypher dependency).
+     * Builds and signs the transaction entirely client-side using bitcoin-kmp.
+     * Uses Esplora (Blockstream) API for UTXO fetching and broadcasting only.
+     *
+     * Supports all address types: Legacy (1...), Nested SegWit (3...), Native SegWit (bc1q...).
+     *
+     * @param toAddress Destination Bitcoin address (any format)
+     * @param amountBtc Amount in BTC
+     * @param addressType Sender address type (default: NATIVE_SEGWIT)
+     * @param accountIndex HD wallet account index (default 0)
+     * @param feeRateSatPerVbyte Fee rate in sat/vB (null = auto from mempool.space)
+     */
+    suspend fun sendBtcLocal(
+        toAddress: String,
+        amountBtc: Double,
+        addressType: com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType =
+            com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0,
+        feeRateSatPerVbyte: Long? = null
+    ): SendResult {
+        return try {
+            val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
+            val amountSatoshi = (amountBtc * 100_000_000).toLong()
+            val result = btcManager.sendBtcLocal(
+                toAddress, amountSatoshi, addressType, accountIndex, feeRateSatPerVbyte
+            )
+            SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to send BTC (local)" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    /**
+     * Estimate BTC transaction fee using the local builder.
+     *
+     * @param toAddress Destination address
+     * @param amountBtc Amount in BTC
+     * @param addressType Sender address type
+     * @param accountIndex HD wallet account index
+     * @param feeRateSatPerVbyte Fee rate in sat/vB (null = auto)
+     * @return FeeEstimateResult with fee in BTC
+     */
+    suspend fun estimateBtcFeeLocal(
+        toAddress: String,
+        amountBtc: Double,
+        addressType: com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType =
+            com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0,
+        feeRateSatPerVbyte: Long? = null
+    ): FeeEstimateResult {
+        return try {
+            val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
+            val amountSatoshi = (amountBtc * 100_000_000).toLong()
+            val feeSat = btcManager.estimateFeeLocal(
+                toAddress, amountSatoshi, addressType, accountIndex, feeRateSatPerVbyte
+            )
+            if (feeSat != null) {
+                FeeEstimateResult(
+                    fee = feeSat.toDouble() / 100_000_000.0,
+                    unit = "BTC",
+                    success = true
+                )
+            } else {
+                FeeEstimateResult(fee = 0.0, unit = "BTC", success = false, error = "Estimation failed")
+            }
+        } catch (e: Exception) {
+            FeeEstimateResult(fee = 0.0, unit = "BTC", success = false, error = e.message)
+        }
     }
 
     // ── Ethereum-specific operations ────────────────────────────────────────

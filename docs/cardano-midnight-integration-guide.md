@@ -229,7 +229,7 @@ launch {
 | Centrality | ✅ | Tự orchestrate extrinsic + submit |
 | ETH / Arbitrum | ✅ | Tự build EIP-155 tx + secp256k1 sign + submit |
 | XRP | ✅ | Tự build Payment tx + secp256k1 sign + submit, hỗ trợ destinationTag |
-| BTC | ✅ | BlockCypher UTXO selection + secp256k1 sign, hỗ trợ Legacy/SegWit/Native SegWit |
+| BTC | ✅ | BlockCypher hoặc Local builder (Esplora), hỗ trợ Legacy/SegWit/Native SegWit |
 
 ### estimateFee (unified)
 
@@ -277,7 +277,7 @@ launch {
 | Midnight | Static | `ACTCoin.Midnight.feeDefault()` |
 | XRP | ✅ Dynamic | `fee` RPC method (open_ledger_fee, fallback 12 drops) |
 | Centrality | Static | `ACTCoin.Centrality.feeDefault()` |
-| BTC | ✅ Dynamic | BlockCypher `/txs/new` (fee theo UTXO count + script type) |
+| BTC | ✅ Dynamic | BlockCypher `/txs/new` hoặc Local builder (Esplora + mempool.space) |
 
 ---
 
@@ -420,6 +420,7 @@ launch {
 
 ```kotlin
 import com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType
+import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
 
 // ─── Addresses (3 loại) ─────────────────────────────────────────────
 val nativeSegwit = manager.getBtcAddress(BitcoinAddressType.NATIVE_SEGWIT)  // "bc1q..."
@@ -433,30 +434,91 @@ launch {
     val balance = manager.getBalance(NetworkName.BTC)
     val txs = manager.getTransactionHistory(NetworkName.BTC)
 
-    // ─── Direct send BTC (build + sign + submit via BlockCypher) ────
-    val send = manager.sendCoin(
-        coin = NetworkName.BTC,
-        toAddress = "bc1q...",   // hoặc "3..." hoặc "1..."
-        amount = 0.001           // 0.001 BTC
+    // ─── Option 1: Local tx builder (recommended — không phụ thuộc BlockCypher)
+    // Build + sign transaction hoàn toàn client-side bằng bitcoin-kmp.
+    // Chỉ gọi API để fetch UTXOs (Esplora/Blockstream) và broadcast.
+    val sendLocal = manager.sendBtcLocal(
+        toAddress = "bc1q...",
+        amountBtc = 0.001,
+        addressType = BitcoinAddressType.NATIVE_SEGWIT,  // hoặc NESTED_SEGWIT, LEGACY
+        accountIndex = 0,
+        feeRateSatPerVbyte = null  // null = auto từ mempool.space
     )
-    // Hoặc dùng method riêng (chọn address type):
-    val send2 = manager.sendBtc(
+
+    // Fee estimation (local)
+    val feeLocal = manager.estimateBtcFeeLocal(
+        toAddress = "bc1q...",
+        amountBtc = 0.001,
+        addressType = BitcoinAddressType.NATIVE_SEGWIT,
+        feeRateSatPerVbyte = 15  // 15 sat/vB, hoặc null = auto
+    )
+    // FeeEstimateResult(fee=0.0000xxxx BTC, unit="BTC", success=true)
+
+    // ─── Option 2: BlockCypher (legacy — vẫn hoạt động) ────────────
+    // BlockCypher xử lý UTXO selection server-side, client chỉ sign.
+    val sendBlockCypher = manager.sendBtc(
         toAddress = "1...",
         amountBtc = 0.001,
-        addressType = BitcoinAddressType.LEGACY,  // gửi từ Legacy address
+        addressType = BitcoinAddressType.LEGACY,
         accountIndex = 0
     )
 
-    // ─── Fee estimation (dynamic via BlockCypher) ───────────────────
-    val fee = manager.estimateFee(
+    // Fee estimation (BlockCypher)
+    val feeBlockCypher = manager.estimateFee(
         coin = NetworkName.BTC,
         amount = 0.001,
         toAddress = "bc1q..."
     )
-    // FeeEstimateResult(fee=0.0000xxxx BTC, unit="BTC", success=true)
+
+    // ─── sendCoin (unified — dùng BlockCypher bên trong) ────────────
+    val send = manager.sendCoin(
+        coin = NetworkName.BTC,
+        toAddress = "bc1q...",
+        amount = 0.001
+    )
 
     // ─── Pre-signed (legacy API) ────────────────────────────────────
     val sendSigned = manager.transfer(NetworkName.BTC, signedTxJson)
+}
+```
+
+#### So sánh Local Builder vs BlockCypher
+
+| | Local Builder (`sendBtcLocal`) | BlockCypher (`sendBtc`) |
+|---|---|---|
+| UTXO selection | Client-side (largest-first) | Server-side (BlockCypher) |
+| Transaction building | Client-side (bitcoin-kmp) | Server-side (BlockCypher `/txs/new`) |
+| Signing | Client-side ✅ | Client-side ✅ |
+| Script type handling | Client explicit (P2PKH/P2SH-P2WPKH/P2WPKH) | BlockCypher auto-detect |
+| API dependency | Esplora (miễn phí, self-hostable) | BlockCypher (rate limited) |
+| Offline signing | Có (nếu có UTXO cache) | Không |
+| Verify trước broadcast | Có (`correctlySpends()`) | Không |
+| Fee rate control | Chọn sat/vB cụ thể | BlockCypher tự chọn |
+
+#### Lấy BitcoinManager trực tiếp
+
+```kotlin
+// Khi cần truy cập các method riêng của BitcoinManager
+val btcManager = manager.getChainManager(NetworkName.BTC) as BitcoinManager
+
+// Local builder trực tiếp (amount in satoshis)
+launch {
+    val result = btcManager.sendBtcLocal(
+        toAddress = "bc1q...",
+        amountSatoshi = 100_000,
+        addressType = BitcoinAddressType.NATIVE_SEGWIT,
+        feeRateSatPerVbyte = 20
+    )
+}
+
+// Estimate fee local (trả về satoshis)
+launch {
+    val feeSat = btcManager.estimateFeeLocal(
+        toAddress = "bc1q...",
+        amountSatoshi = 100_000,
+        addressType = BitcoinAddressType.NATIVE_SEGWIT
+    )
+    println("Fee: $feeSat satoshis")
 }
 ```
 
@@ -1686,6 +1748,246 @@ Config.shared.apiKeyToncenter = "..."
 
 ---
 
+## Lấy Chain Manager riêng (`getChainManager`)
+
+`CommonCoinsManager` cung cấp unified API cho tất cả chain. Khi cần truy cập các method riêng của từng chain manager (ví dụ: local BTC builder, Cardano Byron address, TON staking pool cụ thể), dùng `getChainManager()` rồi cast sang concrete type.
+
+```kotlin
+import com.lybia.cryptowallet.coinkits.CommonCoinsManager
+import com.lybia.cryptowallet.enums.NetworkName
+
+val manager = CommonCoinsManager(mnemonic = mnemonic)
+```
+
+### BitcoinManager
+
+```kotlin
+import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
+import com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType
+
+val btcManager = manager.getChainManager(NetworkName.BTC) as BitcoinManager
+
+// Address generation (3 loại)
+val native = btcManager.getAddressByType(BitcoinAddressType.NATIVE_SEGWIT, accountIndex = 0)
+val nested = btcManager.getAddressByType(BitcoinAddressType.NESTED_SEGWIT, accountIndex = 0)
+val legacy = btcManager.getAddressByType(BitcoinAddressType.LEGACY, accountIndex = 0)
+
+// Multi-account (HD wallet)
+val account0 = btcManager.getAddressByType(BitcoinAddressType.NATIVE_SEGWIT, accountIndex = 0)
+val account1 = btcManager.getAddressByType(BitcoinAddressType.NATIVE_SEGWIT, accountIndex = 1)
+
+launch {
+    // Local builder — build + sign client-side, broadcast qua Esplora
+    val result = btcManager.sendBtcLocal(
+        toAddress = "bc1q...",
+        amountSatoshi = 100_000,
+        addressType = BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex = 0,
+        feeRateSatPerVbyte = 15  // null = auto từ mempool.space
+    )
+
+    // Local fee estimation
+    val feeSat = btcManager.estimateFeeLocal(
+        toAddress = "bc1q...",
+        amountSatoshi = 100_000,
+        addressType = BitcoinAddressType.NATIVE_SEGWIT
+    )
+
+    // BlockCypher builder (legacy option)
+    val result2 = btcManager.sendBtc(
+        toAddress = "bc1q...",
+        amountSatoshi = 100_000,
+        addressType = BitcoinAddressType.NATIVE_SEGWIT
+    )
+
+    // BlockCypher fee estimation
+    val feeSat2 = btcManager.estimateFee(
+        toAddress = "bc1q...",
+        amountSatoshi = 100_000
+    )
+}
+```
+
+### EthereumManager
+
+```kotlin
+import com.lybia.cryptowallet.wallets.ethereum.EthereumManager
+
+val ethManager = manager.getChainManager(NetworkName.ETHEREUM) as EthereumManager
+val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+
+launch {
+    // Send ETH (amount in wei via BigInteger)
+    val amountWei = ethManager.ethToWei(0.1)
+    val result = ethManager.sendEthBigInt("0x...", amountWei, coinNetwork)
+
+    // Send ERC-20 token
+    val tokenResult = ethManager.sendErc20Token(
+        contractAddress = "0xToken...",
+        toAddress = "0xRecipient...",
+        amount = 1_000_000L,
+        coinNetwork = coinNetwork
+    )
+
+    // Gas estimation
+    val gasPrice = ethManager.getGasPrice(coinNetwork)
+    val fee = ethManager.estimateFee(
+        FeeEstimateParams("0xFrom...", "0xTo...", 0.1), coinNetwork
+    )
+
+    // NFT listing
+    val nfts = ethManager.getNFTs("0xWallet...", coinNetwork)
+}
+```
+
+### CardanoManager
+
+```kotlin
+import com.lybia.cryptowallet.wallets.cardano.CardanoManager
+
+val cardanoManager = manager.getChainManager(NetworkName.CARDANO) as CardanoManager
+
+// Shelley address (mặc định)
+val shelley = cardanoManager.getShelleyAddress(account = 0, index = 0)
+
+// Byron address (legacy)
+val byron = cardanoManager.getByronAddress(index = 0)
+
+// Staking address
+val staking = cardanoManager.getStakingAddress(account = 0)
+
+// Derive nhiều address
+val addresses = (0..4).map { cardanoManager.getShelleyAddress(account = 0, index = it) }
+
+launch {
+    // Build + sign + submit transaction
+    val signedTx = cardanoManager.buildAndSignTransaction(
+        toAddress = "addr1q...",
+        amount = 2_000_000L,  // lovelace
+        fee = 200_000L
+    )
+
+    // Native token
+    val tokenBalance = cardanoManager.getTokenBalance("addr1q...", "policyId", "assetName")
+    val tokenTx = cardanoManager.sendToken("addr1q...", "policyId", "assetName", 100L, 200_000L)
+}
+```
+
+### TonManager
+
+```kotlin
+import com.lybia.cryptowallet.wallets.ton.TonManager
+
+val tonManager = manager.getChainManager(NetworkName.TON) as TonManager
+val coinNetwork = CoinNetwork(NetworkName.TON)
+
+launch {
+    // Sign + broadcast TON transfer
+    val seqno = tonManager.getSeqno(coinNetwork)
+    val boc = tonManager.signTransaction("EQ...", amountNano = 500_000_000L, seqno = seqno, memo = "hello")
+    val result = tonManager.transfer(boc, coinNetwork)
+
+    // Jetton token balance
+    val jettonBalance = tonManager.getTokenBalance("EQWallet...", "EQJettonMaster...", coinNetwork)
+
+    // NFT listing
+    val nfts = tonManager.getNFTs("EQWallet...", coinNetwork)
+
+    // Staking (Nominator Pool)
+    val stakeResult = tonManager.stake(1_000_000_000L, "EQPool...", coinNetwork)
+    val stakingBalance = tonManager.getStakingBalance("EQWallet...", "EQPool...", coinNetwork)
+}
+```
+
+### RippleManager
+
+```kotlin
+import com.lybia.cryptowallet.wallets.ripple.RippleManager
+
+val xrpManager = manager.getChainManager(NetworkName.XRP) as RippleManager
+
+launch {
+    // Send XRP (amount in drops)
+    val result = xrpManager.sendXrp(
+        toAddress = "r...",
+        amountDrops = 10_000_000L,  // 10 XRP
+        feeDrops = 12L,
+        destinationTag = 12345L
+    )
+
+    // Dynamic fee estimation
+    val feeXrp = xrpManager.estimateFeeDynamicXrp()
+
+    // Paginated transaction history
+    val (txs, marker) = xrpManager.getTransactionHistoryPaginated("r...", limit = 50)
+}
+```
+
+### MidnightManager
+
+```kotlin
+import com.lybia.cryptowallet.wallets.midnight.MidnightManager
+
+val midManager = manager.getChainManager(NetworkName.MIDNIGHT) as MidnightManager
+
+launch {
+    val txHash = midManager.sendTDust("midnight1q...", amount = 1_000_000L)
+}
+```
+
+### CentralityManager
+
+```kotlin
+import com.lybia.cryptowallet.wallets.centrality.CentralityManager
+
+val cenManager = manager.getChainManager(NetworkName.CENTRALITY) as CentralityManager
+
+launch {
+    // Resolve address (cần API call)
+    val address = cenManager.getAddressAsync()
+
+    // Send CENNZ (full orchestration: getRuntimeVersion → build extrinsic → sign → submit)
+    val result = cenManager.sendCoin(
+        fromAddress = "cX...",
+        toAddress = "cX...",
+        amount = 1.5,
+        assetId = 1
+    )
+
+    // Paginated transaction history
+    val txs = cenManager.getTransactionHistoryPaginated("cX...", row = 100, page = 0)
+}
+```
+
+### Pattern chung
+
+```kotlin
+// Tất cả chain manager đều implement IWalletManager
+val anyManager = manager.getChainManager(NetworkName.XXX)
+val address = anyManager.getAddress()
+
+launch {
+    val balance = anyManager.getBalance(null, CoinNetwork(NetworkName.XXX))
+    val txs = anyManager.getTransactionHistory(null, CoinNetwork(NetworkName.XXX))
+}
+
+// Cast sang interface cụ thể khi cần
+if (anyManager is ITokenManager) {
+    val tokenBalance = anyManager.getTokenBalance(address, contract, coinNetwork)
+}
+if (anyManager is INFTManager) {
+    val nfts = anyManager.getNFTs(address, coinNetwork)
+}
+if (anyManager is IStakingManager) {
+    val rewards = anyManager.getStakingRewards(address, coinNetwork)
+}
+if (anyManager is IFeeEstimator) {
+    val fee = anyManager.estimateFee(params, coinNetwork)
+}
+```
+
+---
+
 ## Lưu ý quan trọng
 
 1. Tất cả hàm network là `suspend fun` — cần gọi trong coroutine scope
@@ -1697,3 +1999,6 @@ Config.shared.apiKeyToncenter = "..."
 7. Sau khi xóa `CoinsManager`, Android app dùng `CommonCoinsManager` trực tiếp — cùng API với iOS
 8. Bridge operations hiện dùng simulated responses — chờ API thật sẵn sàng
 9. TON `unstake()` trả về `UnsupportedOperation`
+10. Bitcoin có 2 option gửi: `sendBtcLocal()` (local builder, recommended) và `sendBtc()` (BlockCypher). Local builder build + sign hoàn toàn client-side, chỉ gọi Esplora API để fetch UTXOs và broadcast
+11. `getChainManager(coin)` trả về `IWalletManager` — cast sang concrete type (BitcoinManager, EthereumManager, ...) để truy cập chain-specific methods
+12. Chain managers được tạo lazy — chỉ khởi tạo khi lần đầu truy cập qua `getAddress()`, `getBalance()`, hoặc `getChainManager()`
