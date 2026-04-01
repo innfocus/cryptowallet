@@ -23,6 +23,7 @@ import com.lybia.cryptowallet.enums.ACTCoin
 import com.lybia.cryptowallet.models.FeeEstimate
 import com.lybia.cryptowallet.models.FeeEstimateParams
 import com.lybia.cryptowallet.models.MemoData
+import kotlin.concurrent.Volatile
 
 /**
  * Result wrapper for balance queries.
@@ -49,6 +50,15 @@ data class TokenBalanceResult(
     val balance: Long,
     val success: Boolean,
     val error: String? = null
+)
+
+/**
+ * Result of balance validation against total required amount (including fees).
+ */
+data class BalanceValidationResult(
+    val sufficient: Boolean,
+    val totalRequired: Double,
+    val deficit: Double = 0.0
 )
 
 /**
@@ -95,7 +105,7 @@ class CommonCoinsManager(
         /**
          * Shared singleton instance — mirrors CoinsManager.shared pattern.
          *
-         * Must call [initialize] before using. Thread-safe via @Volatile + synchronized.
+         * Must call [initialize] before using. Thread-safe via @Volatile.
          *
          * Usage:
          * ```kotlin
@@ -106,7 +116,7 @@ class CommonCoinsManager(
          * val address = CommonCoinsManager.shared.getAddress(NetworkName.BTC)
          * ```
          */
-        @Volatile
+        @kotlin.concurrent.Volatile
         private var _shared: CommonCoinsManager? = null
 
         val shared: CommonCoinsManager
@@ -125,9 +135,7 @@ class CommonCoinsManager(
             mnemonic: String,
             configs: Map<NetworkName, ChainConfig> = emptyMap()
         ) {
-            synchronized(this) {
-                _shared = CommonCoinsManager(mnemonic, configs)
-            }
+            _shared = CommonCoinsManager(mnemonic, configs)
         }
 
         /**
@@ -139,9 +147,7 @@ class CommonCoinsManager(
          * Reset the shared instance (e.g. on logout or wallet switch).
          */
         fun reset() {
-            synchronized(this) {
-                _shared = null
-            }
+            _shared = null
         }
     }
 
@@ -193,6 +199,41 @@ class CommonCoinsManager(
      */
     private fun hasServiceFee(serviceAddress: String?, serviceFee: Double): Boolean {
         return !serviceAddress.isNullOrBlank() && serviceFee > 0.0
+    }
+
+    /**
+     * Validate whether the wallet balance is sufficient for a transaction
+     * including amount, network fee, and service fee.
+     *
+     * The formula is the same for both UTXO and Account chains:
+     *   totalRequired = amount + networkFee + serviceFee
+     *
+     * For Account chains, [estimateFee] already multiplies the network fee
+     * by [FEE_MULTIPLIER] to cover both the main and service-fee transactions,
+     * so no additional adjustment is needed here.
+     *
+     * @param coin Target chain (used for future chain-specific logic if needed)
+     * @param amount Transaction amount in the chain's major unit
+     * @param networkFee Network fee (already doubled by estimateFee for Account chains)
+     * @param serviceFee Service fee amount
+     * @param balance Current wallet balance
+     * @return [BalanceValidationResult] indicating sufficiency, total required, and deficit
+     */
+    fun validateSufficientBalance(
+        coin: NetworkName,
+        amount: Double,
+        networkFee: Double,
+        serviceFee: Double,
+        balance: Double
+    ): BalanceValidationResult {
+        val totalRequired = amount + networkFee + serviceFee
+        val deficit = maxOf(0.0, totalRequired - balance)
+        val sufficient = totalRequired <= balance
+        return BalanceValidationResult(
+            sufficient = sufficient,
+            totalRequired = totalRequired,
+            deficit = deficit
+        )
     }
 
     /**

@@ -6,7 +6,7 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
 
 ## Tasks
 
-- [ ] 1. Thêm helper functions và hằng số cho service fee
+- [x] 1. Thêm helper functions và hằng số cho service fee
   - [x] 1.1 Thêm hằng số `FEE_MULTIPLIER`, `UTXO_CHAINS`, `ACCOUNT_CHAINS` vào companion object của `CommonCoinsManager`
     - Thêm `const val FEE_MULTIPLIER = 2`
     - Thêm `val UTXO_CHAINS = setOf(NetworkName.BTC, NetworkName.CARDANO)`
@@ -21,32 +21,32 @@ Triển khai hỗ trợ phí dịch vụ (service fee) vào `CommonCoinsManager`
     - Trả về `!serviceAddress.isNullOrBlank() && serviceFee > 0.0`
     - _Requirements: 5.1, 5.2, 5.3, 2.3, 2.4_
 
-  - [-] 1.4 Viết property test cho `hasServiceFee`
+  - [x] 1.4 Viết property test cho `hasServiceFee`
     - **Property 1: Phát hiện hasServiceFee**
     - **Validates: Requirements 5.1, 5.2, 5.3, 2.3, 2.4**
 
-- [ ] 2. Thêm data class `BalanceValidationResult` và hàm `validateSufficientBalance`
-  - [~] 2.1 Tạo data class `BalanceValidationResult(sufficient, totalRequired, deficit)`
+- [x] 2. Thêm data class `BalanceValidationResult` và hàm `validateSufficientBalance`
+  - [x] 2.1 Tạo data class `BalanceValidationResult(sufficient, totalRequired, deficit)`
     - Đặt trong file `CommonCoinsManager.kt` cùng với các data class hiện có (`BalanceResult`, `SendResult`)
     - _Requirements: 4.1_
 
-  - [~] 2.2 Implement hàm `validateSufficientBalance(coin, amount, networkFee, serviceFee, balance): BalanceValidationResult`
+  - [x] 2.2 Implement hàm `validateSufficientBalance(coin, amount, networkFee, serviceFee, balance): BalanceValidationResult`
     - UTXO chain: `totalRequired = amount + networkFee + serviceFee`
     - Account chain: `totalRequired = amount + networkFee + serviceFee` (networkFee đã bao gồm phí cho cả 2 giao dịch từ `estimateFee`)
     - `deficit = max(0.0, totalRequired - balance)`
     - `sufficient = totalRequired <= balance`
     - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-  - [~] 2.3 Viết property test cho `validateSufficientBalance`
+  - [x] 2.3 Viết property test cho `validateSufficientBalance`
     - **Property 8: Kiểm tra đủ số dư**
     - **Validates: Requirements 4.2, 4.3, 4.4**
 
-  - [~] 2.4 Viết unit tests cho `validateSufficientBalance`
+  - [x] 2.4 Viết unit tests cho `validateSufficientBalance`
     - Test edge cases: balance vừa đủ, balance thiếu 1 đơn vị nhỏ nhất, serviceFee = 0, tất cả giá trị = 0
     - Test UTXO chain vs Account chain tính toán khác nhau
     - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [~] 3. Checkpoint - Đảm bảo tất cả tests pass
+- [-] 3. Checkpoint - Đảm bảo tất cả tests pass
   - Đảm bảo tất cả tests pass, hỏi người dùng nếu có thắc mắc.
 
 - [ ] 4. Mở rộng hàm `estimateFee` hỗ trợ service fee
