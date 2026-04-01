@@ -706,8 +706,8 @@ class CommonCoinsManager(
                 NetworkName.ETHEREUM, NetworkName.ARBITRUM -> {
                     val ethManager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.ethereum.EthereumManager
                     val coinNetwork = CoinNetwork(coin)
-                    val amountWei = (amount * 1e18).toLong()
-                    val result = ethManager.sendEth(toAddress, amountWei, coinNetwork)
+                    val amountWei = ethManager.ethToWei(amount)
+                    val result = ethManager.sendEthBigInt(toAddress, amountWei, coinNetwork)
                     SendResult(
                         txHash = result.txHash ?: "",
                         success = result.success,
@@ -1039,11 +1039,14 @@ class CommonCoinsManager(
 
     /**
      * Send ETH directly (build + sign + submit).
+     * Uses EIP-1559 (type 2) when supported, falls back to legacy (type 0).
+     * Amount is converted to wei using BigInteger (safe for any ETH amount).
+     *
      * @param toAddress Destination address (0x-prefixed)
-     * @param amountEth Amount in ETH
+     * @param amountEth Amount in ETH (no overflow — uses BigInteger internally)
      * @param coin NetworkName.ETHEREUM or NetworkName.ARBITRUM
      * @param gasLimit Optional gas limit override
-     * @param gasPriceGwei Optional gas price override in gwei
+     * @param gasPriceGwei Optional gas price override in gwei (legacy mode)
      */
     suspend fun sendEth(
         toAddress: String,
@@ -1055,8 +1058,8 @@ class CommonCoinsManager(
         return try {
             val ethManager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.ethereum.EthereumManager
             val coinNetwork = CoinNetwork(coin)
-            val amountWei = (amountEth * 1e18).toLong()
-            val result = ethManager.sendEth(toAddress, amountWei, coinNetwork, gasLimit, gasPriceGwei)
+            val amountWei = ethManager.ethToWei(amountEth)
+            val result = ethManager.sendEthBigInt(toAddress, amountWei, coinNetwork, gasLimit)
             SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
         } catch (e: Exception) {
             logger.e(e) { "Failed to send ETH" }
@@ -1066,6 +1069,8 @@ class CommonCoinsManager(
 
     /**
      * Send ERC-20 token directly (build + sign + submit).
+     * Uses EIP-1559 when supported. Token amount uses BigInteger (safe for high-decimal tokens).
+     *
      * @param contractAddress ERC-20 token contract address
      * @param toAddress Recipient address
      * @param amount Token amount in smallest unit (e.g. wei for 18-decimal tokens)

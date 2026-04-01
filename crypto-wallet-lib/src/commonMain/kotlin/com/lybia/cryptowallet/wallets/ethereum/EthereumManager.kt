@@ -24,6 +24,7 @@ import com.lybia.cryptowallet.services.InfuraRpcService
 import com.lybia.cryptowallet.services.OwlRacleService
 import com.lybia.cryptowallet.utils.Utils
 import com.lybia.cryptowallet.utils.toHexString
+import com.ionspin.kotlin.bignum.integer.BigInteger
 
 
 class EthereumManager(
@@ -110,21 +111,45 @@ class EthereumManager(
     }
 
     /**
+     * Parse a hex string (0x-prefixed) to BigInteger.
+     */
+    private fun hexToBigInt(hex: String?): BigInteger {
+        if (hex.isNullOrEmpty()) return BigInteger.ZERO
+        val clean = hex.removePrefix("0x").removePrefix("0X")
+        if (clean.isEmpty()) return BigInteger.ZERO
+        return BigInteger.parseString(clean, 16)
+    }
+
+    /**
+     * Convert ETH (Double) to wei (BigInteger) safely.
+     * Avoids Long overflow: 1 ETH = 10^18 wei, Long.MAX ≈ 9.2 * 10^18.
+     */
+    fun ethToWei(ethAmount: Double): BigInteger {
+        // Multiply in steps to preserve precision: amount * 10^9 * 10^9
+        val gwei = (ethAmount * 1_000_000_000).toLong()
+        return BigInteger.fromLong(gwei) * BigInteger.fromLong(1_000_000_000)
+    }
+
+    /**
      * Build, sign, and submit an ETH transfer transaction.
+     * Automatically selects EIP-1559 (type 2) when the network supports it,
+     * falling back to legacy (type 0) otherwise.
      *
      * @param toAddress Destination address
-     * @param amountWei Amount in wei
+     * @param amountWei Amount in wei (BigInteger — no overflow risk)
      * @param coinNetwork Network configuration
-     * @param gasLimit Optional gas limit override (default: estimated)
-     * @param gasPriceGwei Optional gas price override in gwei (default: from network)
+     * @param gasLimit Optional gas limit override
+     * @param maxPriorityFeeGwei Optional EIP-1559 tip override in gwei
+     * @param maxFeeGwei Optional EIP-1559 max fee override in gwei
      * @return TransferResponseModel with txHash on success
      */
-    suspend fun sendEth(
+    suspend fun sendEthBigInt(
         toAddress: String,
-        amountWei: Long,
+        amountWei: BigInteger,
         coinNetwork: CoinNetwork,
         gasLimit: Long? = null,
-        gasPriceGwei: Long? = null
+        maxPriorityFeeGwei: Long? = null,
+        maxFeeGwei: Long? = null
     ): TransferResponseModel {
         val privKey = privateKeyBytes
             ?: return TransferResponseModel(false, "No private key — mnemonic not provided", null)
@@ -135,35 +160,69 @@ class EthereumManager(
             val nonce = getNonce(coinNetwork)
             val chainId = getChainId(coinNetwork).toLong()
 
-            // Estimate gas if not provided
-            val estimatedGasLimit = gasLimit ?: run {
+            // Estimate gas limit if not provided
+            val estGasLimit = gasLimit ?: run {
+                val hexValue = "0x" + amountWei.toString(16)
                 val model = TransferTokenModel(
                     nonce = "", addressFrom = fromAddr,
                     contractAddress = toAddress, dataEncodeABI = "",
-                    value = "0x" + amountWei.toString(16)
+                    value = hexValue
                 )
                 getEstGas(model, coinNetwork).toLong()
             }
 
-            // Get gas price if not provided
-            val gasPriceWei = if (gasPriceGwei != null) {
-                gasPriceGwei * 1_000_000_000L
-            } else {
-                val hexPrice = InfuraRpcService.shared.getAllGasPrice(coinNetwork, chainId.toInt())
-                if (hexPrice != null) Utils.convertHexStringToDouble(hexPrice, 0).toLong()
-                else 20_000_000_000L // fallback 20 gwei
-            }
+            // Try EIP-1559 first (check if network supports baseFee)
+            val baseFeeHex = InfuraRpcService.shared.getBaseFee(coinNetwork)
+            val signedTxHex: String
 
-            val signedTxHex = EthTransactionSigner.signTransaction(
-                privateKey = privKey,
-                nonce = nonce,
-                gasPriceWei = gasPriceWei,
-                gasLimit = estimatedGasLimit,
-                toAddress = toAddress,
-                valueWei = amountWei,
-                data = byteArrayOf(),
-                chainId = chainId
-            )
+            if (baseFeeHex != null) {
+                // ── EIP-1559 (type 2) ───────────────────────────────
+                val baseFee = hexToBigInt(baseFeeHex)
+                val GWEI = BigInteger.fromLong(1_000_000_000)
+
+                val priorityFee = if (maxPriorityFeeGwei != null) {
+                    BigInteger.fromLong(maxPriorityFeeGwei) * GWEI
+                } else {
+                    val rpcTip = InfuraRpcService.shared.getMaxPriorityFeePerGas(coinNetwork)
+                    if (rpcTip != null) hexToBigInt(rpcTip)
+                    else BigInteger.fromLong(1_500_000_000) // 1.5 gwei fallback
+                }
+
+                val maxFee = if (maxFeeGwei != null) {
+                    BigInteger.fromLong(maxFeeGwei) * GWEI
+                } else {
+                    // maxFee = 2 * baseFee + priorityFee (standard formula)
+                    baseFee * BigInteger.TWO + priorityFee
+                }
+
+                signedTxHex = EthTransactionSigner.signEip1559Transaction(
+                    privateKey = privKey,
+                    nonce = nonce,
+                    maxPriorityFeePerGas = priorityFee,
+                    maxFeePerGas = maxFee,
+                    gasLimit = estGasLimit,
+                    toAddress = toAddress,
+                    valueWei = amountWei,
+                    data = byteArrayOf(),
+                    chainId = chainId
+                )
+            } else {
+                // ── Legacy (type 0) fallback ────────────────────────
+                val hexPrice = InfuraRpcService.shared.getAllGasPrice(coinNetwork, chainId.toInt())
+                val gasPriceWei = if (hexPrice != null) hexToBigInt(hexPrice)
+                else BigInteger.fromLong(20_000_000_000L) // 20 gwei fallback
+
+                signedTxHex = EthTransactionSigner.signLegacyTransaction(
+                    privateKey = privKey,
+                    nonce = nonce,
+                    gasPriceWei = gasPriceWei,
+                    gasLimit = estGasLimit,
+                    toAddress = toAddress,
+                    valueWei = amountWei,
+                    data = byteArrayOf(),
+                    chainId = chainId
+                )
+            }
 
             val txHash = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, signedTxHex)
             TransferResponseModel(success = true, error = null, txHash = txHash)
@@ -173,23 +232,42 @@ class EthereumManager(
     }
 
     /**
-     * Build, sign, and submit an ERC-20 token transfer transaction.
-     *
-     * @param contractAddress ERC-20 token contract address
-     * @param toAddress Recipient address
-     * @param amount Token amount (raw, in smallest unit)
-     * @param coinNetwork Network configuration
-     * @param gasLimit Optional gas limit override
-     * @param gasPriceGwei Optional gas price override in gwei
-     * @return TransferResponseModel with txHash on success
+     * Backward-compatible sendEth with Long amount.
+     * Delegates to [sendEthBigInt].
      */
-    suspend fun sendErc20Token(
-        contractAddress: String,
+    suspend fun sendEth(
         toAddress: String,
-        amount: Long,
+        amountWei: Long,
         coinNetwork: CoinNetwork,
         gasLimit: Long? = null,
         gasPriceGwei: Long? = null
+    ): TransferResponseModel {
+        return sendEthBigInt(
+            toAddress = toAddress,
+            amountWei = BigInteger.fromLong(amountWei),
+            coinNetwork = coinNetwork,
+            gasLimit = gasLimit,
+            maxFeeGwei = gasPriceGwei  // legacy gasPrice maps to maxFee
+        )
+    }
+
+    /**
+     * Build, sign, and submit an ERC-20 token transfer.
+     * Uses BigInteger for token amount (safe for high-decimal tokens).
+     *
+     * @param contractAddress ERC-20 token contract address
+     * @param toAddress Recipient address
+     * @param amount Token amount in smallest unit (BigInteger)
+     * @param coinNetwork Network configuration
+     * @param gasLimit Optional gas limit override
+     * @return TransferResponseModel with txHash on success
+     */
+    suspend fun sendErc20TokenBigInt(
+        contractAddress: String,
+        toAddress: String,
+        amount: BigInteger,
+        coinNetwork: CoinNetwork,
+        gasLimit: Long? = null
     ): TransferResponseModel {
         val privKey = privateKeyBytes
             ?: return TransferResponseModel(false, "No private key — mnemonic not provided", null)
@@ -200,11 +278,9 @@ class EthereumManager(
             val nonce = getNonce(coinNetwork)
             val chainId = getChainId(coinNetwork).toLong()
 
-            // Encode ERC-20 transfer(address,uint256) call data
-            val transferData = EthTransactionSigner.encodeErc20Transfer(toAddress, amount)
+            val transferData = EthTransactionSigner.encodeErc20TransferBigInt(toAddress, amount)
 
-            // Estimate gas if not provided
-            val estimatedGasLimit = gasLimit ?: run {
+            val estGasLimit = gasLimit ?: run {
                 val model = TransferTokenModel(
                     nonce = "", addressFrom = fromAddr,
                     contractAddress = contractAddress,
@@ -214,25 +290,35 @@ class EthereumManager(
                 getEstGas(model, coinNetwork).toLong()
             }
 
-            // Get gas price if not provided
-            val gasPriceWei = if (gasPriceGwei != null) {
-                gasPriceGwei * 1_000_000_000L
+            val baseFeeHex = InfuraRpcService.shared.getBaseFee(coinNetwork)
+            val signedTxHex: String
+
+            if (baseFeeHex != null) {
+                val baseFee = hexToBigInt(baseFeeHex)
+                val GWEI = BigInteger.fromLong(1_000_000_000)
+                val rpcTip = InfuraRpcService.shared.getMaxPriorityFeePerGas(coinNetwork)
+                val priorityFee = if (rpcTip != null) hexToBigInt(rpcTip)
+                else BigInteger.fromLong(1_500_000_000)
+                val maxFee = baseFee * BigInteger.TWO + priorityFee
+
+                signedTxHex = EthTransactionSigner.signEip1559Transaction(
+                    privateKey = privKey, nonce = nonce,
+                    maxPriorityFeePerGas = priorityFee, maxFeePerGas = maxFee,
+                    gasLimit = estGasLimit, toAddress = contractAddress,
+                    valueWei = BigInteger.ZERO, data = transferData, chainId = chainId
+                )
             } else {
                 val hexPrice = InfuraRpcService.shared.getAllGasPrice(coinNetwork, chainId.toInt())
-                if (hexPrice != null) Utils.convertHexStringToDouble(hexPrice, 0).toLong()
-                else 20_000_000_000L
-            }
+                val gasPriceWei = if (hexPrice != null) hexToBigInt(hexPrice)
+                else BigInteger.fromLong(20_000_000_000L)
 
-            val signedTxHex = EthTransactionSigner.signTransaction(
-                privateKey = privKey,
-                nonce = nonce,
-                gasPriceWei = gasPriceWei,
-                gasLimit = estimatedGasLimit,
-                toAddress = contractAddress,
-                valueWei = 0L,
-                data = transferData,
-                chainId = chainId
-            )
+                signedTxHex = EthTransactionSigner.signLegacyTransaction(
+                    privateKey = privKey, nonce = nonce,
+                    gasPriceWei = gasPriceWei, gasLimit = estGasLimit,
+                    toAddress = contractAddress, valueWei = BigInteger.ZERO,
+                    data = transferData, chainId = chainId
+                )
+            }
 
             val txHash = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, signedTxHex)
             TransferResponseModel(success = true, error = null, txHash = txHash)
@@ -242,8 +328,24 @@ class EthereumManager(
     }
 
     /**
+     * Backward-compatible sendErc20Token with Long amount.
+     */
+    suspend fun sendErc20Token(
+        contractAddress: String,
+        toAddress: String,
+        amount: Long,
+        coinNetwork: CoinNetwork,
+        gasLimit: Long? = null,
+        gasPriceGwei: Long? = null
+    ): TransferResponseModel {
+        return sendErc20TokenBigInt(
+            contractAddress, toAddress,
+            BigInteger.fromLong(amount), coinNetwork, gasLimit
+        )
+    }
+
+    /**
      * Estimate the total fee for a transaction in ETH.
-     * fee = gasLimit * gasPrice
      */
     suspend fun estimateTransactionFee(
         toAddress: String,

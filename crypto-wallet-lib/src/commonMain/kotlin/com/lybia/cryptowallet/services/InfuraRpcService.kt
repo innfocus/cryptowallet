@@ -12,6 +12,8 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.headers
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import io.ktor.http.contentType
 
 
@@ -164,13 +166,8 @@ class InfuraRpcService {
     suspend fun getChainId(coin: CoinNetwork): String?{
         try{
             val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
-
-                headers {
-                    append(HttpHeaders.Accept, "application/json")
-                }
-
+                headers { append(HttpHeaders.Accept, "application/json") }
                 contentType(ContentType.Application.Json)
-
                 setBody(
                     InfuraRpcRequest(
                         jsonrpc = "2.0",
@@ -188,6 +185,69 @@ class InfuraRpcService {
             }
             return null
         } catch (e: Exception){
+            e.printStackTrace()
+            return null
+        }
+    }
+
+    /**
+     * Get the current max priority fee per gas (EIP-1559 tip).
+     * @return Hex-encoded wei string (e.g. "0x59682f00")
+     */
+    suspend fun getMaxPriorityFeePerGas(coin: CoinNetwork): String? {
+        try {
+            val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
+                headers { append(HttpHeaders.Accept, "application/json") }
+                contentType(ContentType.Application.Json)
+                setBody(
+                    InfuraRpcRequest(
+                        jsonrpc = "2.0",
+                        method = "eth_maxPriorityFeePerGas",
+                        params = listOf(),
+                        id = 1
+                    )
+                )
+            }
+            if (response.status.value in 200..299) {
+                val data = response.body<InfuraRpcBalanceResponse>()
+                if (data.error == null) return data.result
+            }
+            return null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
+
+    /**
+     * Get the base fee of the latest block via eth_getBlockByNumber.
+     * @return Hex-encoded baseFeePerGas string, or null
+     */
+    suspend fun getBaseFee(coin: CoinNetwork): String? {
+        try {
+            val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
+                headers { append(HttpHeaders.Accept, "application/json") }
+                contentType(ContentType.Application.Json)
+                setBody(
+                    InfuraRpcRequest(
+                        jsonrpc = "2.0",
+                        method = "eth_getBlockByNumber",
+                        params = listOf("latest", false),
+                        id = 1
+                    )
+                )
+            }
+            if (response.status.value in 200..299) {
+                val bodyText = response.body<String>()
+                // Parse baseFeePerGas from the block object
+                val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                val jsonObj = json.parseToJsonElement(bodyText)
+                val result = jsonObj.jsonObject["result"]?.jsonObject
+                val baseFee = result?.get("baseFeePerGas")?.jsonPrimitive?.content
+                return baseFee
+            }
+            return null
+        } catch (e: Exception) {
             e.printStackTrace()
             return null
         }

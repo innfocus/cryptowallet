@@ -1,29 +1,83 @@
 package com.lybia.cryptowallet.wallets.ethereum
 
-import com.lybia.cryptowallet.utils.ACTCrypto
+import com.ionspin.kotlin.bignum.integer.BigInteger
+import com.ionspin.kotlin.bignum.integer.Sign
 import com.lybia.cryptowallet.utils.Keccak
 import com.lybia.cryptowallet.utils.fromHexToByteArray
 import com.lybia.cryptowallet.utils.toHexString
 import fr.acinq.secp256k1.Secp256k1
 
 /**
- * Pure-Kotlin EIP-155 Ethereum transaction signer.
- * Builds legacy (type 0) transactions with RLP encoding, signs with secp256k1.
+ * Pure-Kotlin Ethereum transaction signer.
+ * Supports both legacy (type 0, EIP-155) and EIP-1559 (type 2) transactions.
+ * Uses BigInteger for all wei amounts to avoid Long overflow (Long.MAX ≈ 9.2 ETH).
  */
 object EthTransactionSigner {
 
+    // ── Legacy (type 0) EIP-155 transaction ─────────────────────────
+
     /**
-     * Build, RLP-encode, sign, and return a hex-encoded signed transaction.
+     * Build and sign a legacy (type 0) EIP-155 transaction.
      *
      * @param privateKey 32-byte secp256k1 private key
      * @param nonce Transaction nonce
-     * @param gasPriceWei Gas price in wei
+     * @param gasPriceWei Gas price in wei (BigInteger)
      * @param gasLimit Gas limit
      * @param toAddress Destination address (0x-prefixed hex)
-     * @param valueWei Value in wei
+     * @param valueWei Value in wei (BigInteger — safe for any ETH amount)
      * @param data Call data (empty for simple transfers)
-     * @param chainId EIP-155 chain ID (1 = mainnet, 11155111 = sepolia, etc.)
+     * @param chainId EIP-155 chain ID
      * @return "0x"-prefixed hex string of the signed transaction
+     */
+    fun signLegacyTransaction(
+        privateKey: ByteArray,
+        nonce: Long,
+        gasPriceWei: BigInteger,
+        gasLimit: Long,
+        toAddress: String,
+        valueWei: BigInteger,
+        data: ByteArray,
+        chainId: Long
+    ): String {
+        val to = toAddress.removePrefix("0x").fromHexToByteArray()
+
+        val unsignedFields = listOf(
+            rlpEncodeLong(nonce),
+            rlpEncodeBigInt(gasPriceWei),
+            rlpEncodeLong(gasLimit),
+            rlpEncodeBytes(to),
+            rlpEncodeBigInt(valueWei),
+            rlpEncodeBytes(data),
+            rlpEncodeLong(chainId),
+            rlpEncodeLong(0),
+            rlpEncodeLong(0)
+        )
+        val unsignedTx = rlpEncodeList(unsignedFields)
+        val txHash = Keccak.keccak256(unsignedTx)
+
+        val sigData = Secp256k1.sign(txHash, privateKey)
+        val r = sigData.copyOfRange(0, 32)
+        val s = sigData.copyOfRange(32, 64)
+        val recId = findRecoveryId(txHash, sigData, privateKey)
+        val v = chainId * 2 + 35 + recId
+
+        val signedFields = listOf(
+            rlpEncodeLong(nonce),
+            rlpEncodeBigInt(gasPriceWei),
+            rlpEncodeLong(gasLimit),
+            rlpEncodeBytes(to),
+            rlpEncodeBigInt(valueWei),
+            rlpEncodeBytes(data),
+            rlpEncodeLong(v),
+            rlpEncodeBytes(stripLeadingZeros(r)),
+            rlpEncodeBytes(stripLeadingZeros(s))
+        )
+        return "0x" + rlpEncodeList(signedFields).toHexString()
+    }
+
+    /**
+     * Backward-compatible legacy sign with Long amounts.
+     * Delegates to [signLegacyTransaction] with BigInteger conversion.
      */
     fun signTransaction(
         privateKey: ByteArray,
@@ -34,71 +88,119 @@ object EthTransactionSigner {
         valueWei: Long,
         data: ByteArray,
         chainId: Long
+    ): String = signLegacyTransaction(
+        privateKey, nonce,
+        BigInteger.fromLong(gasPriceWei), gasLimit,
+        toAddress, BigInteger.fromLong(valueWei),
+        data, chainId
+    )
+
+    // ── EIP-1559 (type 2) transaction ───────────────────────────────
+
+    /**
+     * Build and sign an EIP-1559 (type 2) transaction.
+     *
+     * Type 2 envelope: 0x02 || RLP([chainId, nonce, maxPriorityFeePerGas,
+     *   maxFeePerGas, gasLimit, to, value, data, accessList])
+     *
+     * Signed: 0x02 || RLP([chainId, nonce, maxPriorityFeePerGas,
+     *   maxFeePerGas, gasLimit, to, value, data, accessList, v, r, s])
+     *
+     * @param privateKey 32-byte secp256k1 private key
+     * @param nonce Transaction nonce
+     * @param maxPriorityFeePerGas Tip to miner in wei (BigInteger)
+     * @param maxFeePerGas Maximum total fee per gas in wei (BigInteger)
+     * @param gasLimit Gas limit
+     * @param toAddress Destination address (0x-prefixed hex)
+     * @param valueWei Value in wei (BigInteger)
+     * @param data Call data
+     * @param chainId Chain ID (1 = mainnet, 11155111 = sepolia, etc.)
+     * @return "0x"-prefixed hex string of the signed type 2 transaction
+     */
+    fun signEip1559Transaction(
+        privateKey: ByteArray,
+        nonce: Long,
+        maxPriorityFeePerGas: BigInteger,
+        maxFeePerGas: BigInteger,
+        gasLimit: Long,
+        toAddress: String,
+        valueWei: BigInteger,
+        data: ByteArray,
+        chainId: Long
     ): String {
         val to = toAddress.removePrefix("0x").fromHexToByteArray()
 
-        // RLP-encode for signing: [nonce, gasPrice, gasLimit, to, value, data, chainId, 0, 0]
+        // Unsigned payload: [chainId, nonce, maxPriorityFeePerGas, maxFeePerGas,
+        //                    gasLimit, to, value, data, accessList(empty)]
         val unsignedFields = listOf(
-            rlpEncodeInteger(nonce),
-            rlpEncodeInteger(gasPriceWei),
-            rlpEncodeInteger(gasLimit),
+            rlpEncodeLong(chainId),
+            rlpEncodeLong(nonce),
+            rlpEncodeBigInt(maxPriorityFeePerGas),
+            rlpEncodeBigInt(maxFeePerGas),
+            rlpEncodeLong(gasLimit),
             rlpEncodeBytes(to),
-            rlpEncodeInteger(valueWei),
+            rlpEncodeBigInt(valueWei),
             rlpEncodeBytes(data),
-            rlpEncodeInteger(chainId),
-            rlpEncodeInteger(0),
-            rlpEncodeInteger(0)
+            rlpEncodeList(emptyList()) // empty accessList
         )
-        val unsignedTx = rlpEncodeList(unsignedFields)
-        val txHash = Keccak.keccak256(unsignedTx)
+        val unsignedPayload = rlpEncodeList(unsignedFields)
 
-        // Sign with secp256k1
+        // Hash: keccak256(0x02 || unsignedPayload)
+        val txHash = Keccak.keccak256(byteArrayOf(0x02) + unsignedPayload)
+
+        // Sign
         val sigData = Secp256k1.sign(txHash, privateKey)
-        // sigData = 64 bytes (r[32] + s[32]), recId from ecdsaSign
-        val sig = Secp256k1.compact2der(sigData) // we need compact, not DER
         val r = sigData.copyOfRange(0, 32)
         val s = sigData.copyOfRange(32, 64)
-
-        // Recovery ID: try both 0 and 1 to find the correct one
         val recId = findRecoveryId(txHash, sigData, privateKey)
 
-        // EIP-155: v = chainId * 2 + 35 + recId
-        val v = chainId * 2 + 35 + recId
-
-        // RLP-encode signed tx: [nonce, gasPrice, gasLimit, to, value, data, v, r, s]
+        // Signed payload: [...unsignedFields, v(yParity), r, s]
         val signedFields = listOf(
-            rlpEncodeInteger(nonce),
-            rlpEncodeInteger(gasPriceWei),
-            rlpEncodeInteger(gasLimit),
+            rlpEncodeLong(chainId),
+            rlpEncodeLong(nonce),
+            rlpEncodeBigInt(maxPriorityFeePerGas),
+            rlpEncodeBigInt(maxFeePerGas),
+            rlpEncodeLong(gasLimit),
             rlpEncodeBytes(to),
-            rlpEncodeInteger(valueWei),
+            rlpEncodeBigInt(valueWei),
             rlpEncodeBytes(data),
-            rlpEncodeInteger(v),
+            rlpEncodeList(emptyList()), // empty accessList
+            rlpEncodeLong(recId.toLong()),  // yParity (0 or 1)
             rlpEncodeBytes(stripLeadingZeros(r)),
             rlpEncodeBytes(stripLeadingZeros(s))
         )
-        val signedTx = rlpEncodeList(signedFields)
-        return "0x" + signedTx.toHexString()
+        val signedPayload = rlpEncodeList(signedFields)
+
+        // Type 2 envelope: 0x02 || signedPayload
+        return "0x" + (byteArrayOf(0x02) + signedPayload).toHexString()
+    }
+
+    // ── ERC-20 encoding ─────────────────────────────────────────────
+
+    /**
+     * Encode ERC-20 transfer(address, uint256) call data with BigInteger amount.
+     */
+    fun encodeErc20TransferBigInt(toAddress: String, amount: BigInteger): ByteArray {
+        val selector = "a9059cbb".fromHexToByteArray()
+        val addrBytes = toAddress.removePrefix("0x").fromHexToByteArray()
+        val paddedAddr = ByteArray(32)
+        addrBytes.copyInto(paddedAddr, 32 - addrBytes.size)
+        val amountBytes = bigIntToBytes32(amount)
+        return selector + paddedAddr + amountBytes
     }
 
     /**
-     * Encode ERC-20 transfer(address, uint256) call data.
-     * Function selector: 0xa9059cbb
+     * Encode ERC-20 transfer(address, uint256) call data with Long amount.
+     * Kept for backward compatibility.
      */
     fun encodeErc20Transfer(toAddress: String, amount: Long): ByteArray {
-        val selector = "a9059cbb".fromHexToByteArray() // transfer(address,uint256)
-        val addrBytes = toAddress.removePrefix("0x").fromHexToByteArray()
-        // Pad address to 32 bytes (left-padded with zeros)
-        val paddedAddr = ByteArray(32)
-        addrBytes.copyInto(paddedAddr, 32 - addrBytes.size)
-        // Encode amount as uint256 (32 bytes, big-endian)
-        val amountBytes = longToBytes32(amount)
-        return selector + paddedAddr + amountBytes
+        return encodeErc20TransferBigInt(toAddress, BigInteger.fromLong(amount))
     }
 
     // ── RLP encoding ────────────────────────────────────────────────
 
-    private fun rlpEncodeBytes(bytes: ByteArray): ByteArray {
+    internal fun rlpEncodeBytes(bytes: ByteArray): ByteArray {
+        if (bytes.isEmpty()) return byteArrayOf(0x80.toByte())
         return when {
             bytes.size == 1 && bytes[0].toInt() and 0xFF < 0x80 -> bytes
             bytes.size <= 55 -> byteArrayOf((0x80 + bytes.size).toByte()) + bytes
@@ -109,13 +211,19 @@ object EthTransactionSigner {
         }
     }
 
-    private fun rlpEncodeInteger(value: Long): ByteArray {
+    internal fun rlpEncodeLong(value: Long): ByteArray {
         if (value == 0L) return byteArrayOf(0x80.toByte())
         val bytes = stripLeadingZeros(longToBytesBigEndian(value))
         return rlpEncodeBytes(bytes)
     }
 
-    private fun rlpEncodeList(items: List<ByteArray>): ByteArray {
+    internal fun rlpEncodeBigInt(value: BigInteger): ByteArray {
+        if (value == BigInteger.ZERO) return byteArrayOf(0x80.toByte())
+        val bytes = stripLeadingZeros(value.toByteArray())
+        return rlpEncodeBytes(bytes)
+    }
+
+    internal fun rlpEncodeList(items: List<ByteArray>): ByteArray {
         val payload = items.fold(byteArrayOf()) { acc, item -> acc + item }
         return if (payload.size <= 55) {
             byteArrayOf((0xC0 + payload.size).toByte()) + payload
@@ -138,18 +246,17 @@ object EthTransactionSigner {
         return result.toByteArray()
     }
 
-    private fun longToBytes32(value: Long): ByteArray {
-        val result = ByteArray(32)
-        var v = value
-        for (i in 31 downTo 0) {
-            result[i] = (v and 0xFF).toByte()
-            v = v ushr 8
-            if (v == 0L) break
+    private fun bigIntToBytes32(value: BigInteger): ByteArray {
+        val raw = value.toByteArray()
+        return when {
+            raw.size == 32 -> raw
+            raw.size < 32 -> ByteArray(32 - raw.size) + raw
+            else -> raw.copyOfRange(raw.size - 32, raw.size)
         }
-        return result
     }
 
-    private fun stripLeadingZeros(bytes: ByteArray): ByteArray {
+    internal fun stripLeadingZeros(bytes: ByteArray): ByteArray {
+        if (bytes.isEmpty()) return bytes
         var i = 0
         while (i < bytes.size - 1 && bytes[i] == 0.toByte()) i++
         return bytes.copyOfRange(i, bytes.size)
@@ -167,6 +274,6 @@ object EthTransactionSigner {
                 if (recovered.contentEquals(pubKey)) return recId
             } catch (_: Exception) { }
         }
-        return 0 // fallback
+        return 0
     }
 }
