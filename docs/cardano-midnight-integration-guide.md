@@ -36,12 +36,40 @@ Config.shared.setNetwork(Network.MAINNET) // hoặc Network.TESTNET
 
 ### 2. Khởi tạo CommonCoinsManager
 
+Có 2 cách sử dụng: tạo instance trực tiếp hoặc dùng singleton pattern.
+
 ```kotlin
 import com.lybia.cryptowallet.coinkits.CommonCoinsManager
 
 val mnemonic = "your twelve word mnemonic phrase here ..."
+
+// ─── Cách 1: Tạo instance trực tiếp ────────────────────────────────
+// Phù hợp khi cần multi-wallet hoặc trong test
 val manager = CommonCoinsManager(mnemonic = mnemonic)
+
+// ─── Cách 2: Singleton pattern (giống CoinsManager.shared) ─────────
+// Phù hợp cho app chỉ có 1 wallet, truy cập từ nhiều nơi
+// Khởi tạo 1 lần khi app startup hoặc sau khi user login:
+CommonCoinsManager.initialize(mnemonic = mnemonic)
+
+// Sau đó dùng ở bất kỳ đâu:
+val address = CommonCoinsManager.shared.getAddress(NetworkName.BTC)
+launch {
+    val balance = CommonCoinsManager.shared.getBalance(NetworkName.CARDANO)
+}
+
+// Kiểm tra đã khởi tạo chưa:
+if (CommonCoinsManager.isInitialized) {
+    // safe to use CommonCoinsManager.shared
+}
+
+// Reset khi logout hoặc đổi wallet:
+CommonCoinsManager.reset()
+// Khởi tạo lại với mnemonic mới:
+CommonCoinsManager.initialize(mnemonic = newMnemonic)
 ```
+
+> `CommonCoinsManager.shared` throw `IllegalStateException` nếu chưa gọi `initialize()`. Luôn kiểm tra `isInitialized` hoặc gọi `initialize()` trước khi dùng.
 
 ### 3. Khởi tạo với custom API service (tuỳ chọn)
 
@@ -230,6 +258,64 @@ launch {
 | ETH / Arbitrum | ✅ | Tự build EIP-155 tx + secp256k1 sign + submit |
 | XRP | ✅ | Tự build Payment tx + secp256k1 sign + submit, hỗ trợ destinationTag |
 | BTC | ✅ | BlockCypher hoặc Local builder (Esplora), hỗ trợ Legacy/SegWit/Native SegWit |
+
+### sendCoinExact (Long — không sai số floating-point)
+
+`sendCoin` nhận `Double` (đơn vị lớn) và convert nội bộ bằng `round()`. Nếu cần chính xác tuyệt đối (amount đã ở đơn vị nhỏ nhất), dùng `sendCoinExact`:
+
+```kotlin
+launch {
+    // ─── Cardano (lovelace) ─────────────────────────────────────────
+    val adaResult = manager.sendCoinExact(
+        coin = NetworkName.CARDANO,
+        toAddress = "addr1q...",
+        amountSmallestUnit = 2_000_000L,  // 2 ADA
+        feeSmallestUnit = 200_000L         // 0.2 ADA
+    )
+
+    // ─── Bitcoin (satoshi) ──────────────────────────────────────────
+    val btcResult = manager.sendCoinExact(
+        coin = NetworkName.BTC,
+        toAddress = "bc1q...",
+        amountSmallestUnit = 10_000_000L  // 0.1 BTC
+    )
+
+    // ─── TON (nanoton, có memo) ─────────────────────────────────────
+    val tonResult = manager.sendCoinExact(
+        coin = NetworkName.TON,
+        toAddress = "EQ...",
+        amountSmallestUnit = 500_000_000L,  // 0.5 TON
+        memo = MemoData("hello", null)
+    )
+
+    // ─── XRP (drops, có destinationTag) ─────────────────────────────
+    val xrpResult = manager.sendCoinExact(
+        coin = NetworkName.XRP,
+        toAddress = "r...",
+        amountSmallestUnit = 10_000_000L,  // 10 XRP
+        feeSmallestUnit = 12L,              // 12 drops
+        memo = MemoData(null, 12345u)
+    )
+
+    // ─── Midnight (units) ───────────────────────────────────────────
+    val midResult = manager.sendCoinExact(
+        coin = NetworkName.MIDNIGHT,
+        toAddress = "midnight1q...",
+        amountSmallestUnit = 1_000_000L  // 1 tDUST
+    )
+}
+```
+
+> ETH và Centrality không hỗ trợ `sendCoinExact` — ETH dùng BigInteger qua `sendEth()`, Centrality nhận Double qua `sendCentrality()`.
+
+#### Khi nào dùng `sendCoin` vs `sendCoinExact`?
+
+| | `sendCoin(Double)` | `sendCoinExact(Long)` |
+|---|---|---|
+| Input | Đơn vị lớn (ADA, BTC, TON...) | Đơn vị nhỏ nhất (lovelace, satoshi, nanoton...) |
+| Precision | `round()` — sai số tối đa ±1 đơn vị nhỏ nhất | Chính xác tuyệt đối |
+| Use case | UI input (user nhập "2.5 ADA") | API/backend (amount đã là Long) |
+| Chains | Tất cả | Tất cả trừ ETH, Centrality |
 
 ### estimateFee (unified)
 
@@ -910,6 +996,21 @@ launch {
 
 > `getBalance()` trả về đơn vị lớn (human-readable). Các helper methods (`sendCardano`, `sendMidnight`) nhận đơn vị nhỏ nhất.
 
+#### Lưu ý về floating-point precision
+
+`sendCoin(amount: Double)` convert Double → Long nội bộ bằng `kotlin.math.round()` (không phải `toLong()` truncate). Sai số tối đa ±1 đơn vị nhỏ nhất, đủ chính xác cho hầu hết use case.
+
+Khi cần chính xác tuyệt đối (ví dụ: amount từ API trả về dạng Long, hoặc tính toán phức tạp), dùng `sendCoinExact(amountSmallestUnit: Long)` hoặc chain-specific methods nhận Long trực tiếp (`sendCardano(amountLovelace)`, `btcManager.sendBtc(amountSatoshi)`).
+
+```kotlin
+// ❌ Có thể sai 1 satoshi do floating-point
+manager.sendCoin(NetworkName.BTC, "bc1q...", amount = 0.1)
+// 0.1 * 100_000_000 = 9999999.999... → round() → 10_000_000 ✅ (đã fix)
+
+// ✅ Chính xác tuyệt đối — không có floating-point conversion
+manager.sendCoinExact(NetworkName.BTC, "bc1q...", amountSmallestUnit = 10_000_000L)
+```
+
 ---
 
 ## Result Types
@@ -1074,7 +1175,7 @@ Hướng dẫn cho app cũ đang dùng code trực tiếp từ `androidMain` chu
 | `CentralityNetwork.shared.transactions(...)` | `manager.getCentralityTransactions()` |
 | `CentralityNetwork.shared.getPublicAddress(seed, handler)` | `manager.getAddress(NetworkName.CENTRALITY)` hoặc `CentralityApiService.getPublicAddress(seed)` |
 | `CoinsManager.shared.setNetworks(networks)` | `Config.shared.setNetwork(Network.MAINNET)` + tạo mới `CommonCoinsManager` |
-| `CoinsManager.shared.cleanAll()` | Tạo mới instance `CommonCoinsManager(mnemonic)` |
+| `CoinsManager.shared.cleanAll()` | `CommonCoinsManager.reset()` + `CommonCoinsManager.initialize(newMnemonic)` |
 | `CoinsManager.shared.sendCoin(from, to, ...)` | `manager.sendCoin(coin, toAddress, amount, fee)` |
 | `CoinsManager.shared.estimateFee(...)` | `manager.estimateFee(coin)` hoặc `ACTCoin.feeDefault()` |
 | Callback-based (`completionHandler`) | Suspend functions (coroutines) |
@@ -1373,10 +1474,12 @@ val manager = CommonCoinsManager(mnemonic = mnemonic)
 // Trước: CoinsManager.shared.cleanAll()
 //   → xóa hdWallet, addresses, cached data
 
-// Sau: Tạo mới instance (CommonCoinsManager không có mutable state cần clean)
+// Sau — Cách 1: Singleton pattern (recommended)
+CommonCoinsManager.reset()
+CommonCoinsManager.initialize(mnemonic = newMnemonic)
+
+// Sau — Cách 2: Instance pattern
 val freshManager = CommonCoinsManager(mnemonic = newMnemonic)
-// Hoặc nếu đổi mnemonic trong androidMain CoinsManager:
-// CoinsManager.shared.updateMnemonic(newMnemonic)  // đã có method này
 
 // ─── estimateFee ────────────────────────────────────────────────────
 // Trước:
@@ -1510,7 +1613,7 @@ Hướng dẫn thay thế từng method của `CoinsManager` (androidMain) bằn
 | | CoinsManager (cũ) | CommonCoinsManager (mới) |
 |---|---|---|
 | Source set | androidMain | commonMain (Android + iOS + JVM) |
-| Pattern | Singleton `CoinsManager.shared` | Instance `CommonCoinsManager(mnemonic)` |
+| Pattern | Singleton `CoinsManager.shared` | Instance hoặc Singleton `CommonCoinsManager.shared` |
 | API style | Callback (`BalanceHandle`, `SendCoinHandle`) | Suspend functions + Result wrappers |
 | Address type | `ACTAddress` (object) | `String` (trực tiếp) |
 | Coin type | `ACTCoin` enum | `NetworkName` enum |
@@ -1538,8 +1641,10 @@ val manager = CommonCoinsManager(mnemonic = mnemonic)
 
 // ─── cleanAll() ─────────────────────────────────────────────────────
 // Trước: CoinsManager.shared.cleanAll()
-// Sau: Tạo mới instance
-val freshManager = CommonCoinsManager(mnemonic = newMnemonic)
+// Sau:
+CommonCoinsManager.reset()
+CommonCoinsManager.initialize(mnemonic = newMnemonic)
+// Hoặc: val freshManager = CommonCoinsManager(mnemonic = newMnemonic)
 
 // ─── firstAddress(coin) / addresses(coin) ───────────────────────────
 // Trước: CoinsManager.shared.firstAddress(ACTCoin.Cardano) → ACTAddress?
@@ -2002,3 +2107,5 @@ if (anyManager is IFeeEstimator) {
 10. Bitcoin có 2 option gửi: `sendBtcLocal()` (local builder, recommended) và `sendBtc()` (BlockCypher). Local builder build + sign hoàn toàn client-side, chỉ gọi Esplora API để fetch UTXOs và broadcast
 11. `getChainManager(coin)` trả về `IWalletManager` — cast sang concrete type (BitcoinManager, EthereumManager, ...) để truy cập chain-specific methods
 12. Chain managers được tạo lazy — chỉ khởi tạo khi lần đầu truy cập qua `getAddress()`, `getBalance()`, hoặc `getChainManager()`
+13. `sendCoin(Double)` dùng `round()` để convert — an toàn cho UI input. `sendCoinExact(Long)` không có floating-point conversion — dùng khi amount đã ở đơn vị nhỏ nhất
+14. Hỗ trợ cả 2 pattern: instance (`CommonCoinsManager(mnemonic)`) và singleton (`CommonCoinsManager.shared`). Singleton cần gọi `initialize(mnemonic)` trước khi dùng
