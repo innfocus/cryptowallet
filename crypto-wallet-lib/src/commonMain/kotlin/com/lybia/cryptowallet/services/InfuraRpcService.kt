@@ -79,13 +79,8 @@ class InfuraRpcService {
     }
     suspend fun sendSignedTransaction(coin: CoinNetwork, dataSigned: String): String?{
         val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
-
-            headers {
-                append(HttpHeaders.Accept, "application/json")
-            }
-
+            headers { append(HttpHeaders.Accept, "application/json") }
             contentType(ContentType.Application.Json)
-
             setBody(
                 InfuraRpcRequest(
                     jsonrpc = "2.0",
@@ -95,7 +90,6 @@ class InfuraRpcService {
                 )
             )
         }
-
         if(response.status.value in 200..299){
             val rpcResponse = response.body<InfuraRpcBalanceResponse>()
             return if(rpcResponse.error == null){
@@ -106,6 +100,36 @@ class InfuraRpcService {
         }
         throw Exception("Error")
     }
+
+    /**
+     * Get the transaction count (nonce) for an address.
+     * @return Hex-encoded nonce string (e.g. "0x1a")
+     */
+    suspend fun getTransactionCount(coin: CoinNetwork, address: String): String? {
+        try {
+            val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
+                headers { append(HttpHeaders.Accept, "application/json") }
+                contentType(ContentType.Application.Json)
+                setBody(
+                    InfuraRpcRequest(
+                        jsonrpc = "2.0",
+                        method = "eth_getTransactionCount",
+                        params = listOf(address, "latest"),
+                        id = 1
+                    )
+                )
+            }
+            if (response.status.value in 200..299) {
+                val data = response.body<InfuraRpcBalanceResponse>()
+                if (data.error == null) return data.result
+            }
+            return null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
+
     suspend fun getAllGasPrice(coin: CoinNetwork, chainId: Int): String?{
         try{
             val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {

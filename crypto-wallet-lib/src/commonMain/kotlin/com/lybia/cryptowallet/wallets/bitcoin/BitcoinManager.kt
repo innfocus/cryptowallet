@@ -23,81 +23,99 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
     private var walletAddress: String? = null
     private var keyPath: KeyPath? = null
 
+    /**
+     * Unified method to generate a Bitcoin address by type and account index.
+     *
+     * Dispatches to the correct bitcoin-kmp function based on [addressType]:
+     * - [BitcoinAddressType.NATIVE_SEGWIT] → `Bitcoin.computeBIP84Address()` (BIP-84, P2WPKH)
+     * - [BitcoinAddressType.NESTED_SEGWIT] → `Bitcoin.computeP2ShOfP2WpkhAddress()` (BIP-49, P2SH-P2WPKH)
+     * - [BitcoinAddressType.LEGACY] → `Bitcoin.computeP2PkhAddress()` (BIP-44, P2PKH)
+     *
+     * @param addressType the Bitcoin address type to generate
+     * @param accountIndex the HD wallet account index (must be >= 0)
+     * @return the generated Bitcoin address string
+     * @throws IllegalArgumentException if [accountIndex] is negative
+     */
+    fun getAddressByType(
+        addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0
+    ): String {
+        require(accountIndex >= 0) { "Account index must be non-negative, received: $accountIndex" }
 
-    fun getLegacyAddress(): String? {
-        when (Config.shared.getNetwork()) {
-            Network.MAINNET -> {
-                keyPath = KeyPath("m/44'/0'/0'/0/0")
-                val account =
-                    DeterministicWallet.derivePrivateKey(master, keyPath!!)
-                walletAddress =
-                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Mainnet.chainHash)
-            }
+        val isMainnet = Config.shared.getNetwork() == Network.MAINNET
+        val coinType = if (isMainnet) 0 else 1
+        val chain = if (isMainnet) Chain.Mainnet else Chain.Testnet4
 
-            else -> {
-                keyPath = KeyPath("m/44'/1'/0'/0/0")
-                val account =
-                    DeterministicWallet.derivePrivateKey(master, keyPath!!)
-                walletAddress =
-                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Testnet4.chainHash)
-            }
-        }
-        return walletAddress
-    }
-
-    fun getNativeSegWitAddress(numberAccount: Int = 0): String? {
-        when (Config.shared.getNetwork()) {
-            Network.MAINNET -> {
-                keyPath = KeyPath("m/84'/0'/${numberAccount}'/0/0")
-                val account =
-                    DeterministicWallet.derivePrivateKey(
-                        master,
-                        keyPath!!
-                    )
-                walletAddress =
-                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Mainnet.chainHash)
-            }
-
-            else -> {
-                keyPath = KeyPath("m/84'/1'/${numberAccount}'/0/0")
-                val account =
-                    DeterministicWallet.derivePrivateKey(
-                        master,
-                        keyPath!!
-                    )
-                walletAddress =
-                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Testnet4.chainHash)
-            }
+        val purpose = when (addressType) {
+            BitcoinAddressType.NATIVE_SEGWIT -> 84
+            BitcoinAddressType.NESTED_SEGWIT -> 49
+            BitcoinAddressType.LEGACY -> 44
         }
 
+        val path = KeyPath("m/${purpose}'/${coinType}'/${accountIndex}'/0/0")
+        val derived = DeterministicWallet.derivePrivateKey(master, path)
 
-        return walletAddress
-    }
-
-    fun getSegWitAddress(): String? {
-        when (Config.shared.getNetwork()) {
-            Network.MAINNET -> {
-                keyPath = KeyPath("m/49'/0'/0'/0/0")
-                val account =
-                    DeterministicWallet.derivePrivateKey(master, keyPath!!)
-                walletAddress =
-                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Mainnet.chainHash)
-            }
-
-            else -> {
-                keyPath = KeyPath("m/49'/1'/0'/0/0")
-                val account =
-                    DeterministicWallet.derivePrivateKey(master, keyPath!!)
-                walletAddress =
-                    Bitcoin.computeBIP84Address(account.publicKey, Chain.Testnet4.chainHash)
-            }
+        val address = when (addressType) {
+            BitcoinAddressType.NATIVE_SEGWIT ->
+                Bitcoin.computeBIP84Address(derived.publicKey, chain.chainHash)
+            BitcoinAddressType.NESTED_SEGWIT ->
+                Bitcoin.computeP2ShOfP2WpkhAddress(derived.publicKey, chain.chainHash)
+            BitcoinAddressType.LEGACY ->
+                Bitcoin.computeP2PkhAddress(derived.publicKey, chain.chainHash)
         }
 
-        return walletAddress
+        walletAddress = address
+        keyPath = path
+        return address
     }
 
+    /**
+     * Generate a Legacy (P2PKH) Bitcoin address.
+     *
+     * @param accountIndex the HD wallet account index (default 0)
+     * @return the generated Legacy address
+     */
+    fun getLegacyAddress(accountIndex: Int = 0): String {
+        return getAddressByType(BitcoinAddressType.LEGACY, accountIndex)
+    }
+
+    /**
+     * Generate a Nested SegWit (P2SH-P2WPKH) Bitcoin address.
+     *
+     * @param accountIndex the HD wallet account index (default 0)
+     * @return the generated Nested SegWit address
+     */
+    fun getNestedSegWitAddress(accountIndex: Int = 0): String {
+        return getAddressByType(BitcoinAddressType.NESTED_SEGWIT, accountIndex)
+    }
+
+    /**
+     * Generate a Nested SegWit address.
+     *
+     * @deprecated Use [getNestedSegWitAddress] instead for correct P2SH-P2WPKH address generation.
+     */
+    @Deprecated(
+        message = "Use getNestedSegWitAddress() instead",
+        replaceWith = ReplaceWith("getNestedSegWitAddress()")
+    )
+    fun getSegWitAddress(): String {
+        return getNestedSegWitAddress()
+    }
+
+    /**
+     * Generate a Native SegWit (P2WPKH / Bech32) Bitcoin address.
+     *
+     * @param numberAccount the HD wallet account index (default 0)
+     * @return the generated Native SegWit address
+     */
+    fun getNativeSegWitAddress(numberAccount: Int = 0): String {
+        return getAddressByType(BitcoinAddressType.NATIVE_SEGWIT, numberAccount)
+    }
 
     override fun getAddress(): String {
+        if (walletAddress == null) {
+            getAddressByType(BitcoinAddressType.NATIVE_SEGWIT, 0)
+        }
         return walletAddress ?: ""
     }
 
@@ -116,44 +134,112 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
     }
 
     suspend fun sendBitcoinTransaction(toAddress: String, amount: Double) {
-        val transactionRequest =
-            BitcoinApiService.INSTANCE.createNewTransaction(walletAddress!!, toAddress, 100)
-        require(transactionRequest != null) { "Transaction request is null" }
-        val pubsKey = mutableListOf<String>()
-        require(keyPath != null) { "Key path is null" }
-        val signature: List<String> = transactionRequest.tosign.map { sign ->
-            val privateKeyStr = DeterministicWallet.derivePrivateKey(
-                master,
-                keyPath!!
-            ).privateKey.toBase58(Base58.Prefix.SecretKeyTestnet)
-            val privateKey =
-                PrivateKey.fromBase58(privateKeyStr, Base58.Prefix.SecretKeyTestnet).first
-            val publicKey = privateKey.publicKey()
-            val data = Crypto.sha256(sign.encodeToByteArray())
-            val encoded = Crypto.sign(
-                data,
-                privateKey
-            )
+        val amountSatoshi = (amount * 100_000_000).toLong()
+        sendBtc(toAddress, amountSatoshi)
+    }
 
-            require(Crypto.verifySignature(data, encoded, publicKey)) { "Invalid signature" }
+    /**
+     * Build, sign, and submit a Bitcoin transaction via BlockCypher API.
+     *
+     * Flow:
+     * 1. BlockCypher creates unsigned tx with UTXO selection (`/txs/new`)
+     * 2. Client signs each `tosign` hash with the derived private key
+     * 3. BlockCypher broadcasts the signed tx (`/txs/send`)
+     *
+     * Works with all address types (Legacy, Nested SegWit, Native SegWit)
+     * because BlockCypher handles script type detection automatically.
+     *
+     * @param toAddress Destination Bitcoin address (any format: 1..., 3..., bc1q...)
+     * @param amountSatoshi Amount in satoshis (1 BTC = 100,000,000 satoshis)
+     * @param addressType Address type of the sender (determines which key to sign with)
+     * @param accountIndex HD wallet account index (default 0)
+     * @return TransferResponseModel with txHash on success
+     */
+    suspend fun sendBtc(
+        toAddress: String,
+        amountSatoshi: Long,
+        addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0
+    ): TransferResponseModel {
+        val fromAddress = getAddressByType(addressType, accountIndex)
 
-            // encoded is already in DER format in bitcoin-kmp 0.30+
-            val sig = encoded
-
-            pubsKey.add(publicKey.value.toString())
-
-            Hex.encode(sig.toByteArray())
-
-        }
-
-        val requestSend = BitcoinTransactionModel(
-            transactionRequest.tx,
-            transactionRequest.tosign,
-            signature,
-            pubsKey
+        val transactionRequest = BitcoinApiService.INSTANCE.createNewTransaction(
+            fromAddress, toAddress, amountSatoshi
+        ) ?: return TransferResponseModel(
+            success = false,
+            error = "Failed to create transaction (BlockCypher returned null)",
+            txHash = null
         )
 
-        println(requestSend)
+        val derivedKey = derivePrivateKey(addressType, accountIndex)
+        val publicKey = derivedKey.publicKey()
+        val pubKeyHex = publicKey.value.toString()
+
+        val signatures = mutableListOf<String>()
+        val pubkeys = mutableListOf<String>()
+
+        for (tosignHex in transactionRequest.tosign) {
+            val hashBytes = Hex.decode(tosignHex)
+            val sig = Crypto.sign(hashBytes, derivedKey)
+            signatures.add(Hex.encode(sig.toByteArray()))
+            pubkeys.add(pubKeyHex)
+        }
+
+        val signedTx = BitcoinTransactionModel(
+            tx = transactionRequest.tx,
+            tosign = transactionRequest.tosign,
+            signatures = signatures,
+            pubkeys = pubkeys
+        )
+
+        val result = BitcoinApiService.INSTANCE.sendTransaction(signedTx)
+        return if (result != null) {
+            TransferResponseModel(success = true, error = null, txHash = result.tx.hash)
+        } else {
+            TransferResponseModel(success = false, error = "Failed to broadcast transaction", txHash = null)
+        }
+    }
+
+    /**
+     * Derive the secp256k1 private key for a given address type and account index.
+     */
+    private fun derivePrivateKey(
+        addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0
+    ): PrivateKey {
+        val isMainnet = Config.shared.getNetwork() == Network.MAINNET
+        val coinType = if (isMainnet) 0 else 1
+        val purpose = when (addressType) {
+            BitcoinAddressType.NATIVE_SEGWIT -> 84
+            BitcoinAddressType.NESTED_SEGWIT -> 49
+            BitcoinAddressType.LEGACY -> 44
+        }
+        val path = KeyPath("m/${purpose}'/${coinType}'/${accountIndex}'/0/0")
+        return DeterministicWallet.derivePrivateKey(master, path).privateKey
+    }
+
+    /**
+     * Estimate the transaction fee in satoshis via BlockCypher.
+     * BlockCypher's `/txs/new` returns the estimated fee in the tx skeleton,
+     * accounting for UTXO count and script types.
+     *
+     * @param toAddress Destination address
+     * @param amountSatoshi Amount in satoshis
+     * @param addressType Sender address type
+     * @param accountIndex HD wallet account index
+     * @return Fee in satoshis, or null if estimation failed
+     */
+    suspend fun estimateFee(
+        toAddress: String,
+        amountSatoshi: Long,
+        addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0
+    ): Long? {
+        val fromAddress = getAddressByType(addressType, accountIndex)
+        val txSkeleton = BitcoinApiService.INSTANCE.createNewTransaction(
+            fromAddress, toAddress, amountSatoshi
+        ) ?: return null
+        return txSkeleton.tx.fees
     }
 
     override suspend fun transfer(

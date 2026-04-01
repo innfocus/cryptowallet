@@ -18,11 +18,11 @@ Tài liệu này tổng hợp toàn bộ yêu cầu của module `crypto-wallet-
 | Module | Trạng thái | Source Set | Ghi chú |
 |---|---|---|---|
 | HD Wallet (BIP32/39/44) | ✅ Đã migrate | commonMain | |
-| Bitcoin | ✅ Đã migrate | commonMain | `transfer()` đã implement |
-| Ethereum/Arbitrum | ✅ Đã migrate (JSON-RPC qua Ktor) | commonMain | NFT: `getNFTs()` + `transferNFT()` đã implement |
-| Cardano (Byron + Shelley + Native Token) | ✅ Đã migrate | commonMain | |
-| TON | ✅ Đã migrate | commonMain | `getNFTs()` + `transferNFT()` + INFTManager đã implement |
-| Ripple/XRP | ✅ Đã migrate | commonMain | |
+| Bitcoin | ✅ Đã migrate | commonMain | `transfer()` đã implement, testnet ✅ |
+| Ethereum/Arbitrum | ✅ Đã migrate (JSON-RPC qua Ktor) | commonMain | NFT đã implement, testnet ✅ |
+| Cardano (Byron + Shelley + Native Token) | ✅ Đã migrate | commonMain | Testnet ⚠️ CardanoManager hardcode mainnet URL |
+| TON | ✅ Đã migrate | commonMain | `getNFTs()` + INFTManager đã implement, testnet ✅ |
+| Ripple/XRP | ✅ Đã migrate | commonMain | Testnet ⚠️ RippleManager hardcode isTestNet=false |
 | Midnight Network | ✅ Đã migrate | commonMain | |
 | Centrality/CennzNet | ✅ Đã migrate | commonMain | |
 | Staking (Cardano + TON) | ✅ Đã implement | commonMain | |
@@ -31,6 +31,7 @@ Tài liệu này tổng hợp toàn bộ yêu cầu của module `crypto-wallet-
 | CommonCoinsManager (Facade) | ✅ Đã implement | commonMain | |
 | ChainManagerFactory | ✅ Đã implement | commonMain | |
 | Testing (Property + Unit) | ✅ Đã implement | commonTest | P1-P13 property tests + unit tests |
+| Testnet Support | ⚠️ Cần bổ sung | commonMain | Cardano + Ripple cần fix hardcode |
 
 ## Glossary
 
@@ -87,6 +88,14 @@ Tài liệu này tổng hợp toàn bộ yêu cầu của module `crypto-wallet-
 - **bitcoin_kmp**: Thư viện `fr.acinq.bitcoin:bitcoin-kmp` cung cấp MnemonicCode, DeterministicWallet, Crypto
 - **TransationData**: Model giao dịch chung cho tất cả chain
 - **TransferResponseModel**: Model kết quả gửi giao dịch (txHash, success, error)
+- **Testnet**: Mạng thử nghiệm của blockchain, cho phép phát triển và kiểm thử mà không dùng tiền thật. Bitcoin dùng Testnet4, Ethereum dùng Sepolia, Cardano dùng Preprod, Ripple dùng Altnet, TON dùng Testnet
+- **Mainnet**: Mạng chính thức của blockchain, nơi giao dịch thật diễn ra
+- **Native_SegWit**: Địa chỉ Bitcoin theo BIP-84, sử dụng Bech32 encoding (prefix bc1), script type P2WPKH, phí giao dịch thấp nhất
+- **Nested_SegWit**: Địa chỉ Bitcoin theo BIP-49, sử dụng P2SH-P2WPKH (prefix 3), tương thích ngược với các dịch vụ chưa hỗ trợ Native SegWit
+- **Legacy_Address**: Địa chỉ Bitcoin theo BIP-44, sử dụng P2PKH (prefix 1), định dạng địa chỉ Bitcoin gốc, tương thích rộng nhất
+- **BIP-84**: Bitcoin Improvement Proposal cho Native SegWit, derivation path `m/84'/coin_type'/account'/change/index`
+- **BIP-49**: Bitcoin Improvement Proposal cho Nested SegWit, derivation path `m/49'/coin_type'/account'/change/index`
+- **Bitcoin_Address_Type**: Enum định nghĩa các loại địa chỉ Bitcoin: NATIVE_SEGWIT, NESTED_SEGWIT, LEGACY
 
 ## Requirements
 
@@ -543,6 +552,52 @@ Tài liệu này tổng hợp toàn bộ yêu cầu của module `crypto-wallet-
 6. THE Midnight_Module SHALL implement: IWalletManager
 7. THE Centrality_Module SHALL implement: IWalletManager
 8. THE CommonCoinsManager SHALL trả về `false` cho capability check khi chain không implement interface tương ứng
+
+### Requirement 35: Hỗ trợ Testnet cho tất cả Network chính
+
+**User Story:** Là developer, tôi muốn tất cả các network chính (Bitcoin, Cardano, Ripple, Ethereum, TON) đều hỗ trợ testnet đầy đủ, để có thể phát triển và kiểm thử ứng dụng mà không cần dùng tiền thật.
+
+#### Phân tích hiện trạng Testnet
+
+| Network | Address Generation | API Endpoints | Chuyển đổi Mainnet/Testnet | Gaps |
+|---|:---:|:---:|:---:|---|
+| Bitcoin | ✅ tb1... (Testnet4) | ✅ BlockCypher test3 | ✅ Config.shared.getNetwork() | CoinNetwork trả về `""` cho BTC testnet (không ảnh hưởng vì dùng BlockCypher) |
+| Ethereum | ✅ 0x... (giống mainnet) | ✅ Sepolia Infura + Etherscan | ✅ Config.shared.getNetwork() | Không có gap |
+| Cardano | ✅ addr_test... | ⚠️ Blockfrost preprod URL có trong CoinNetwork | ⚠️ CardanoManager constructor hardcode mainnet URL | CardanoManager cần sử dụng CoinNetwork.getBlockfrostUrl() thay vì hardcode |
+| Ripple | ✅ r... (giống mainnet) | ✅ altnet.rippletest.net | ⚠️ RippleApiService hỗ trợ, nhưng RippleManager hardcode isTestNet=false | RippleManager cần đọc Config.shared.getNetwork() để set isTestNet |
+| TON | ✅ 0Q... (testnet flag) | ✅ testnet.toncenter.com | ✅ Config.shared.getNetwork() | Không có gap |
+
+#### Acceptance Criteria
+
+1. WHEN Config network được set thành TESTNET, THE Bitcoin_Module SHALL tạo địa chỉ testnet (prefix tb1) và sử dụng BlockCypher test3 network cho tất cả API calls
+2. WHEN Config network được set thành TESTNET, THE Ethereum_Module SHALL sử dụng Sepolia testnet endpoints (Infura Sepolia, Etherscan Sepolia) cho tất cả API calls
+3. WHEN Config network được set thành TESTNET, THE Cardano_Module SHALL sử dụng Blockfrost preprod endpoint và tạo địa chỉ với prefix `addr_test` thay vì `addr`
+4. WHEN Config network được set thành TESTNET, THE Cardano_Module SHALL khởi tạo CardanoApiService với URL từ CoinNetwork.getBlockfrostUrl() thay vì hardcode mainnet URL
+5. WHEN Config network được set thành TESTNET, THE Ripple_Module SHALL sử dụng Ripple testnet endpoint (s.altnet.rippletest.net) và derivation path phù hợp với testnet
+6. WHEN Config network được set thành TESTNET, THE Ripple_Module SHALL đọc cấu hình network từ Config.shared.getNetwork() thay vì hardcode isTestNet=false trong ACTNetwork
+7. WHEN Config network được set thành TESTNET, THE TON_Module SHALL tạo địa chỉ testnet (testOnly flag) và sử dụng testnet.toncenter.com cho tất cả API calls
+8. THE CoinNetwork class SHALL trả về URL hợp lệ (không rỗng) cho tất cả 5 network (BTC, ETHEREUM, CARDANO, XRP, TON) khi ở chế độ TESTNET
+9. WHEN chuyển đổi giữa MAINNET và TESTNET, THE Wallet_Library SHALL tạo lại địa chỉ phù hợp với network mới cho tất cả chain managers
+10. THE Test_Suite SHALL bao gồm unit tests kiểm tra address generation và API endpoint selection cho cả mainnet và testnet trên tất cả 5 network
+
+### Requirement 36: Bitcoin — Hỗ trợ đa loại địa chỉ (SegWit, Nested SegWit, Legacy) và HD Wallet
+
+**User Story:** Là người dùng ví Bitcoin, tôi muốn tạo và quản lý nhiều loại địa chỉ Bitcoin (Native SegWit, Nested SegWit, Legacy) với hỗ trợ HD Wallet đa tài khoản, để tương thích với mọi dịch vụ và sàn giao dịch.
+
+#### Acceptance Criteria
+
+1. WHEN người dùng yêu cầu tạo Native SegWit address, THE Bitcoin_Module SHALL derive key theo BIP-84 với derivation path `m/84'/0'/0'/0/index` (mainnet) hoặc `m/84'/1'/0'/0/index` (testnet) và tạo địa chỉ Bech32 có prefix `bc1` (mainnet) hoặc `tb1` (testnet)
+2. WHEN người dùng yêu cầu tạo Nested SegWit address, THE Bitcoin_Module SHALL derive key theo BIP-49 với derivation path `m/49'/0'/0'/0/index` (mainnet) hoặc `m/49'/1'/0'/0/index` (testnet) và tạo địa chỉ P2SH-P2WPKH có prefix `3` (mainnet) hoặc `2` (testnet)
+3. WHEN người dùng yêu cầu tạo Legacy address, THE Bitcoin_Module SHALL derive key theo BIP-44 với derivation path `m/44'/0'/0'/0/index` (mainnet) hoặc `m/44'/1'/0'/0/index` (testnet) và tạo địa chỉ P2PKH có prefix `1` (mainnet) hoặc `m` hoặc `n` (testnet)
+4. THE Bitcoin_Module SHALL hỗ trợ HD Wallet theo BIP-32 cho phép derive nhiều tài khoản (account index) cho mỗi loại địa chỉ, với derivation path `m/purpose'/coin_type'/account'/change/address_index`
+5. THE Bitcoin_Module SHALL hỗ trợ BIP-44 multi-account hierarchy, cho phép tạo nhiều account (account index 0, 1, 2, ...) cho mỗi loại địa chỉ (Native SegWit, Nested SegWit, Legacy)
+6. WHEN `getNativeSegWitAddress()` được gọi, THE Bitcoin_Module SHALL sử dụng hàm `Bitcoin.computeBIP84Address()` từ thư viện `bitcoin-kmp` để tạo địa chỉ Bech32 (P2WPKH)
+7. WHEN `getNestedSegWitAddress()` được gọi, THE Bitcoin_Module SHALL sử dụng hàm `Bitcoin.computeP2shOfP2wpkhAddress()` từ thư viện `bitcoin-kmp` để tạo địa chỉ P2SH-P2WPKH
+8. WHEN `getLegacyAddress()` được gọi, THE Bitcoin_Module SHALL sử dụng hàm `Bitcoin.computeP2pkhAddress()` từ thư viện `bitcoin-kmp` để tạo địa chỉ P2PKH
+9. FOR ALL loại địa chỉ Bitcoin (Native SegWit, Nested SegWit, Legacy), cùng mnemonic và cùng account index SHALL tạo ra cùng địa chỉ trên mọi platform (determinism property)
+10. THE Bitcoin_Module SHALL cung cấp method `getAddressByType(addressType, accountIndex)` cho phép chọn loại địa chỉ (NATIVE_SEGWIT, NESTED_SEGWIT, LEGACY) và account index
+11. IF account index âm được cung cấp, THEN THE Bitcoin_Module SHALL trả về lỗi mô tả rõ account index phải là số không âm
+12. THE Bitcoin_Module SHALL mặc định sử dụng Native SegWit (BIP-84) làm loại địa chỉ chính khi gọi `getAddress()` để tối ưu phí giao dịch
 
 ---
 

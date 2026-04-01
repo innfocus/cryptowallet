@@ -5,6 +5,7 @@ import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.models.ripple.RippleAccountInfoResponse
 import com.lybia.cryptowallet.models.ripple.RippleAccountTxResponse
 import com.lybia.cryptowallet.models.ripple.RippleRpcParam
+import com.lybia.cryptowallet.models.ripple.RippleMarker
 import com.lybia.cryptowallet.models.ripple.RippleRpcRequest
 import com.lybia.cryptowallet.models.ripple.RippleSubmitResponse
 import io.ktor.client.call.body
@@ -80,6 +81,19 @@ class RippleApiService(
         address: String,
         limit: Int = 100
     ): RippleAccountTxResponse? {
+        return getTransactionHistoryWithMarker(address, limit, marker = null)
+    }
+
+    /**
+     * Get transaction history with pagination marker support.
+     * @param marker Pagination marker from previous response (null for first page)
+     * @return Response containing transactions and optional next marker
+     */
+    suspend fun getTransactionHistoryWithMarker(
+        address: String,
+        limit: Int = 100,
+        marker: RippleMarker? = null
+    ): RippleAccountTxResponse? {
         return try {
             val request = RippleRpcRequest(
                 method = "account_tx",
@@ -88,7 +102,8 @@ class RippleApiService(
                         account = address,
                         ledgerIndex = "validated",
                         limit = limit,
-                        forward = false
+                        forward = false,
+                        marker = marker
                     )
                 )
             )

@@ -17,6 +17,12 @@ import com.lybia.cryptowallet.wallets.cardano.CardanoAddress
 import com.lybia.cryptowallet.wallets.cardano.CardanoAddressType
 import com.lybia.cryptowallet.wallets.cardano.CardanoError
 import com.lybia.cryptowallet.wallets.centrality.CentralityManager
+import com.lybia.cryptowallet.wallets.ton.TonManager
+import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
+import com.lybia.cryptowallet.enums.ACTCoin
+import com.lybia.cryptowallet.models.FeeEstimate
+import com.lybia.cryptowallet.models.FeeEstimateParams
+import com.lybia.cryptowallet.models.MemoData
 
 /**
  * Result wrapper for balance queries.
@@ -109,6 +115,62 @@ class CommonCoinsManager(
         return manager.getAddress()
     }
 
+    /**
+     * Get multiple addresses for a chain (HD wallet derivation).
+     *
+     * - Cardano: returns Shelley base addresses derived from account=0, index 0..count-1
+     * - Bitcoin: returns Native SegWit addresses derived from account 0..count-1
+     * - Centrality: returns single address (resolved from API)
+     * - Other chains: returns single address (most chains use 1 address)
+     *
+     * @param coin Target chain
+     * @param count Number of addresses to derive (default 1)
+     * @return List of address strings
+     */
+    suspend fun addresses(coin: NetworkName, count: Int = 1): List<String> {
+        val manager = getOrCreateManager(coin)
+        return when (coin) {
+            NetworkName.CARDANO -> {
+                val cardanoManager = manager as com.lybia.cryptowallet.wallets.cardano.CardanoManager
+                (0 until count).map { index ->
+                    cardanoManager.getShelleyAddress(account = 0, index = index)
+                }
+            }
+
+            NetworkName.BTC -> {
+                val btcManager = manager as BitcoinManager
+                (0 until count).map { account ->
+                    btcManager.getNativeSegWitAddress(account) ?: ""
+                }.filter { it.isNotEmpty() }
+            }
+
+            NetworkName.CENTRALITY -> {
+                val addr = if (manager is CentralityManager) {
+                    manager.getAddressAsync()
+                } else {
+                    manager.getAddress()
+                }
+                if (addr.isNotEmpty()) listOf(addr) else emptyList()
+            }
+
+            else -> {
+                val addr = manager.getAddress()
+                if (addr.isNotEmpty()) listOf(addr) else emptyList()
+            }
+        }
+    }
+
+    /**
+     * Get the first address for a chain.
+     * Equivalent to CoinsManager.firstAddress(coin).
+     *
+     * @param coin Target chain
+     * @return Address string, or empty string if not available
+     */
+    fun firstAddress(coin: NetworkName): String {
+        return getAddress(coin)
+    }
+
     // ── Balance queries ─────────────────────────────────────────────────────
 
     suspend fun getBalance(coin: NetworkName, address: String? = null): BalanceResult {
@@ -133,6 +195,98 @@ class CommonCoinsManager(
         } catch (e: Exception) {
             logger.e(e) { "Failed to get transaction history for $coin" }
             null
+        }
+    }
+
+    /**
+     * Result wrapper for paginated transaction history queries.
+     *
+     * @param transactions Raw transaction list (type depends on chain)
+     * @param hasMore Whether more pages are available
+     * @param nextPageParam Opaque pagination token to pass to the next call
+     * @param success Whether the query succeeded
+     * @param error Error message if failed
+     */
+    data class TransactionHistoryResult(
+        val transactions: Any? = null,
+        val hasMore: Boolean = false,
+        val nextPageParam: Map<String, Any?>? = null,
+        val success: Boolean,
+        val error: String? = null
+    )
+
+    /**
+     * Get transaction history with pagination support.
+     *
+     * Pagination behavior per chain:
+     * - XRP: uses `marker` (ledger + seq) from Ripple JSON-RPC `account_tx`
+     * - Centrality: uses `row` + `page` params
+     * - Cardano: Blockfrost returns all txs per address (no pagination in current impl)
+     * - Other chains: returns all available transactions (no pagination)
+     *
+     * @param coin Target chain
+     * @param address Optional address override
+     * @param limit Max number of transactions per page
+     * @param pageParam Pagination token from previous [TransactionHistoryResult.nextPageParam]
+     * @return TransactionHistoryResult with transactions and pagination info
+     */
+    suspend fun getTransactionHistoryPaginated(
+        coin: NetworkName,
+        address: String? = null,
+        limit: Int = 100,
+        pageParam: Map<String, Any?>? = null
+    ): TransactionHistoryResult {
+        return try {
+            when (coin) {
+                NetworkName.XRP -> {
+                    val manager = getOrCreateManager(coin)
+                    val rippleManager = manager as com.lybia.cryptowallet.wallets.ripple.RippleManager
+                    val addr = address ?: manager.getAddress()
+                    val marker = pageParam?.let {
+                        com.lybia.cryptowallet.models.ripple.RippleMarker(
+                            ledger = (it["ledger"] as? Number)?.toLong(),
+                            seq = (it["seq"] as? Number)?.toLong()
+                        )
+                    }
+                    val response = rippleManager.getTransactionHistoryPaginated(addr, limit, marker)
+                    TransactionHistoryResult(
+                        transactions = response.first,
+                        hasMore = response.second != null,
+                        nextPageParam = response.second?.let {
+                            mapOf("ledger" to it.ledger, "seq" to it.seq)
+                        },
+                        success = true
+                    )
+                }
+
+                NetworkName.CENTRALITY -> {
+                    val manager = getOrCreateManager(coin) as CentralityManager
+                    val addr = address ?: manager.getAddressAsync()
+                    val page = (pageParam?.get("page") as? Number)?.toInt() ?: 0
+                    val result = manager.getTransactionHistoryPaginated(addr, limit, page)
+                    val nextPage = if (result.isNotEmpty() && result.size >= limit) page + 1 else null
+                    TransactionHistoryResult(
+                        transactions = result,
+                        hasMore = nextPage != null,
+                        nextPageParam = nextPage?.let { mapOf("page" to it) },
+                        success = true
+                    )
+                }
+
+                else -> {
+                    // Chains without pagination — delegate to standard method
+                    val txs = getTransactionHistory(coin, address)
+                    TransactionHistoryResult(
+                        transactions = txs,
+                        hasMore = false,
+                        nextPageParam = null,
+                        success = true
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to get paginated transaction history for $coin" }
+            TransactionHistoryResult(success = false, error = e.message)
         }
     }
 
@@ -481,6 +635,245 @@ class CommonCoinsManager(
         }
     }
 
+    // ── Unified sendCoin — dispatches per-chain ───────────────────────────
+
+    /**
+     * Unified send coin operation that dispatches to the appropriate chain manager.
+     * Mirrors the legacy CoinsManager.sendCoin() but as a suspend function.
+     *
+     * @param coin Target chain
+     * @param toAddress Destination address
+     * @param amount Amount in the chain's major unit (e.g. ADA, not lovelace)
+     * @param networkFee Network fee in the chain's major unit
+     * @param serviceFee Optional service fee (for service-address transactions)
+     * @param serviceAddress Optional service address
+     * @param memo Optional memo / destination tag
+     * @return SendResult with txHash on success
+     */
+    suspend fun sendCoin(
+        coin: NetworkName,
+        toAddress: String,
+        amount: Double,
+        networkFee: Double = 0.0,
+        serviceFee: Double = 0.0,
+        serviceAddress: String? = null,
+        memo: MemoData? = null
+    ): SendResult {
+        return try {
+            when (coin) {
+                NetworkName.CARDANO -> {
+                    val amountLovelace = (amount * 1_000_000).toLong()
+                    val feeLovelace = (networkFee * 1_000_000).toLong()
+                    sendCardano(toAddress, amountLovelace, feeLovelace)
+                }
+
+                NetworkName.MIDNIGHT -> {
+                    val amountUnits = (amount * 1_000_000).toLong()
+                    sendMidnight(toAddress, amountUnits)
+                }
+
+                NetworkName.CENTRALITY -> {
+                    val fromAddress = getAddress(NetworkName.CENTRALITY)
+                    sendCentrality(fromAddress, toAddress, amount)
+                }
+
+                NetworkName.TON -> {
+                    val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+                    val coinNetwork = CoinNetwork(NetworkName.TON)
+                    val seqno = tonManager.getSeqno(coinNetwork)
+                    val amountNano = (amount * 1_000_000_000).toLong()
+                    val memoStr = memo?.memo?.takeIf { it.isNotEmpty() }
+                    val bocBase64 = tonManager.signTransaction(toAddress, amountNano, seqno, memoStr)
+                    val result = tonManager.transfer(bocBase64, coinNetwork)
+                    SendResult(
+                        txHash = result.txHash ?: "",
+                        success = result.success,
+                        error = result.error
+                    )
+                }
+
+                NetworkName.BTC -> {
+                    val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
+                    val amountSatoshi = (amount * 100_000_000).toLong()
+                    val result = btcManager.sendBtc(toAddress, amountSatoshi)
+                    SendResult(
+                        txHash = result.txHash ?: "",
+                        success = result.success,
+                        error = result.error
+                    )
+                }
+
+                NetworkName.ETHEREUM, NetworkName.ARBITRUM -> {
+                    val ethManager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.ethereum.EthereumManager
+                    val coinNetwork = CoinNetwork(coin)
+                    val amountWei = (amount * 1e18).toLong()
+                    val result = ethManager.sendEth(toAddress, amountWei, coinNetwork)
+                    SendResult(
+                        txHash = result.txHash ?: "",
+                        success = result.success,
+                        error = result.error
+                    )
+                }
+
+                NetworkName.XRP -> {
+                    val rippleManager = getOrCreateManager(NetworkName.XRP) as com.lybia.cryptowallet.wallets.ripple.RippleManager
+                    val amountDrops = (amount * 1_000_000).toLong()
+                    val feeDrops = if (networkFee > 0) (networkFee * 1_000_000).toLong() else 12L
+                    val destTag = memo?.destinationTag?.toLong()
+                    val result = rippleManager.sendXrp(toAddress, amountDrops, feeDrops, destTag)
+                    SendResult(
+                        txHash = result.txHash ?: "",
+                        success = result.success,
+                        error = result.error
+                    )
+                }
+
+                else -> {
+                    SendResult(txHash = "", success = false, error = "sendCoin not supported for $coin")
+                }
+            }
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to sendCoin for $coin" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    // ── Fee estimation ──────────────────────────────────────────────────────
+
+    /**
+     * Result wrapper for fee estimation.
+     */
+    data class FeeEstimateResult(
+        val fee: Double,
+        val gasLimit: Long? = null,
+        val gasPrice: Long? = null,
+        val unit: String = "native",
+        val success: Boolean,
+        val error: String? = null
+    )
+
+    /**
+     * Estimate transaction fee for a given chain.
+     *
+     * - Ethereum/Arbitrum: delegates to [IFeeEstimator.estimateFee] (gas-based)
+     * - TON: estimates via TonApiService using a dummy BOC
+     * - Cardano, Centrality, Ripple, Midnight: returns static default fee
+     * - BTC: returns 0 (fee calculated during UTXO selection)
+     *
+     * @param coin Target chain
+     * @param amount Transaction amount in the chain's major unit
+     * @param fromAddress Sender address (required for ETH/Arbitrum gas estimation)
+     * @param toAddress Recipient address (required for ETH/Arbitrum gas estimation)
+     * @return FeeEstimateResult with fee in the chain's major unit
+     */
+    suspend fun estimateFee(
+        coin: NetworkName,
+        amount: Double = 0.0,
+        fromAddress: String? = null,
+        toAddress: String? = null
+    ): FeeEstimateResult {
+        return try {
+            when (coin) {
+                NetworkName.ETHEREUM, NetworkName.ARBITRUM -> {
+                    val manager = getOrCreateManager(coin)
+                    val feeEstimator = manager as? IFeeEstimator
+                    if (feeEstimator != null) {
+                        val from = fromAddress ?: getAddress(coin)
+                        val to = toAddress ?: from
+                        val coinNetwork = CoinNetwork(coin)
+                        val estimate = feeEstimator.estimateFee(
+                            FeeEstimateParams(from, to, amount), coinNetwork
+                        )
+                        FeeEstimateResult(
+                            fee = estimate.fee,
+                            gasLimit = estimate.gasLimit,
+                            gasPrice = estimate.gasPrice,
+                            unit = estimate.unit,
+                            success = true
+                        )
+                    } else {
+                        FeeEstimateResult(fee = 0.0, success = false, error = "IFeeEstimator not available for $coin")
+                    }
+                }
+
+                NetworkName.TON -> {
+                    val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+                    val coinNetwork = CoinNetwork(NetworkName.TON)
+                    val seqno = tonManager.getSeqno(coinNetwork)
+                    val amountNano = (amount * 1_000_000_000).toLong()
+                    // Sign a dummy self-transfer to get a valid BOC for estimation
+                    val bocBase64 = tonManager.signTransaction(
+                        toAddress = tonManager.getAddress(),
+                        amountNano = amountNano,
+                        seqno = seqno
+                    )
+                    val fee = tonManager.estimateFee(coinNetwork, tonManager.getAddress(), bocBase64)
+                    FeeEstimateResult(fee = fee, unit = "TON", success = true)
+                }
+
+                NetworkName.CARDANO -> {
+                    FeeEstimateResult(
+                        fee = ACTCoin.Cardano.feeDefault(),
+                        unit = "ADA",
+                        success = true
+                    )
+                }
+
+                NetworkName.MIDNIGHT -> {
+                    FeeEstimateResult(
+                        fee = ACTCoin.Midnight.feeDefault(),
+                        unit = "tDUST",
+                        success = true
+                    )
+                }
+
+                NetworkName.XRP -> {
+                    FeeEstimateResult(
+                        fee = ACTCoin.Ripple.feeDefault(),
+                        unit = "XRP",
+                        success = true
+                    )
+                }
+
+                NetworkName.CENTRALITY -> {
+                    FeeEstimateResult(
+                        fee = ACTCoin.Centrality.feeDefault(),
+                        unit = "CENNZ",
+                        success = true
+                    )
+                }
+
+                NetworkName.BTC -> {
+                    val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
+                    val to = toAddress ?: btcManager.getAddress()
+                    val amountSatoshi = (amount * 100_000_000).toLong()
+                    val feeSatoshi = btcManager.estimateFee(to, amountSatoshi)
+                    if (feeSatoshi != null) {
+                        FeeEstimateResult(
+                            fee = feeSatoshi.toDouble() / 100_000_000.0,
+                            unit = "BTC",
+                            success = true
+                        )
+                    } else {
+                        FeeEstimateResult(
+                            fee = ACTCoin.Bitcoin.feeDefault(),
+                            unit = "BTC",
+                            success = true,
+                            error = "Estimation failed, using default"
+                        )
+                    }
+                }
+
+                else -> {
+                    FeeEstimateResult(fee = 0.0, success = false, error = "Fee estimation not supported for $coin")
+                }
+            }
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to estimate fee for $coin" }
+            FeeEstimateResult(fee = 0.0, success = false, error = e.message)
+        }
+    }
+
     // ── Cardano-specific operations (backward compat) ───────────────────────
 
     suspend fun getCardanoBalance(address: String? = null): BalanceResult {
@@ -596,6 +989,133 @@ class CommonCoinsManager(
             CardanoAddressType.SHELLEY_ENTERPRISE,
             CardanoAddressType.SHELLEY_REWARD -> "vkey"
             CardanoAddressType.UNKNOWN -> throw IllegalArgumentException("Unknown address type: $address")
+        }
+    }
+
+    // ── Bitcoin-specific operations ─────────────────────────────────────────
+
+    /**
+     * Send BTC directly (build + sign + submit via BlockCypher).
+     * Supports all address types: Legacy (1...), Nested SegWit (3...), Native SegWit (bc1q...).
+     *
+     * @param toAddress Destination Bitcoin address (any format)
+     * @param amountBtc Amount in BTC
+     * @param addressType Sender address type (default: NATIVE_SEGWIT)
+     * @param accountIndex HD wallet account index (default 0)
+     */
+    suspend fun sendBtc(
+        toAddress: String,
+        amountBtc: Double,
+        addressType: com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType =
+            com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0
+    ): SendResult {
+        return try {
+            val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
+            val amountSatoshi = (amountBtc * 100_000_000).toLong()
+            val result = btcManager.sendBtc(toAddress, amountSatoshi, addressType, accountIndex)
+            SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to send BTC" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    /**
+     * Get a Bitcoin address by type.
+     * @param addressType NATIVE_SEGWIT (bc1q...), NESTED_SEGWIT (3...), or LEGACY (1...)
+     * @param accountIndex HD wallet account index (default 0)
+     */
+    fun getBtcAddress(
+        addressType: com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType =
+            com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0
+    ): String {
+        val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
+        return btcManager.getAddressByType(addressType, accountIndex)
+    }
+
+    // ── Ethereum-specific operations ────────────────────────────────────────
+
+    /**
+     * Send ETH directly (build + sign + submit).
+     * @param toAddress Destination address (0x-prefixed)
+     * @param amountEth Amount in ETH
+     * @param coin NetworkName.ETHEREUM or NetworkName.ARBITRUM
+     * @param gasLimit Optional gas limit override
+     * @param gasPriceGwei Optional gas price override in gwei
+     */
+    suspend fun sendEth(
+        toAddress: String,
+        amountEth: Double,
+        coin: NetworkName = NetworkName.ETHEREUM,
+        gasLimit: Long? = null,
+        gasPriceGwei: Long? = null
+    ): SendResult {
+        return try {
+            val ethManager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.ethereum.EthereumManager
+            val coinNetwork = CoinNetwork(coin)
+            val amountWei = (amountEth * 1e18).toLong()
+            val result = ethManager.sendEth(toAddress, amountWei, coinNetwork, gasLimit, gasPriceGwei)
+            SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to send ETH" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    /**
+     * Send ERC-20 token directly (build + sign + submit).
+     * @param contractAddress ERC-20 token contract address
+     * @param toAddress Recipient address
+     * @param amount Token amount in smallest unit (e.g. wei for 18-decimal tokens)
+     * @param coin NetworkName.ETHEREUM or NetworkName.ARBITRUM
+     * @param gasLimit Optional gas limit override
+     * @param gasPriceGwei Optional gas price override in gwei
+     */
+    suspend fun sendErc20Token(
+        contractAddress: String,
+        toAddress: String,
+        amount: Long,
+        coin: NetworkName = NetworkName.ETHEREUM,
+        gasLimit: Long? = null,
+        gasPriceGwei: Long? = null
+    ): SendResult {
+        return try {
+            val ethManager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.ethereum.EthereumManager
+            val coinNetwork = CoinNetwork(coin)
+            val result = ethManager.sendErc20Token(contractAddress, toAddress, amount, coinNetwork, gasLimit, gasPriceGwei)
+            SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to send ERC-20 token" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    // ── XRP-specific operations ─────────────────────────────────────────────
+
+    /**
+     * Send XRP directly (build + sign + submit).
+     * @param toAddress Destination r-address
+     * @param amountXrp Amount in XRP (not drops)
+     * @param feeXrp Fee in XRP (default: 0.000012 XRP = 12 drops)
+     * @param destinationTag Optional destination tag
+     */
+    suspend fun sendXrp(
+        toAddress: String,
+        amountXrp: Double,
+        feeXrp: Double = 0.000012,
+        destinationTag: Long? = null
+    ): SendResult {
+        return try {
+            val rippleManager = getOrCreateManager(NetworkName.XRP) as com.lybia.cryptowallet.wallets.ripple.RippleManager
+            val amountDrops = (amountXrp * 1_000_000).toLong()
+            val feeDrops = (feeXrp * 1_000_000).toLong()
+            val result = rippleManager.sendXrp(toAddress, amountDrops, feeDrops, destinationTag)
+            SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to send XRP" }
+            SendResult(txHash = "", success = false, error = e.message)
         }
     }
 }

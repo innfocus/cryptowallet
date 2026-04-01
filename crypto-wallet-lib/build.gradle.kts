@@ -136,35 +136,39 @@ kotlin {
 
 
 mavenPublishing {
+    val groupIdProp = project.property("GROUP") as String
+    val artifactIdProp = project.property("POM_ARTIFACT_ID") as String
+    val versionProp = project.property("VERSION_NAME") as String
+
     coordinates(
-        groupId = "io.github.innfocus",
-        artifactId = "crypto-wallet-lib",
-        version = "1.2.2.9"
+        groupId = groupIdProp,
+        artifactId = artifactIdProp,
+        version = versionProp
     )
 
     pom {
-        name.set("Crypto Wallet Libirary")
-        description.set("A library for blockchain crypto wallet")
-        inceptionYear.set("2024")
-        url.set("https://github.com/innfocus/cryptowallet")
+        name.set(project.property("POM_NAME") as String)
+        description.set(project.property("POM_DESCRIPTION") as String)
+        inceptionYear.set(project.property("POM_INCEPTION_YEAR") as String)
+        url.set(project.property("POM_URL") as String)
 
         licenses {
             license {
-                name.set("MIT")
-                url.set("https://opensource.org/licenses/MIT")
+                name.set(project.property("POM_LICENSE_NAME") as String)
+                url.set(project.property("POM_LICENSE_URL") as String)
             }
         }
 
         developers {
             developer {
-                id.set("nqhuy2509")
-                name.set("quanhuy")
-                email.set("nqhuy250901@gmail.com")
+                id.set(project.property("POM_DEVELOPER_ID") as String)
+                name.set(project.property("POM_DEVELOPER_NAME") as String)
+                email.set(project.property("POM_DEVELOPER_EMAIL") as String)
             }
         }
 
         scm {
-            url.set("https://github.com/innfocus/cryptowallet")
+            url.set(project.property("POM_SCM_URL") as String)
         }
     }
 

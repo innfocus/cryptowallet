@@ -3,6 +3,7 @@ package com.lybia.cryptowallet.wallets.cardano
 import co.touchlab.kermit.Logger
 import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.Config
+import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.base.BaseCoinManager
 import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.enums.Network
@@ -24,7 +25,7 @@ import fr.acinq.bitcoin.MnemonicCode
 class CardanoManager(
     private val mnemonic: String,
     private val apiService: CardanoApiService = CardanoApiService(
-        baseUrl = "https://cardano-mainnet.blockfrost.io/api/v0"
+        baseUrl = CoinNetwork(NetworkName.CARDANO).getBlockfrostUrl()
     )
 ) : BaseCoinManager(), IStakingManager {
 

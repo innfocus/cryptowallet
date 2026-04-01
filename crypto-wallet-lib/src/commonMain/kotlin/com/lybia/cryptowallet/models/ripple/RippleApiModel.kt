@@ -17,7 +17,8 @@ data class RippleRpcParam(
     @SerialName("tx_blob") val txBlob: String? = null,
     @SerialName("ledger_index") val ledgerIndex: String? = null,
     val limit: Int? = null,
-    val forward: Boolean? = null
+    val forward: Boolean? = null,
+    val marker: RippleMarker? = null
 )
 
 // ─── account_info response ──────────────────────────────────────────

@@ -54,7 +54,7 @@ object ChainManagerFactory {
     ): IWalletManager {
         return when (coin) {
             NetworkName.BTC -> BitcoinManager(mnemonic).also { it.getNativeSegWitAddress() }
-            NetworkName.ETHEREUM, NetworkName.ARBITRUM -> EthereumManager()
+            NetworkName.ETHEREUM, NetworkName.ARBITRUM -> EthereumManager(mnemonic)
             NetworkName.CARDANO -> CardanoManager(
                 mnemonic = mnemonic,
                 apiService = CardanoApiService(baseUrl = config.apiBaseUrl)

@@ -66,6 +66,22 @@ class CentralityManager(
         return result.transfers.filter { it.assetId == assetId && it.success }
     }
 
+    /**
+     * Get transaction history with pagination support.
+     * @param address Centrality address
+     * @param row Max transactions per page
+     * @param page Page number (0-based)
+     * @return Filtered list of CennzTransfer for the current page
+     */
+    suspend fun getTransactionHistoryPaginated(
+        address: String,
+        row: Int = 100,
+        page: Int = 0
+    ): List<com.lybia.cryptowallet.wallets.centrality.model.CennzTransfer> {
+        val result = apiService.scanTransfers(address, row, page)
+        return result.transfers.filter { it.assetId == assetId && it.success }
+    }
+
     override suspend fun transfer(dataSigned: String, coinNetwork: CoinNetwork): TransferResponseModel {
         return try {
             val txHash = apiService.submitExtrinsic(dataSigned)

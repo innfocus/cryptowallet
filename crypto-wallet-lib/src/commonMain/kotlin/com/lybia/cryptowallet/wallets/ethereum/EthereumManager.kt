@@ -23,17 +23,36 @@ import com.lybia.cryptowallet.services.ExplorerRpcService
 import com.lybia.cryptowallet.services.InfuraRpcService
 import com.lybia.cryptowallet.services.OwlRacleService
 import com.lybia.cryptowallet.utils.Utils
+import com.lybia.cryptowallet.utils.toHexString
 
 
-class EthereumManager : BaseCoinManager(), ITokenManager, INFTManager, IFeeEstimator, ITransactionFee, ITokenAndNFT {
+class EthereumManager(
+    private val mnemonic: String? = null
+) : BaseCoinManager(), ITokenManager, INFTManager, IFeeEstimator, ITransactionFee, ITokenAndNFT {
     private val decimal = 18
 
     companion object {
         val shared: EthereumManager = EthereumManager()
     }
 
+    // ── Key derivation (m/44'/60'/0'/0/0) ───────────────────────────
+
+    private val hdWallet by lazy { mnemonic?.let { com.lybia.cryptowallet.wallets.hdwallet.bip44.ACTHDWallet(it) } }
+    private val ethNetwork by lazy { com.lybia.cryptowallet.enums.ACTNetwork(ACTCoin.Ethereum, false) }
+
+    private val privateKeyBytes: ByteArray? by lazy {
+        hdWallet?.generateExternalPrivateKey(0, ethNetwork)?.raw
+    }
+
+    private val walletAddress: String? by lazy {
+        hdWallet?.let {
+            val pubKey = it.generateExternalPublicKey(0, ethNetwork)
+            com.lybia.cryptowallet.wallets.hdwallet.bip44.ACTAddress(pubKey).rawAddressString()
+        }
+    }
+
     override fun getAddress(): String {
-        return "Arbitrum Address"
+        return walletAddress ?: "Ethereum Address"
     }
 
     override suspend fun getBalance(address: String?, coinNetwork: CoinNetwork?): Double {
@@ -76,6 +95,177 @@ class EthereumManager : BaseCoinManager(), ITokenManager, INFTManager, IFeeEstim
     override suspend fun getChainId(coinNetwork: CoinNetwork): String {
         val result = InfuraRpcService.shared.getChainId(coinNetwork)
         return Utils.convertHexStringToDouble(result, 0).toInt().toString()
+    }
+
+    // ── Direct send (build + sign + submit) ─────────────────────────
+
+    /**
+     * Get the current nonce for the wallet address.
+     */
+    suspend fun getNonce(coinNetwork: CoinNetwork): Long {
+        val addr = walletAddress ?: throw IllegalStateException("No wallet address — mnemonic not provided")
+        val hexNonce = InfuraRpcService.shared.getTransactionCount(coinNetwork, addr)
+            ?: throw Exception("Failed to get nonce")
+        return Utils.convertHexStringToDouble(hexNonce, 0).toLong()
+    }
+
+    /**
+     * Build, sign, and submit an ETH transfer transaction.
+     *
+     * @param toAddress Destination address
+     * @param amountWei Amount in wei
+     * @param coinNetwork Network configuration
+     * @param gasLimit Optional gas limit override (default: estimated)
+     * @param gasPriceGwei Optional gas price override in gwei (default: from network)
+     * @return TransferResponseModel with txHash on success
+     */
+    suspend fun sendEth(
+        toAddress: String,
+        amountWei: Long,
+        coinNetwork: CoinNetwork,
+        gasLimit: Long? = null,
+        gasPriceGwei: Long? = null
+    ): TransferResponseModel {
+        val privKey = privateKeyBytes
+            ?: return TransferResponseModel(false, "No private key — mnemonic not provided", null)
+        val fromAddr = walletAddress
+            ?: return TransferResponseModel(false, "No wallet address", null)
+
+        return try {
+            val nonce = getNonce(coinNetwork)
+            val chainId = getChainId(coinNetwork).toLong()
+
+            // Estimate gas if not provided
+            val estimatedGasLimit = gasLimit ?: run {
+                val model = TransferTokenModel(
+                    nonce = "", addressFrom = fromAddr,
+                    contractAddress = toAddress, dataEncodeABI = "",
+                    value = "0x" + amountWei.toString(16)
+                )
+                getEstGas(model, coinNetwork).toLong()
+            }
+
+            // Get gas price if not provided
+            val gasPriceWei = if (gasPriceGwei != null) {
+                gasPriceGwei * 1_000_000_000L
+            } else {
+                val hexPrice = InfuraRpcService.shared.getAllGasPrice(coinNetwork, chainId.toInt())
+                if (hexPrice != null) Utils.convertHexStringToDouble(hexPrice, 0).toLong()
+                else 20_000_000_000L // fallback 20 gwei
+            }
+
+            val signedTxHex = EthTransactionSigner.signTransaction(
+                privateKey = privKey,
+                nonce = nonce,
+                gasPriceWei = gasPriceWei,
+                gasLimit = estimatedGasLimit,
+                toAddress = toAddress,
+                valueWei = amountWei,
+                data = byteArrayOf(),
+                chainId = chainId
+            )
+
+            val txHash = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, signedTxHex)
+            TransferResponseModel(success = true, error = null, txHash = txHash)
+        } catch (e: Exception) {
+            TransferResponseModel(success = false, error = e.message, txHash = null)
+        }
+    }
+
+    /**
+     * Build, sign, and submit an ERC-20 token transfer transaction.
+     *
+     * @param contractAddress ERC-20 token contract address
+     * @param toAddress Recipient address
+     * @param amount Token amount (raw, in smallest unit)
+     * @param coinNetwork Network configuration
+     * @param gasLimit Optional gas limit override
+     * @param gasPriceGwei Optional gas price override in gwei
+     * @return TransferResponseModel with txHash on success
+     */
+    suspend fun sendErc20Token(
+        contractAddress: String,
+        toAddress: String,
+        amount: Long,
+        coinNetwork: CoinNetwork,
+        gasLimit: Long? = null,
+        gasPriceGwei: Long? = null
+    ): TransferResponseModel {
+        val privKey = privateKeyBytes
+            ?: return TransferResponseModel(false, "No private key — mnemonic not provided", null)
+        val fromAddr = walletAddress
+            ?: return TransferResponseModel(false, "No wallet address", null)
+
+        return try {
+            val nonce = getNonce(coinNetwork)
+            val chainId = getChainId(coinNetwork).toLong()
+
+            // Encode ERC-20 transfer(address,uint256) call data
+            val transferData = EthTransactionSigner.encodeErc20Transfer(toAddress, amount)
+
+            // Estimate gas if not provided
+            val estimatedGasLimit = gasLimit ?: run {
+                val model = TransferTokenModel(
+                    nonce = "", addressFrom = fromAddr,
+                    contractAddress = contractAddress,
+                    dataEncodeABI = "0x" + transferData.toHexString(),
+                    value = "0x0"
+                )
+                getEstGas(model, coinNetwork).toLong()
+            }
+
+            // Get gas price if not provided
+            val gasPriceWei = if (gasPriceGwei != null) {
+                gasPriceGwei * 1_000_000_000L
+            } else {
+                val hexPrice = InfuraRpcService.shared.getAllGasPrice(coinNetwork, chainId.toInt())
+                if (hexPrice != null) Utils.convertHexStringToDouble(hexPrice, 0).toLong()
+                else 20_000_000_000L
+            }
+
+            val signedTxHex = EthTransactionSigner.signTransaction(
+                privateKey = privKey,
+                nonce = nonce,
+                gasPriceWei = gasPriceWei,
+                gasLimit = estimatedGasLimit,
+                toAddress = contractAddress,
+                valueWei = 0L,
+                data = transferData,
+                chainId = chainId
+            )
+
+            val txHash = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, signedTxHex)
+            TransferResponseModel(success = true, error = null, txHash = txHash)
+        } catch (e: Exception) {
+            TransferResponseModel(success = false, error = e.message, txHash = null)
+        }
+    }
+
+    /**
+     * Estimate the total fee for a transaction in ETH.
+     * fee = gasLimit * gasPrice
+     */
+    suspend fun estimateTransactionFee(
+        toAddress: String,
+        amountWei: Long,
+        coinNetwork: CoinNetwork
+    ): FeeEstimate {
+        val fromAddr = walletAddress ?: getAddress()
+        val model = TransferTokenModel(
+            nonce = "", addressFrom = fromAddr,
+            contractAddress = toAddress, dataEncodeABI = "",
+            value = "0x" + amountWei.toString(16)
+        )
+        val gasLimit = getEstGas(model, coinNetwork)
+        val gasPrice = getAllGasPrice(coinNetwork)
+        val gasPriceValue = gasPrice?.ProposeGasPrice?.toLongOrNull() ?: 0L
+        val fee = gasLimit * gasPriceValue.toDouble() / 1_000_000_000.0
+        return FeeEstimate(
+            fee = fee,
+            gasLimit = gasLimit.toLong(),
+            gasPrice = gasPriceValue,
+            unit = "gwei"
+        )
     }
 
     // ── ITransactionFee (existing) ──────────────────────────────────

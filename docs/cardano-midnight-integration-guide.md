@@ -14,7 +14,7 @@ Tài liệu này hướng dẫn cách sử dụng `CommonCoinsManager` trong `co
 | Ethereum (ETH) | `ETHEREUM` | ✅ | ✅ ERC-20 | ✅ ERC-721 | ✅ | — | ✅ ↔ Arbitrum |
 | Arbitrum | `ARBITRUM` | ✅ | ✅ ERC-20 | ✅ ERC-721 | ✅ | — | ✅ ↔ Ethereum |
 | Ripple (XRP) | `XRP` | ✅ | — | — | — | — | — |
-| TON | `TON` | ✅ | ✅ Jetton | ✅ TEP-62 | — | ✅ | — |
+| TON | `TON` | ✅ | ✅ Jetton | ✅ TEP-62 | ✅ | ✅ | — |
 | Cardano (ADA) | `CARDANO` | ✅ | ✅ Native | — | — | ✅ | ✅ ↔ Midnight |
 | Midnight (tDUST) | `MIDNIGHT` | ✅ | — | — | — | — | ✅ ↔ Cardano |
 | Centrality (CENNZ) | `CENTRALITY` | ✅ | — | — | — | — | — |
@@ -132,6 +132,135 @@ launch {
     if (result.success) println("TX: ${result.txHash}")
 }
 ```
+
+### sendCoin (unified — tự build + sign + submit)
+
+`sendCoin` là API thống nhất thay thế `CoinsManager.shared.sendCoin()`. Tự động dispatch đến chain manager phù hợp, build transaction, sign và submit. Nhận amount ở đơn vị lớn (ADA, TON, CENNZ...).
+
+```kotlin
+import com.lybia.cryptowallet.models.MemoData
+
+launch {
+    // ─── Cardano ────────────────────────────────────────────────────
+    val adaResult = manager.sendCoin(
+        coin = NetworkName.CARDANO,
+        toAddress = "addr1q...",
+        amount = 2.0,           // 2 ADA (tự convert sang lovelace bên trong)
+        networkFee = 0.2         // 0.2 ADA fee
+    )
+
+    // ─── Ethereum ───────────────────────────────────────────────────
+    val ethResult = manager.sendCoin(
+        coin = NetworkName.ETHEREUM,
+        toAddress = "0x...",
+        amount = 0.1             // 0.1 ETH (tự build EIP-155 tx + sign)
+    )
+    // Hoặc dùng method riêng:
+    val ethResult2 = manager.sendEth("0x...", amountEth = 0.1)
+
+    // ─── ERC-20 Token (method riêng) ────────────────────────────────
+    val tokenResult = manager.sendErc20Token(
+        contractAddress = "0xTokenContract...",
+        toAddress = "0xRecipient...",
+        amount = 1_000_000L      // amount in smallest unit (e.g. 1 USDT = 1_000_000)
+    )
+
+    // ─── XRP (có destinationTag) ────────────────────────────────────
+    val xrpResult = manager.sendCoin(
+        coin = NetworkName.XRP,
+        toAddress = "r...",
+        amount = 10.0,           // 10 XRP (tự build Payment tx + sign)
+        memo = MemoData(null, 12345u)  // destinationTag
+    )
+    // Hoặc dùng method riêng:
+    val xrpResult2 = manager.sendXrp("r...", amountXrp = 10.0, destinationTag = 12345L)
+
+    // ─── Midnight ───────────────────────────────────────────────────
+    val midResult = manager.sendCoin(
+        coin = NetworkName.MIDNIGHT,
+        toAddress = "midnight1q...",
+        amount = 1.0             // 1 tDUST
+    )
+
+    // ─── TON (có memo) ─────────────────────────────────────────────
+    val tonResult = manager.sendCoin(
+        coin = NetworkName.TON,
+        toAddress = "EQ...",
+        amount = 0.5,            // 0.5 TON
+        memo = MemoData("Hello", null)
+    )
+
+    // ─── Centrality ─────────────────────────────────────────────────
+    val cenResult = manager.sendCoin(
+        coin = NetworkName.CENTRALITY,
+        toAddress = "cX...",
+        amount = 1.5             // 1.5 CENNZ
+    )
+
+    // Kết quả chung
+    if (adaResult.success) println("ADA TX: ${adaResult.txHash}")
+}
+```
+
+> Tất cả chain đều hỗ trợ `sendCoin` trực tiếp (build + sign + submit).
+
+| Chain | sendCoin | Ghi chú |
+|---|---|---|
+| Cardano | ✅ | Tự build UTXO + sign + submit |
+| Midnight | ✅ | Tự build + submit |
+| TON | ✅ | Tự sign BOC + submit, hỗ trợ memo |
+| Centrality | ✅ | Tự orchestrate extrinsic + submit |
+| ETH / Arbitrum | ✅ | Tự build EIP-155 tx + secp256k1 sign + submit |
+| XRP | ✅ | Tự build Payment tx + secp256k1 sign + submit, hỗ trợ destinationTag |
+| BTC | ✅ | BlockCypher UTXO selection + secp256k1 sign, hỗ trợ Legacy/SegWit/Native SegWit |
+
+### estimateFee (unified)
+
+`estimateFee` trả về phí giao dịch ước tính cho mỗi chain. ETH/Arbitrum dùng gas estimation thực tế, các chain khác trả về default fee.
+
+```kotlin
+launch {
+    // ─── Ethereum (gas-based, cần fromAddress + toAddress) ──────────
+    val ethFee = manager.estimateFee(
+        coin = NetworkName.ETHEREUM,
+        amount = 0.1,
+        fromAddress = "0xFrom...",
+        toAddress = "0xTo..."
+    )
+    // FeeEstimateResult(fee, gasLimit, gasPrice, unit, success, error)
+    if (ethFee.success) {
+        println("ETH fee: ${ethFee.fee} ${ethFee.unit}")
+        println("Gas limit: ${ethFee.gasLimit}, Gas price: ${ethFee.gasPrice}")
+    }
+
+    // ─── TON (estimate qua dummy BOC) ───────────────────────────────
+    val tonFee = manager.estimateFee(
+        coin = NetworkName.TON,
+        amount = 0.5
+    )
+    if (tonFee.success) println("TON fee: ${tonFee.fee} ${tonFee.unit}")
+
+    // ─── Cardano, Centrality, XRP, Midnight (static default) ────────
+    val adaFee = manager.estimateFee(coin = NetworkName.CARDANO)
+    val cenFee = manager.estimateFee(coin = NetworkName.CENTRALITY)
+    val xrpFee = manager.estimateFee(coin = NetworkName.XRP)
+    val midFee = manager.estimateFee(coin = NetworkName.MIDNIGHT)
+
+    println("ADA fee: ${adaFee.fee}")   // ACTCoin.Cardano.feeDefault()
+    println("CENNZ fee: ${cenFee.fee}") // ACTCoin.Centrality.feeDefault()
+    println("XRP fee: ${xrpFee.fee}")   // ACTCoin.Ripple.feeDefault()
+}
+```
+
+| Chain | Estimation | Ghi chú |
+|---|---|---|
+| ETH / Arbitrum | ✅ Dynamic | Gas estimation qua IFeeEstimator |
+| TON | ✅ Dynamic | Estimate qua TonApiService (dummy BOC) |
+| Cardano | Static | `ACTCoin.Cardano.feeDefault()` |
+| Midnight | Static | `ACTCoin.Midnight.feeDefault()` |
+| XRP | Static | `ACTCoin.Ripple.feeDefault()` |
+| Centrality | Static | `ACTCoin.Centrality.feeDefault()` |
+| BTC | ✅ Dynamic | BlockCypher `/txs/new` (fee theo UTXO count + script type) |
 
 ---
 
@@ -273,13 +402,44 @@ launch {
 ### Bitcoin (BTC)
 
 ```kotlin
-val address = manager.getAddress(NetworkName.BTC)
-// Native SegWit: "bc1q..." (mainnet) / "tb1q..." (testnet)
+import com.lybia.cryptowallet.wallets.bitcoin.BitcoinAddressType
+
+// ─── Addresses (3 loại) ─────────────────────────────────────────────
+val nativeSegwit = manager.getBtcAddress(BitcoinAddressType.NATIVE_SEGWIT)  // "bc1q..."
+val nestedSegwit = manager.getBtcAddress(BitcoinAddressType.NESTED_SEGWIT)  // "3..."
+val legacy = manager.getBtcAddress(BitcoinAddressType.LEGACY)               // "1..."
+
+// Default (Native SegWit):
+val address = manager.getAddress(NetworkName.BTC)  // "bc1q..."
 
 launch {
     val balance = manager.getBalance(NetworkName.BTC)
     val txs = manager.getTransactionHistory(NetworkName.BTC)
-    val send = manager.transfer(NetworkName.BTC, signedTxHex)
+
+    // ─── Direct send BTC (build + sign + submit via BlockCypher) ────
+    val send = manager.sendCoin(
+        coin = NetworkName.BTC,
+        toAddress = "bc1q...",   // hoặc "3..." hoặc "1..."
+        amount = 0.001           // 0.001 BTC
+    )
+    // Hoặc dùng method riêng (chọn address type):
+    val send2 = manager.sendBtc(
+        toAddress = "1...",
+        amountBtc = 0.001,
+        addressType = BitcoinAddressType.LEGACY,  // gửi từ Legacy address
+        accountIndex = 0
+    )
+
+    // ─── Fee estimation (dynamic via BlockCypher) ───────────────────
+    val fee = manager.estimateFee(
+        coin = NetworkName.BTC,
+        amount = 0.001,
+        toAddress = "bc1q..."
+    )
+    // FeeEstimateResult(fee=0.0000xxxx BTC, unit="BTC", success=true)
+
+    // ─── Pre-signed (legacy API) ────────────────────────────────────
+    val sendSigned = manager.transfer(NetworkName.BTC, signedTxJson)
 }
 ```
 
@@ -288,15 +448,46 @@ launch {
 ```kotlin
 launch {
     val balance = manager.getBalance(NetworkName.ETHEREUM)
-    val send = manager.transfer(NetworkName.ETHEREUM, signedTxHex)
 
-    // ERC-20 token
+    // ─── Direct send ETH (build + sign + submit) ───────────────────
+    val send = manager.sendCoin(
+        coin = NetworkName.ETHEREUM,
+        toAddress = "0x...",
+        amount = 0.1             // 0.1 ETH
+    )
+    // Hoặc dùng method riêng (cho custom gas):
+    val send2 = manager.sendEth(
+        toAddress = "0x...",
+        amountEth = 0.1,
+        gasLimit = 21000L,       // optional
+        gasPriceGwei = 30L       // optional
+    )
+
+    // ─── Direct send ERC-20 token ──────────────────────────────────
+    val tokenSend = manager.sendErc20Token(
+        contractAddress = "0xTokenContract...",
+        toAddress = "0xRecipient...",
+        amount = 1_000_000L      // smallest unit
+    )
+
+    // ─── Pre-signed (legacy) ───────────────────────────────────────
+    val sendSigned = manager.transfer(NetworkName.ETHEREUM, signedTxHex)
+
+    // ERC-20 token balance
     val tokenBal = manager.getTokenBalance(NetworkName.ETHEREUM, wallet, contract)
-    val tokenSend = manager.sendToken(NetworkName.ETHEREUM, signedTokenTx)
 
     // ERC-721 NFT
     val nfts = manager.getNFTs(NetworkName.ETHEREUM, wallet)
     val nftSend = manager.transferNFT(NetworkName.ETHEREUM, nftAddr, toAddr)
+
+    // Fee estimation
+    val fee = manager.estimateFee(
+        coin = NetworkName.ETHEREUM,
+        amount = 0.1,
+        fromAddress = "0x...",
+        toAddress = "0x..."
+    )
+    // FeeEstimateResult(fee, gasLimit, gasPrice, unit="gwei", success)
 }
 ```
 
@@ -306,7 +497,27 @@ launch {
 launch {
     val balance = manager.getBalance(NetworkName.XRP)
     // Balance đã chia 1,000,000 drops → XRP
-    val send = manager.transfer(NetworkName.XRP, signedTxBlob)
+
+    // ─── Direct send XRP (build + sign + submit) ───────────────────
+    val send = manager.sendCoin(
+        coin = NetworkName.XRP,
+        toAddress = "r...",
+        amount = 10.0,           // 10 XRP
+        memo = MemoData(null, 12345u)  // destinationTag (optional)
+    )
+    // Hoặc dùng method riêng:
+    val send2 = manager.sendXrp(
+        toAddress = "r...",
+        amountXrp = 10.0,
+        feeXrp = 0.000012,       // 12 drops (default)
+        destinationTag = 12345L   // optional
+    )
+
+    // ─── Pre-signed (legacy) ───────────────────────────────────────
+    val sendSigned = manager.transfer(NetworkName.XRP, signedTxBlob)
+
+    // Fee: XRP fee cố định 12 drops (0.000012 XRP)
+    val fee = manager.estimateFee(coin = NetworkName.XRP)
 }
 ```
 
@@ -375,6 +586,206 @@ val isShelley = CardanoAddress.isValidShelleyAddress("addr1q...")
 // Detect address type
 val type = CardanoAddress.getAddressType("addr1q...")
 // BYRON, SHELLEY_BASE, SHELLEY_ENTERPRISE, SHELLEY_REWARD, UNKNOWN
+```
+
+### Sử dụng Byron và Shelley song song qua CommonCoinsManager
+
+`CardanoManager` (bên trong `CommonCoinsManager`) derive cả Byron và Shelley address từ cùng một mnemonic. Mặc định `getAddress(NetworkName.CARDANO)` trả về Shelley base address. Để truy cập Byron address hoặc dùng cả hai song song, cần cast sang `CardanoManager`.
+
+#### Derivation paths
+
+| Loại | Derivation Path | Ví dụ address |
+|---|---|---|
+| Shelley (CIP-1852) | `m/1852'/1815'/account'/0'/index'` | `addr1q...` / `addr_test1q...` |
+| Byron (BIP-44) | `m/44'/1815'/0'/0'/index'` | `Ae2tdPwUPEZ...` (Base58) |
+| Staking (CIP-1852) | `m/1852'/1815'/account'/2'/0'` | `stake1u...` / `stake_test1u...` |
+
+#### Lấy cả Byron và Shelley address
+
+```kotlin
+val manager = CommonCoinsManager(mnemonic = mnemonic)
+
+// ─── Cách 1: Qua CommonCoinsManager (chỉ Shelley) ──────────────────
+val shelleyAddress = manager.getAddress(NetworkName.CARDANO)  // "addr1q..."
+
+// ─── Cách 2: Cast sang CardanoManager để lấy cả hai ────────────────
+import com.lybia.cryptowallet.wallets.cardano.CardanoManager
+import com.lybia.cryptowallet.coinkits.ChainManagerFactory
+import com.lybia.cryptowallet.coinkits.ChainConfig
+import com.lybia.cryptowallet.enums.NetworkName
+
+val cardanoManager = ChainManagerFactory.createWalletManager(
+    NetworkName.CARDANO, mnemonic, ChainConfig.default(NetworkName.CARDANO)
+) as CardanoManager
+
+// Shelley base address (payment + staking key)
+val shelley = cardanoManager.getShelleyAddress(account = 0, index = 0)  // "addr1q..."
+
+// Byron address (legacy)
+val byron = cardanoManager.getByronAddress(index = 0)  // "Ae2tdPwUPEZ..."
+
+// Staking (reward) address
+val staking = cardanoManager.getStakingAddress(account = 0)  // "stake1u..."
+
+// Derive nhiều address (HD wallet)
+val shelleyAddresses = (0..4).map { cardanoManager.getShelleyAddress(account = 0, index = it) }
+val byronAddresses = (0..4).map { cardanoManager.getByronAddress(index = it) }
+```
+
+#### Query balance cho cả Byron và Shelley
+
+```kotlin
+launch {
+    // Balance cho Shelley address (mặc định)
+    val shelleyBalance = manager.getCardanoBalance()
+
+    // Balance cho Byron address cụ thể
+    val byronAddr = cardanoManager.getByronAddress(index = 0)
+    val byronBalance = manager.getCardanoBalance(address = byronAddr)
+
+    // Tổng balance cả hai
+    if (shelleyBalance.success && byronBalance.success) {
+        val totalAda = shelleyBalance.balance + byronBalance.balance
+        println("Shelley: ${shelleyBalance.balance} ADA")
+        println("Byron:   ${byronBalance.balance} ADA")
+        println("Total:   $totalAda ADA")
+    }
+}
+```
+
+#### Gửi ADA — tự động detect Byron/Shelley
+
+`sendCardano()` và `buildAndSignTransaction()` tự detect loại address đích (Byron hay Shelley) qua `CardanoAddress.getAddressType()` và convert sang bytes phù hợp. Caller không cần xử lý gì thêm.
+
+```kotlin
+launch {
+    // Gửi đến Shelley address — tự detect
+    val result1 = manager.sendCardano(
+        toAddress = "addr1q...",       // Shelley base address
+        amountLovelace = 2_000_000L,
+        fee = 200_000L
+    )
+
+    // Gửi đến Byron address — cũng tự detect
+    val result2 = manager.sendCardano(
+        toAddress = "Ae2tdPwUPEZ...",  // Byron address
+        amountLovelace = 2_000_000L,
+        fee = 200_000L
+    )
+    // Cả hai đều dùng cùng API, CardanoManager tự xử lý addressToBytes()
+}
+```
+
+#### Validate và detect loại address
+
+```kotlin
+import com.lybia.cryptowallet.wallets.cardano.CardanoAddress
+import com.lybia.cryptowallet.wallets.cardano.CardanoAddressType
+
+fun handleCardanoAddress(address: String) {
+    // Validate chung (Byron hoặc Shelley)
+    if (!CardanoAddress.isValidAddress(address)) {
+        println("Invalid Cardano address")
+        return
+    }
+
+    // Detect loại cụ thể
+    when (CardanoAddress.getAddressType(address)) {
+        CardanoAddressType.BYRON -> {
+            println("Byron (legacy) address")
+            // Byron address không hỗ trợ staking, native token
+        }
+        CardanoAddressType.SHELLEY_BASE -> {
+            println("Shelley base address (payment + staking)")
+            // Hỗ trợ đầy đủ: transfer, staking, native token
+        }
+        CardanoAddressType.SHELLEY_ENTERPRISE -> {
+            println("Shelley enterprise address (payment only)")
+            // Không có staking key
+        }
+        CardanoAddressType.SHELLEY_REWARD -> {
+            println("Shelley reward/staking address")
+            // Chỉ dùng cho staking rewards
+        }
+        CardanoAddressType.UNKNOWN -> {
+            println("Unknown address type")
+        }
+    }
+}
+```
+
+#### Lịch sử giao dịch cho cả hai loại address
+
+```kotlin
+launch {
+    // Lịch sử cho Shelley (mặc định)
+    val shelleyTxs = manager.getCardanoTransactions()
+
+    // Lịch sử cho Byron address cụ thể
+    val byronAddr = cardanoManager.getByronAddress(index = 0)
+    val byronTxs = manager.getCardanoTransactions(address = byronAddr)
+
+    // Gộp lịch sử cả hai (nếu cần hiển thị chung)
+    // Cast về List<*> tuỳ theo response type từ Blockfrost API
+}
+```
+
+#### So sánh Byron vs Shelley
+
+| Tính năng | Byron | Shelley |
+|---|---|---|
+| Address format | Base58 (`Ae2tdPwUPEZ...`) | Bech32 (`addr1q...`) |
+| Derivation | BIP-44 (`m/44'/1815'/...`) | CIP-1852 (`m/1852'/1815'/...`) |
+| Staking | ❌ | ✅ (delegation) |
+| Native token | ❌ | ✅ |
+| Bridge (Midnight) | ❌ | ✅ |
+| `getAddress()` mặc định | ❌ | ✅ |
+| Transfer (nhận) | ✅ | ✅ |
+| Transfer (gửi từ) | ✅ (qua `buildAndSignTransaction`) | ✅ |
+
+> Byron address chủ yếu dùng cho backward compatibility với ví cũ. Shelley là tiêu chuẩn hiện tại, hỗ trợ đầy đủ staking, native token, và bridge.
+
+#### Pattern trong Android app (WalletCardanoManager + WalletCardanoShelleyManager)
+
+Android app hiện tại dùng 2 wallet manager song song:
+
+| Manager | ISO | Loại | Mô tả |
+|---|---|---|---|
+| `WalletCardanoManager` | `"ADA"` | Byron | Legacy Cardano wallet, dùng `CoinsManager.shared` |
+| `WalletCardanoShelleyManager` | `"ADAS"` | Shelley | Shelley wallet, lấy address từ StakingApi server |
+
+```kotlin
+// WalletsMaster.kt — khởi tạo cả hai song song
+val cardano = WalletCardanoManager.getInstance(app)        // Byron
+val cardanoShelley = WalletCardanoShelleyManager.getInstance(app)  // Shelley
+
+if (cardano != null) mWallets.add(cardano)
+if (cardanoShelley != null) mWallets.add(cardanoShelley)
+
+// Lookup theo ISO
+val byronWallet = WalletsMaster.getWalletByIso(app, "ADA")    // WalletCardanoManager
+val shelleyWallet = WalletsMaster.getWalletByIso(app, "ADAS")  // WalletCardanoShelleyManager
+```
+
+Khi migrate sang `CommonCoinsManager`, cả hai wallet có thể thay bằng một `CardanoManager` duy nhất:
+
+```kotlin
+// ─── Trước (2 manager riêng biệt) ──────────────────────────────────
+val byronAddr = WalletCardanoManager.getInstance(app)?.getAddress()
+val shelleyAddr = WalletCardanoShelleyManager.getInstance(app)?.getAddress()
+
+// ─── Sau (1 CardanoManager, derive cả hai) ──────────────────────────
+val cardanoManager = ChainManagerFactory.createWalletManager(
+    NetworkName.CARDANO, mnemonic, ChainConfig.default(NetworkName.CARDANO)
+) as CardanoManager
+
+val byronAddr = cardanoManager.getByronAddress(index = 0)
+val shelleyAddr = cardanoManager.getShelleyAddress(account = 0, index = 0)
+val stakingAddr = cardanoManager.getStakingAddress(account = 0)
+
+// Hoặc qua CommonCoinsManager (chỉ Shelley mặc định)
+val manager = CommonCoinsManager(mnemonic = mnemonic)
+val defaultAddr = manager.getAddress(NetworkName.CARDANO)  // = shelleyAddr
 ```
 
 ### Midnight Network (tDUST)
@@ -571,20 +982,22 @@ Hướng dẫn cho app cũ đang dùng code trực tiếp từ `androidMain` chu
 
 | Trước (androidMain) | Sau (commonMain) |
 |---|---|
-| `CoinsManager.shared.addresses(ACTCoin.Bitcoin)` | `manager.getAddress(NetworkName.BTC)` |
+| `CoinsManager.shared.addresses(ACTCoin.Bitcoin)` | `manager.addresses(NetworkName.BTC, count)` |
+| `CoinsManager.shared.firstAddress(coin)` | `manager.firstAddress(NetworkName.XXX)` hoặc `manager.getAddress(NetworkName.XXX)` |
 | `CoinsManager.shared.getBalance(ACTCoin.Cardano, ...)` | `manager.getBalance(NetworkName.CARDANO)` |
+| `CoinsManager.shared.getTransactions(coin, moreParam, handler)` | `manager.getTransactionHistoryPaginated(coin, limit, pageParam)` |
 | `com.lybia.cryptowallet.coinkits.cardano.helpers.ADACoin` | `ACTCoin.Cardano.unitValue()` (= 1,000,000.0) |
 | `Gada.shared.addressUsed(addresses, handler)` | `CardanoApiService.getTransactionHistory()` + filter |
 | `ADAAddressUsedHandle` | Định nghĩa callback cục bộ trong app |
-| `CentralityNetwork.shared.sendCoin(...)` | `manager.sendCentrality(from, to, amount)` |
+| `CentralityNetwork.shared.sendCoin(...)` | `manager.sendCoin(NetworkName.CENTRALITY, ...)` hoặc `manager.sendCentrality(from, to, amount)` |
 | `CentralityNetwork.BASE_UNIT` | `CentralityManager.BASE_UNIT` (= 10000) |
 | `CentralityNetwork.shared.scanAccount(...)` | `manager.getCentralityBalance()` |
 | `CentralityNetwork.shared.transactions(...)` | `manager.getCentralityTransactions()` |
 | `CentralityNetwork.shared.getPublicAddress(seed, handler)` | `manager.getAddress(NetworkName.CENTRALITY)` hoặc `CentralityApiService.getPublicAddress(seed)` |
 | `CoinsManager.shared.setNetworks(networks)` | `Config.shared.setNetwork(Network.MAINNET)` + tạo mới `CommonCoinsManager` |
 | `CoinsManager.shared.cleanAll()` | Tạo mới instance `CommonCoinsManager(mnemonic)` |
-| `CoinsManager.shared.estimateFee(...)` | `ACTCoin.feeDefault()` hoặc chain manager trực tiếp |
-| `CoinsManager.shared.firstAddress(coin)` | `manager.getAddress(NetworkName.XXX)` |
+| `CoinsManager.shared.sendCoin(from, to, ...)` | `manager.sendCoin(coin, toAddress, amount, fee)` |
+| `CoinsManager.shared.estimateFee(...)` | `manager.estimateFee(coin)` hoặc `ACTCoin.feeDefault()` |
 | Callback-based (`completionHandler`) | Suspend functions (coroutines) |
 | Gson `@SerializedName` | kotlinx `@SerialName` |
 | `java.math.BigInteger` | `com.ionspin.kotlin.bignum.integer.BigInteger` |
@@ -1052,7 +1465,19 @@ val freshManager = CommonCoinsManager(mnemonic = newMnemonic)
 // ─── firstAddress(coin) / addresses(coin) ───────────────────────────
 // Trước: CoinsManager.shared.firstAddress(ACTCoin.Cardano) → ACTAddress?
 // Sau:
-val address: String = manager.getAddress(NetworkName.CARDANO)
+val address: String = manager.firstAddress(NetworkName.CARDANO)  // = getAddress()
+// Hoặc:
+val address2: String = manager.getAddress(NetworkName.CARDANO)
+
+// Trước: CoinsManager.shared.addresses(ACTCoin.Cardano) → Array<ACTAddress>?
+// Sau:
+launch {
+    val addrs: List<String> = manager.addresses(NetworkName.CARDANO, count = 5)
+    // Cardano: 5 Shelley base addresses (account=0, index 0..4)
+    // BTC: 5 Native SegWit addresses (account 0..4)
+    // Centrality: luôn trả về 1 address (resolve từ API)
+    // Các chain khác: luôn trả về 1 address
+}
 // Centrality (cần resolve từ API):
 launch { val addr = manager.getAddressAsync(NetworkName.CENTRALITY) }
 
@@ -1072,10 +1497,35 @@ launch {
 CoinsManager.shared.getTransactions(ACTCoin.Ripple, null, object : TransactionsHandle {
     override fun completionHandler(txs: Array<TransationData>?, more: JsonObject?, err: String) { }
 })
-// Sau:
+// Sau — Cách 1: Không cần pagination
 launch {
     val txs = manager.getTransactionHistory(NetworkName.XRP)
     // Any? — cast theo chain
+}
+// Sau — Cách 2: Có pagination (recommended cho XRP, Centrality)
+launch {
+    // Trang đầu
+    val page1 = manager.getTransactionHistoryPaginated(
+        coin = NetworkName.XRP,
+        limit = 50
+    )
+    // TransactionHistoryResult(transactions, hasMore, nextPageParam, success, error)
+
+    // Trang tiếp theo (nếu có)
+    if (page1.hasMore) {
+        val page2 = manager.getTransactionHistoryPaginated(
+            coin = NetworkName.XRP,
+            limit = 50,
+            pageParam = page1.nextPageParam  // chứa marker cho XRP
+        )
+    }
+
+    // Centrality pagination (row + page)
+    val cenPage = manager.getTransactionHistoryPaginated(
+        coin = NetworkName.CENTRALITY,
+        limit = 100,
+        pageParam = mapOf("page" to 0)  // page 0-based
+    )
 }
 
 // ─── sendCoin(from, to, ser, amount, fee, serviceFee, memo, handler)
@@ -1084,20 +1534,69 @@ CoinsManager.shared.sendCoin(fromAddr, toStr, serStr, amount, fee, sFee, memo,
     object : SendCoinHandle {
         override fun completionHandler(txID: String, success: Boolean, err: String) { }
     })
-// Sau (per-coin):
+// Sau — Cách 1: Unified sendCoin (recommended cho tất cả chain trừ BTC)
 launch {
-    val eth = manager.transfer(NetworkName.ETHEREUM, signedTxHex)
+    val result = manager.sendCoin(
+        coin = NetworkName.CARDANO,
+        toAddress = "addr1q...",
+        amount = 2.0,        // ADA (tự convert lovelace bên trong)
+        networkFee = 0.2      // ADA
+    )
+    // TON với memo:
+    val tonResult = manager.sendCoin(
+        coin = NetworkName.TON,
+        toAddress = "EQ...",
+        amount = 0.5,
+        memo = MemoData("memo text", null)
+    )
+    // ETH (tự build EIP-155 tx + sign + submit):
+    val ethResult = manager.sendCoin(
+        coin = NetworkName.ETHEREUM,
+        toAddress = "0x...",
+        amount = 0.1          // 0.1 ETH
+    )
+    // XRP với destinationTag:
+    val xrpResult = manager.sendCoin(
+        coin = NetworkName.XRP,
+        toAddress = "r...",
+        amount = 10.0,         // 10 XRP
+        memo = MemoData(null, 12345u)  // destinationTag
+    )
+}
+// Sau — Cách 2: Per-chain methods (vẫn hoạt động)
+launch {
     val ada = manager.sendCardano(toAddress, amountLovelace, feeLovelace)
     val cen = manager.sendCentrality(from, to, amount, assetId)
     val mid = manager.sendMidnight(toAddress, amount)
-    // TON: dùng TonManager trực tiếp
+    val eth = manager.sendEth(toAddress, amountEth = 0.1)
+    val erc20 = manager.sendErc20Token(contractAddress, toAddress, amount = 1000L)
+    val xrp = manager.sendXrp(toAddress, amountXrp = 10.0, destinationTag = 12345L)
+}
+// Sau — Cách 3: Pre-signed (legacy API, vẫn hoạt động)
+launch {
+    val btc = manager.transfer(NetworkName.BTC, signedTxJson)
 }
 
 // ─── estimateFee(...) ───────────────────────────────────────────────
 // Trước: CoinsManager.shared.estimateFee(amount, ser, fee, 0.0, 0.0, network, handler)
-// Sau:
+// Sau — Cách 1: Unified estimateFee (recommended)
+launch {
+    val fee = manager.estimateFee(coin = NetworkName.CARDANO)
+    // FeeEstimateResult(fee, gasLimit?, gasPrice?, unit, success, error?)
+    println("Fee: ${fee.fee} ${fee.unit}")
+
+    // ETH/Arbitrum: dynamic gas estimation
+    val ethFee = manager.estimateFee(
+        coin = NetworkName.ETHEREUM,
+        amount = 0.1,
+        fromAddress = "0x...",
+        toAddress = "0x..."
+    )
+    // TON: dynamic estimation via dummy BOC
+    val tonFee = manager.estimateFee(coin = NetworkName.TON, amount = 0.5)
+}
+// Sau — Cách 2: Static default (vẫn hoạt động)
 val fee = ACTCoin.Cardano.feeDefault()  // Cardano, Centrality, Ripple
-// Ethereum: IFeeEstimator, TON: TonApiService.estimateFee()
 ```
 
 ### ITokenManager methods
