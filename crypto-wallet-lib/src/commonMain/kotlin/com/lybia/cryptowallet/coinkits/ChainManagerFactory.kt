@@ -26,13 +26,17 @@ import com.lybia.cryptowallet.services.CentralityApiService
 data class ChainConfig(
     val apiBaseUrl: String,
     val apiKey: String? = null,
-    val isTestnet: Boolean = false
+    val isTestnet: Boolean = false,
+    val fallbackApiBaseUrl: String? = null
 ) {
     companion object {
         fun default(coin: NetworkName): ChainConfig {
             val coinNetwork = CoinNetwork(coin)
             return when (coin) {
-                NetworkName.CARDANO -> ChainConfig(coinNetwork.getBlockfrostUrl())
+                NetworkName.CARDANO -> ChainConfig(
+                    apiBaseUrl = coinNetwork.getBlockfrostUrl(),
+                    fallbackApiBaseUrl = coinNetwork.getKoiosUrl()
+                )
                 NetworkName.MIDNIGHT -> ChainConfig(coinNetwork.getMidnightApiUrl())
                 else -> ChainConfig("")
             }
@@ -57,7 +61,11 @@ object ChainManagerFactory {
             NetworkName.ETHEREUM, NetworkName.ARBITRUM -> EthereumManager(mnemonic)
             NetworkName.CARDANO -> CardanoManager(
                 mnemonic = mnemonic,
-                apiService = CardanoApiService(baseUrl = config.apiBaseUrl)
+                apiService = CardanoApiService.createWithFallback(
+                    blockfrostUrl = config.apiBaseUrl,
+                    koiosUrl = config.fallbackApiBaseUrl ?: CoinNetwork(coin).getKoiosUrl(),
+                    apiKey = config.apiKey
+                )
             )
             NetworkName.TON -> TonManager(mnemonic)
             NetworkName.MIDNIGHT -> MidnightManager(

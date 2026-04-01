@@ -9,7 +9,12 @@ import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.add
 
 /**
  * Supported Cardano API backend providers.
@@ -37,6 +42,35 @@ class CardanoApiService(
     private val logger = Logger.withTag("CardanoApiService")
 
     private val json = Json { ignoreUnknownKeys = true }
+
+    /**
+     * Create a CardanoApiService with automatic provider detection.
+     * If apiKey is provided, uses Blockfrost. Otherwise, falls back to Koios (free, no key).
+     */
+    companion object {
+        fun createWithFallback(
+            blockfrostUrl: String,
+            koiosUrl: String,
+            apiKey: String? = null,
+            client: HttpClient = HttpClientService.INSTANCE.client
+        ): CardanoApiService {
+            return if (!apiKey.isNullOrEmpty()) {
+                CardanoApiService(
+                    baseUrl = blockfrostUrl,
+                    apiKey = apiKey,
+                    provider = CardanoApiProvider.BLOCKFROST,
+                    client = client
+                )
+            } else {
+                CardanoApiService(
+                    baseUrl = koiosUrl,
+                    apiKey = null,
+                    provider = CardanoApiProvider.KOIOS,
+                    client = client
+                )
+            }
+        }
+    }
 
     /**
      * Apply common headers (e.g. Blockfrost project_id).
@@ -74,43 +108,112 @@ class CardanoApiService(
 
     /**
      * Get UTXOs for a list of addresses.
+     * Blockfrost: GET /addresses/{address}/utxos
+     * Koios: POST /address_utxos with body {"_addresses": [...]}
      */
     suspend fun getUtxos(addresses: List<String>): List<CardanoApiUtxo> {
-        logger.d { "getUtxos: ${addresses.size} addresses" }
-        val allUtxos = mutableListOf<CardanoApiUtxo>()
-        for (address in addresses) {
-            val utxos = safeRequest<List<CardanoApiUtxo>> {
-                get("$baseUrl/addresses/$address/utxos") { applyAuth() }
+        logger.d { "getUtxos: ${addresses.size} addresses (provider=$provider)" }
+        return when (provider) {
+            CardanoApiProvider.KOIOS -> {
+                val body = buildJsonObject {
+                    putJsonArray("_addresses") { addresses.forEach { add(it) } }
+                }
+                val koiosUtxos = safeRequest<List<KoiosUtxo>> {
+                    post("$baseUrl/address_utxos") {
+                        applyAuth()
+                        contentType(ContentType.Application.Json)
+                        setBody(body.toString())
+                    }
+                }
+                // Convert Koios format to Blockfrost-compatible format
+                koiosUtxos.map { ku ->
+                    CardanoApiUtxo(
+                        txHash = ku.txHash,
+                        txIndex = ku.txIndex,
+                        amount = ku.value.let { value ->
+                            val amounts = mutableListOf(CardanoAmount("lovelace", value))
+                            ku.assetList?.forEach { asset ->
+                                amounts.add(CardanoAmount(
+                                    unit = asset.policyId + asset.assetName,
+                                    quantity = asset.quantity
+                                ))
+                            }
+                            amounts
+                        }
+                    )
+                }
             }
-            allUtxos.addAll(utxos)
+            else -> {
+                val allUtxos = mutableListOf<CardanoApiUtxo>()
+                for (address in addresses) {
+                    val utxos = safeRequest<List<CardanoApiUtxo>> {
+                        get("$baseUrl/addresses/$address/utxos") { applyAuth() }
+                    }
+                    allUtxos.addAll(utxos)
+                }
+                allUtxos
+            }
         }
-        return allUtxos
     }
 
     /**
      * Get transaction history for a list of addresses.
+     * Blockfrost: GET /addresses/{address}/transactions
+     * Koios: POST /address_txs with body {"_addresses": [...]}
      */
     suspend fun getTransactionHistory(addresses: List<String>): List<CardanoTransactionInfo> {
-        logger.d { "getTransactionHistory: ${addresses.size} addresses" }
-        val allTxs = mutableListOf<CardanoTransactionInfo>()
-        for (address in addresses) {
-            val txs = safeRequest<List<CardanoTransactionInfo>> {
-                get("$baseUrl/addresses/$address/transactions") { applyAuth() }
+        logger.d { "getTransactionHistory: ${addresses.size} addresses (provider=$provider)" }
+        return when (provider) {
+            CardanoApiProvider.KOIOS -> {
+                val body = buildJsonObject {
+                    putJsonArray("_addresses") { addresses.forEach { add(it) } }
+                }
+                val koiosTxs = safeRequest<List<KoiosTxInfo>> {
+                    post("$baseUrl/address_txs") {
+                        applyAuth()
+                        contentType(ContentType.Application.Json)
+                        setBody(body.toString())
+                    }
+                }
+                koiosTxs.map { kt ->
+                    CardanoTransactionInfo(
+                        txHash = kt.txHash,
+                        blockHeight = kt.blockHeight,
+                        blockTime = kt.blockTime,
+                        fees = kt.fee ?: "0",
+                        inputs = emptyList(),
+                        outputs = emptyList()
+                    )
+                }
             }
-            allTxs.addAll(txs)
+            else -> {
+                val allTxs = mutableListOf<CardanoTransactionInfo>()
+                for (address in addresses) {
+                    val txs = safeRequest<List<CardanoTransactionInfo>> {
+                        get("$baseUrl/addresses/$address/transactions") { applyAuth() }
+                    }
+                    allTxs.addAll(txs)
+                }
+                allTxs
+            }
         }
-        return allTxs
     }
 
     /**
      * Submit a signed transaction (CBOR bytes) to the network.
+     * Blockfrost: POST /tx/submit (application/cbor)
+     * Koios: POST /submittx (application/cbor)
      * @return Transaction hash
      */
     suspend fun submitTransaction(signedTxCbor: ByteArray): String {
-        logger.d { "submitTransaction: ${signedTxCbor.size} bytes" }
-        val response: io.ktor.client.statement.HttpResponse
+        logger.d { "submitTransaction: ${signedTxCbor.size} bytes (provider=$provider)" }
+        val submitPath = when (provider) {
+            CardanoApiProvider.KOIOS -> "$baseUrl/submittx"
+            else -> "$baseUrl/tx/submit"
+        }
+        val response: HttpResponse
         try {
-            response = client.post("$baseUrl/tx/submit") {
+            response = client.post(submitPath) {
                 applyAuth()
                 contentType(ContentType("application", "cbor"))
                 setBody(signedTxCbor)
@@ -131,11 +234,29 @@ class CardanoApiService(
 
     /**
      * Get the current (latest) block info.
+     * Blockfrost: GET /blocks/latest
+     * Koios: GET /tip
      */
     suspend fun getCurrentBlock(): CardanoBlockInfo {
-        logger.d { "getCurrentBlock" }
-        return safeRequest<CardanoBlockInfo> {
-            get("$baseUrl/blocks/latest") { applyAuth() }
+        logger.d { "getCurrentBlock (provider=$provider)" }
+        return when (provider) {
+            CardanoApiProvider.KOIOS -> {
+                val tips = safeRequest<List<KoiosTip>> {
+                    get("$baseUrl/tip") { applyAuth() }
+                }
+                val tip = tips.firstOrNull() ?: throw CardanoError.ApiError(null, "No tip data")
+                CardanoBlockInfo(
+                    epoch = tip.epochNo,
+                    slot = tip.absSlot,
+                    hash = tip.hash,
+                    height = tip.blockNo
+                )
+            }
+            else -> {
+                safeRequest<CardanoBlockInfo> {
+                    get("$baseUrl/blocks/latest") { applyAuth() }
+                }
+            }
         }
     }
 
@@ -200,3 +321,36 @@ class CardanoApiService(
         }
     }
 }
+
+// ── Koios response models ───────────────────────────────────────────────
+
+@Serializable
+internal data class KoiosUtxo(
+    @SerialName("tx_hash") val txHash: String,
+    @SerialName("tx_index") val txIndex: Int,
+    val value: String,
+    @SerialName("asset_list") val assetList: List<KoiosAsset>? = null
+)
+
+@Serializable
+internal data class KoiosAsset(
+    @SerialName("policy_id") val policyId: String,
+    @SerialName("asset_name") val assetName: String,
+    val quantity: String
+)
+
+@Serializable
+internal data class KoiosTxInfo(
+    @SerialName("tx_hash") val txHash: String,
+    @SerialName("block_height") val blockHeight: Long,
+    @SerialName("block_time") val blockTime: Long,
+    val fee: String? = null
+)
+
+@Serializable
+internal data class KoiosTip(
+    @SerialName("epoch_no") val epochNo: Int,
+    @SerialName("abs_slot") val absSlot: Long,
+    val hash: String,
+    @SerialName("block_no") val blockNo: Long
+)

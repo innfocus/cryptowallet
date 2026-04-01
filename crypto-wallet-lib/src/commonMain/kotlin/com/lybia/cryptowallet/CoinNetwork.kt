@@ -93,6 +93,17 @@ class CoinNetwork(
         }
     }
 
+    /**
+     * Koios API URL — free, no API key required.
+     * Koios is a decentralized Cardano API with the same data as Blockfrost.
+     */
+    fun getKoiosUrl(): String {
+        return when (Config.shared.getNetwork()) {
+            Network.MAINNET -> "https://api.koios.rest/api/v1"
+            Network.TESTNET -> "https://preprod.koios.rest/api/v1"
+        }
+    }
+
     fun getMidnightApiUrl(): String {
         return when (Config.shared.getNetwork()) {
             Network.MAINNET -> "https://midnight.api.midnight.network/api/v0"

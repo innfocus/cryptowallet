@@ -828,8 +828,10 @@ class CommonCoinsManager(
                 }
 
                 NetworkName.XRP -> {
+                    val rippleManager = getOrCreateManager(NetworkName.XRP) as com.lybia.cryptowallet.wallets.ripple.RippleManager
+                    val feeXrp = rippleManager.estimateFeeDynamicXrp()
                     FeeEstimateResult(
-                        fee = ACTCoin.Ripple.feeDefault(),
+                        fee = feeXrp,
                         unit = "XRP",
                         success = true
                     )

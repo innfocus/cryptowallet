@@ -232,7 +232,7 @@ class InfuraRpcService {
                     InfuraRpcRequest(
                         jsonrpc = "2.0",
                         method = "eth_getBlockByNumber",
-                        params = listOf("latest", false),
+                        params = listOf("latest", "false"),
                         id = 1
                     )
                 )

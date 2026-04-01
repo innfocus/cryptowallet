@@ -86,7 +86,24 @@ val manager = CommonCoinsManager(
 )
 ```
 
-> Nếu không truyền apiKey, `ChainConfig.default(CARDANO)` dùng URL mặc định với `apiKey = null` — Blockfrost sẽ reject vì thiếu `project_id`.
+> Nếu không truyền apiKey, `ChainConfig.default(CARDANO)` tự động fallback sang Koios API (free, không cần key). Nếu có apiKey, dùng Blockfrost.
+
+```kotlin
+// ─── Cách 3: Koios fallback (không cần API key) ────────────────────
+// Khi không truyền apiKey, ChainManagerFactory tự dùng Koios thay Blockfrost
+val manager = CommonCoinsManager(mnemonic = mnemonic)
+// → CardanoApiService.createWithFallback() chọn Koios vì apiKey = null
+
+// ─── Cách 4: Chỉ định Koios trực tiếp ──────────────────────────────
+import com.lybia.cryptowallet.services.CardanoApiService
+import com.lybia.cryptowallet.services.CardanoApiProvider
+
+val koiosApi = CardanoApiService(
+    baseUrl = CoinNetwork(NetworkName.CARDANO).getKoiosUrl(),
+    provider = CardanoApiProvider.KOIOS
+)
+val manager = CommonCoinsManager(mnemonic = mnemonic, cardanoApiService = koiosApi)
+```
 
 ---
 
@@ -258,7 +275,7 @@ launch {
 | TON | ✅ Dynamic | Estimate qua TonApiService (dummy BOC) |
 | Cardano | Static | `ACTCoin.Cardano.feeDefault()` |
 | Midnight | Static | `ACTCoin.Midnight.feeDefault()` |
-| XRP | Static | `ACTCoin.Ripple.feeDefault()` |
+| XRP | ✅ Dynamic | `fee` RPC method (open_ledger_fee, fallback 12 drops) |
 | Centrality | Static | `ACTCoin.Centrality.feeDefault()` |
 | BTC | ✅ Dynamic | BlockCypher `/txs/new` (fee theo UTXO count + script type) |
 

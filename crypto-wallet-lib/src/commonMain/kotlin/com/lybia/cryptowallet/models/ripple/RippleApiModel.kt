@@ -125,3 +125,38 @@ data class RippleSubmitResult(
 data class RippleSubmitTxJson(
     val hash: String? = null
 )
+
+// ─── fee response ───────────────────────────────────────────────────
+
+@Serializable
+data class RippleFeeResponse(
+    val result: RippleFeeResult
+)
+
+@Serializable
+data class RippleFeeResult(
+    val status: String? = null,
+    @SerialName("current_ledger_size") val currentLedgerSize: String? = null,
+    @SerialName("current_queue_size") val currentQueueSize: String? = null,
+    val drops: RippleFeeDrops? = null,
+    val levels: RippleFeeLevels? = null,
+    @SerialName("max_queue_size") val maxQueueSize: String? = null,
+    val error: String? = null,
+    @SerialName("error_message") val errorMessage: String? = null
+)
+
+@Serializable
+data class RippleFeeDrops(
+    @SerialName("base_fee") val baseFee: String = "10",
+    @SerialName("median_fee") val medianFee: String = "5000",
+    @SerialName("minimum_fee") val minimumFee: String = "10",
+    @SerialName("open_ledger_fee") val openLedgerFee: String = "10"
+)
+
+@Serializable
+data class RippleFeeLevels(
+    @SerialName("median_level") val medianLevel: String? = null,
+    @SerialName("minimum_level") val minimumLevel: String? = null,
+    @SerialName("open_ledger_level") val openLedgerLevel: String? = null,
+    @SerialName("reference_level") val referenceLevel: String? = null
+)

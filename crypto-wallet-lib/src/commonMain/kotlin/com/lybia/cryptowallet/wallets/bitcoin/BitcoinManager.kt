@@ -7,6 +7,7 @@ import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.models.bitcoin.BitcoinTransactionModel
 import com.lybia.cryptowallet.services.BitcoinApiService
+import com.lybia.cryptowallet.services.EsploraApiService
 import fr.acinq.bitcoin.Base58
 import fr.acinq.bitcoin.Bitcoin
 import fr.acinq.bitcoin.Chain
@@ -15,6 +16,7 @@ import fr.acinq.bitcoin.DeterministicWallet
 import fr.acinq.bitcoin.KeyPath
 import fr.acinq.bitcoin.MnemonicCode
 import fr.acinq.bitcoin.PrivateKey
+import fr.acinq.bitcoin.Transaction
 import fr.acinq.secp256k1.Hex
 import fr.acinq.secp256k1.Secp256k1
 
@@ -280,6 +282,136 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
         return when (Config.shared.getNetwork()) {
             Network.MAINNET -> Chain.Mainnet.name
             else -> Chain.Testnet4.name
+        }
+    }
+
+    // =========================================================================
+    // Local Transaction Builder — builds & signs tx client-side via bitcoin-kmp
+    // Uses Esplora API for UTXO fetching and broadcasting only.
+    // =========================================================================
+
+    /**
+     * Build, sign, and broadcast a Bitcoin transaction locally.
+     *
+     * Unlike [sendBtc] which delegates tx building to BlockCypher,
+     * this method builds the entire transaction client-side using bitcoin-kmp:
+     * 1. Fetch UTXOs from Esplora (Blockstream)
+     * 2. Select UTXOs and calculate fee locally
+     * 3. Build and sign the raw transaction (P2PKH / P2SH-P2WPKH / P2WPKH)
+     * 4. Broadcast raw tx hex via Esplora
+     *
+     * @param toAddress destination Bitcoin address (any format)
+     * @param amountSatoshi amount in satoshis
+     * @param addressType sender address type (default: NATIVE_SEGWIT)
+     * @param accountIndex HD wallet account index (default: 0)
+     * @param feeRateSatPerVbyte fee rate in sat/vB (null = auto from mempool.space)
+     * @return TransferResponseModel with txHash on success
+     */
+    suspend fun sendBtcLocal(
+        toAddress: String,
+        amountSatoshi: Long,
+        addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0,
+        feeRateSatPerVbyte: Long? = null
+    ): TransferResponseModel {
+        return try {
+            val fromAddress = getAddressByType(addressType, accountIndex)
+            val chain = if (Config.shared.getNetwork() == Network.MAINNET) Chain.Mainnet else Chain.Testnet4
+
+            // 1. Fetch UTXOs
+            val utxos = EsploraApiService.INSTANCE.getUtxos(fromAddress)
+            if (utxos.isNullOrEmpty()) {
+                return TransferResponseModel(
+                    success = false,
+                    error = "No UTXOs found for address $fromAddress",
+                    txHash = null
+                )
+            }
+
+            // 2. Determine fee rate
+            val feeRate = feeRateSatPerVbyte ?: run {
+                val recommended = EsploraApiService.INSTANCE.getRecommendedFeeRates()
+                recommended?.halfHourFee ?: 10L // fallback 10 sat/vB
+            }
+
+            // 3. Select UTXOs
+            val (selectedUtxos, fee) = BitcoinTransactionBuilder.selectUtxos(
+                utxos, amountSatoshi, feeRate, addressType
+            ) ?: return TransferResponseModel(
+                success = false,
+                error = "Insufficient funds. Available: ${utxos.sumOf { it.value }} sat, " +
+                        "needed: $amountSatoshi + fee",
+                txHash = null
+            )
+
+            // 4. Build and sign
+            val privateKey = derivePrivateKey(addressType, accountIndex)
+            val publicKey = privateKey.publicKey()
+
+            val buildResult = BitcoinTransactionBuilder.buildAndSign(
+                utxos = selectedUtxos,
+                toAddress = toAddress,
+                amountSat = amountSatoshi,
+                feeSat = fee,
+                changeAddress = fromAddress,
+                privateKey = privateKey,
+                publicKey = publicKey,
+                addressType = addressType,
+                chain = chain
+            )
+
+            // 5. Broadcast
+            val txid = EsploraApiService.INSTANCE.broadcastTransaction(buildResult.rawTxHex)
+            if (txid != null) {
+                TransferResponseModel(success = true, error = null, txHash = txid)
+            } else {
+                TransferResponseModel(
+                    success = false,
+                    error = "Failed to broadcast transaction",
+                    txHash = null
+                )
+            }
+        } catch (e: Exception) {
+            TransferResponseModel(
+                success = false,
+                error = "Local tx build failed: ${e.message}",
+                txHash = null
+            )
+        }
+    }
+
+    /**
+     * Estimate the transaction fee locally without building the full transaction.
+     *
+     * @param toAddress destination address
+     * @param amountSatoshi amount in satoshis
+     * @param addressType sender address type
+     * @param accountIndex HD wallet account index
+     * @param feeRateSatPerVbyte fee rate in sat/vB (null = auto)
+     * @return estimated fee in satoshis, or null if estimation failed
+     */
+    suspend fun estimateFeeLocal(
+        toAddress: String,
+        amountSatoshi: Long,
+        addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
+        accountIndex: Int = 0,
+        feeRateSatPerVbyte: Long? = null
+    ): Long? {
+        return try {
+            val fromAddress = getAddressByType(addressType, accountIndex)
+            val utxos = EsploraApiService.INSTANCE.getUtxos(fromAddress) ?: return null
+
+            val feeRate = feeRateSatPerVbyte ?: run {
+                val recommended = EsploraApiService.INSTANCE.getRecommendedFeeRates()
+                recommended?.halfHourFee ?: 10L
+            }
+
+            val result = BitcoinTransactionBuilder.selectUtxos(
+                utxos, amountSatoshi, feeRate, addressType
+            )
+            result?.second
+        } catch (e: Exception) {
+            null
         }
     }
 

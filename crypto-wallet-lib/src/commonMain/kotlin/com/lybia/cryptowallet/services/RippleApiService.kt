@@ -8,6 +8,7 @@ import com.lybia.cryptowallet.models.ripple.RippleRpcParam
 import com.lybia.cryptowallet.models.ripple.RippleMarker
 import com.lybia.cryptowallet.models.ripple.RippleRpcRequest
 import com.lybia.cryptowallet.models.ripple.RippleSubmitResponse
+import com.lybia.cryptowallet.models.ripple.RippleFeeResponse
 import io.ktor.client.call.body
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
@@ -139,6 +140,30 @@ class RippleApiService(
             }
             if (response.status.value in 200..299) {
                 response.body<RippleSubmitResponse>()
+            } else null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Get current network fee via `fee` JSON-RPC method.
+     * Returns fee drops info including base_fee, median_fee, minimum_fee, open_ledger_fee.
+     */
+    suspend fun getFee(): RippleFeeResponse? {
+        return try {
+            val request = RippleRpcRequest(
+                method = "fee",
+                params = emptyList()
+            )
+            val response = client.post(getRpcUrl()) {
+                headers { append(HttpHeaders.Accept, "application/json") }
+                contentType(ContentType.Application.Json)
+                setBody(request)
+            }
+            if (response.status.value in 200..299) {
+                response.body<RippleFeeResponse>()
             } else null
         } catch (e: Exception) {
             e.printStackTrace()

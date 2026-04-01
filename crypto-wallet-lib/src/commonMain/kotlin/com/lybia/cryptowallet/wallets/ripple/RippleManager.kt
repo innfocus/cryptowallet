@@ -154,16 +154,18 @@ class RippleManager(
     suspend fun sendXrp(
         toAddress: String,
         amountDrops: Long,
-        feeDrops: Long = DEFAULT_FEE_DROPS,
+        feeDrops: Long = 0L,
         destinationTag: Long? = null
     ): TransferResponseModel {
         return try {
             val fromAddr = walletAddress
                 ?: return TransferResponseModel(false, "No wallet address", null)
 
+            // Use dynamic fee if not explicitly provided (0 = auto)
+            val actualFee = if (feeDrops > 0) feeDrops else estimateFeeDynamic()
+
             val sequence = getSequence()
             val ledgerIndex = getCurrentLedgerIndex()
-            // LastLedgerSequence = current + 20 (gives ~60-80 seconds to confirm)
             val lastLedgerSeq = if (ledgerIndex > 0) ledgerIndex + 20 else null
 
             val txBlob = XrpTransactionSigner.signPayment(
@@ -172,7 +174,7 @@ class RippleManager(
                 account = fromAddr,
                 destination = toAddress,
                 amountDrops = amountDrops,
-                feeDrops = feeDrops,
+                feeDrops = actualFee,
                 sequence = sequence,
                 destinationTag = destinationTag,
                 lastLedgerSequence = lastLedgerSeq
@@ -199,9 +201,40 @@ class RippleManager(
     }
 
     /**
-     * Estimate XRP transaction fee.
-     * XRP fees are typically fixed at 12 drops (0.000012 XRP).
-     * Returns fee in XRP (not drops).
+     * Estimate XRP transaction fee dynamically via the `fee` RPC method.
+     * Returns fee in drops. Falls back to DEFAULT_FEE_DROPS if RPC fails.
+     *
+     * The `open_ledger_fee` is the fee required to get into the current open ledger,
+     * which is the most practical value for immediate confirmation.
+     */
+    suspend fun estimateFeeDynamic(): Long {
+        return try {
+            val feeResponse = apiService.getFee()
+            val drops = feeResponse?.result?.drops
+            if (drops != null) {
+                // Use open_ledger_fee for timely inclusion, fallback to median, then base
+                drops.openLedgerFee.toLongOrNull()
+                    ?: drops.medianFee.toLongOrNull()
+                    ?: drops.baseFee.toLongOrNull()
+                    ?: DEFAULT_FEE_DROPS
+            } else {
+                DEFAULT_FEE_DROPS
+            }
+        } catch (_: Exception) {
+            DEFAULT_FEE_DROPS
+        }
+    }
+
+    /**
+     * Estimate XRP transaction fee in XRP (not drops).
+     * Uses dynamic fee from the network, falls back to default.
+     */
+    suspend fun estimateFeeDynamicXrp(): Double {
+        return estimateFeeDynamic().toDouble() / XRP_DROPS_PER_UNIT
+    }
+
+    /**
+     * Static fee estimate (synchronous). Returns default fee in XRP.
      */
     fun estimateFee(): Double {
         return DEFAULT_FEE_DROPS / XRP_DROPS_PER_UNIT
