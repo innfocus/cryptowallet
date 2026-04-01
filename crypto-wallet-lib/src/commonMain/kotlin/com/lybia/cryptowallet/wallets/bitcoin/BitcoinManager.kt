@@ -16,6 +16,7 @@ import fr.acinq.bitcoin.KeyPath
 import fr.acinq.bitcoin.MnemonicCode
 import fr.acinq.bitcoin.PrivateKey
 import fr.acinq.secp256k1.Hex
+import fr.acinq.secp256k1.Secp256k1
 
 class BitcoinManager(mnemonics: String) : BaseCoinManager() {
     private val seed = MnemonicCode.toSeed(mnemonics, "")
@@ -173,15 +174,17 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
 
         val derivedKey = derivePrivateKey(addressType, accountIndex)
         val publicKey = derivedKey.publicKey()
-        val pubKeyHex = publicKey.value.toString()
+        val pubKeyHex = publicKey.toHex()
 
         val signatures = mutableListOf<String>()
         val pubkeys = mutableListOf<String>()
 
         for (tosignHex in transactionRequest.tosign) {
             val hashBytes = Hex.decode(tosignHex)
-            val sig = Crypto.sign(hashBytes, derivedKey)
-            signatures.add(Hex.encode(sig.toByteArray()))
+            val compactSig = Crypto.sign(hashBytes, derivedKey)
+            // BlockCypher requires DER-encoded signatures
+            val derSig = Secp256k1.compact2der(compactSig.toByteArray())
+            signatures.add(Hex.encode(derSig))
             pubkeys.add(pubKeyHex)
         }
 

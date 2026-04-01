@@ -136,41 +136,8 @@ kotlin {
 
 
 mavenPublishing {
-    val groupIdProp = project.property("GROUP") as String
-    val artifactIdProp = project.property("POM_ARTIFACT_ID") as String
-    val versionProp = project.property("VERSION_NAME") as String
-
-    coordinates(
-        groupId = groupIdProp,
-        artifactId = artifactIdProp,
-        version = versionProp
-    )
-
-    pom {
-        name.set(project.property("POM_NAME") as String)
-        description.set(project.property("POM_DESCRIPTION") as String)
-        inceptionYear.set(project.property("POM_INCEPTION_YEAR") as String)
-        url.set(project.property("POM_URL") as String)
-
-        licenses {
-            license {
-                name.set(project.property("POM_LICENSE_NAME") as String)
-                url.set(project.property("POM_LICENSE_URL") as String)
-            }
-        }
-
-        developers {
-            developer {
-                id.set(project.property("POM_DEVELOPER_ID") as String)
-                name.set(project.property("POM_DEVELOPER_NAME") as String)
-                email.set(project.property("POM_DEVELOPER_EMAIL") as String)
-            }
-        }
-
-        scm {
-            url.set(project.property("POM_SCM_URL") as String)
-        }
-    }
+    // Các thông tin Group, ArtifactId, Version và POM sẽ được plugin 
+    // tự động lấy từ gradle.properties (GROUP, POM_ARTIFACT_ID, VERSION_NAME, POM_*)
 
     publishToMavenCentral()
 
