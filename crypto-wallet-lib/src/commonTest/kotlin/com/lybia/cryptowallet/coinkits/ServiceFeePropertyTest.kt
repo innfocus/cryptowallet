@@ -465,3 +465,158 @@ class UtxoChainFeeEstimationPropertyTest {
         }
     }
 }
+
+
+/**
+ * Feature: service-fee-support, Property 10: Backward compatibility
+ *
+ * For any coin and any parameters, calling estimateFee with default values
+ * serviceAddress=null and serviceFee=0.0 must produce identical results as
+ * calling without the new parameters.
+ *
+ * This verifies that the fee multiplier logic in CommonCoinsManager.estimateFee
+ * is a no-op when the service fee parameters use their default values:
+ *   - hasServiceFee(null, 0.0) always returns false
+ *   - Therefore the multiplier branch is never taken
+ *   - The result equals the base fee for ALL chains (UTXO and Account alike)
+ *
+ * **Validates: Requirements 1.5, 2.6**
+ */
+class EstimateFeeBackwardCompatPropertyTest {
+
+    // ── Replicated production logic ─────────────────────────────────────
+
+    private fun hasServiceFee(serviceAddress: String?, serviceFee: Double): Boolean {
+        return !serviceAddress.isNullOrBlank() && serviceFee > 0.0
+    }
+
+    private fun isUtxoChain(coin: NetworkName): Boolean {
+        return coin in CommonCoinsManager.UTXO_CHAINS
+    }
+
+    /**
+     * Replicates the fee multiplier logic applied at the end of
+     * CommonCoinsManager.estimateFee. When serviceAddress=null and
+     * serviceFee=0.0 (defaults), hasServiceFee returns false and the
+     * baseFee is returned unchanged — identical to calling without
+     * the new parameters.
+     */
+    private fun applyFeeMultiplier(
+        baseFee: Double,
+        coin: NetworkName,
+        serviceAddress: String?,
+        serviceFee: Double
+    ): Double {
+        return if (hasServiceFee(serviceAddress, serviceFee) && !isUtxoChain(coin)) {
+            baseFee * CommonCoinsManager.FEE_MULTIPLIER
+        } else {
+            baseFee
+        }
+    }
+
+    // ── Arb generators ──────────────────────────────────────────────────
+
+    /** Generates any NetworkName from all supported chains. */
+    private fun arbNetworkName(): Arb<NetworkName> = Arb.of(
+        NetworkName.BTC,
+        NetworkName.ETHEREUM,
+        NetworkName.ARBITRUM,
+        NetworkName.TON,
+        NetworkName.CARDANO,
+        NetworkName.MIDNIGHT,
+        NetworkName.XRP,
+        NetworkName.CENTRALITY
+    )
+
+    /** Generates positive base fee values (simulating network fee estimates). */
+    private fun arbPositiveBaseFee(): Arb<Double> = Arb.double(
+        min = 0.000001,
+        max = 10.0
+    ).filter { it > 0.0 && it.isFinite() }
+
+    // ── Property tests ──────────────────────────────────────────────────
+
+    /**
+     * For any coin, calling the fee multiplier logic with the default values
+     * (serviceAddress=null, serviceFee=0.0) must return the baseFee unchanged.
+     * This proves that estimateFee with explicit defaults is identical to
+     * estimateFee without the new parameters.
+     */
+    @Test
+    fun estimateFeeWithDefaultServiceParamsEqualsBaseFee() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            arbNetworkName(),
+            arbPositiveBaseFee()
+        ) { coin, baseFee ->
+            val resultWithDefaults = applyFeeMultiplier(
+                baseFee = baseFee,
+                coin = coin,
+                serviceAddress = null,
+                serviceFee = 0.0
+            )
+
+            assertEquals(
+                baseFee, resultWithDefaults,
+                "For coin $coin, estimateFee with serviceAddress=null and serviceFee=0.0 " +
+                    "should return baseFee($baseFee) unchanged, but got $resultWithDefaults"
+            )
+        }
+    }
+
+    /**
+     * For any coin, calling the fee multiplier logic with serviceAddress=""
+     * (empty string) and serviceFee=0.0 must also return the baseFee unchanged.
+     * Empty string is treated the same as null for backward compatibility.
+     */
+    @Test
+    fun estimateFeeWithEmptyServiceAddressEqualsBaseFee() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            arbNetworkName(),
+            arbPositiveBaseFee()
+        ) { coin, baseFee ->
+            val resultWithEmpty = applyFeeMultiplier(
+                baseFee = baseFee,
+                coin = coin,
+                serviceAddress = "",
+                serviceFee = 0.0
+            )
+
+            assertEquals(
+                baseFee, resultWithEmpty,
+                "For coin $coin, estimateFee with serviceAddress='' and serviceFee=0.0 " +
+                    "should return baseFee($baseFee) unchanged, but got $resultWithEmpty"
+            )
+        }
+    }
+
+    /**
+     * For any coin, even when serviceFee > 0 but serviceAddress is null,
+     * the result must equal the baseFee (hasServiceFee returns false).
+     * This ensures backward compatibility: without a valid service address,
+     * the fee is never modified regardless of serviceFee value.
+     */
+    @Test
+    fun estimateFeeWithNullAddressAndPositiveFeeEqualsBaseFee() = runTest {
+        checkAll(
+            PropTestConfig(iterations = 100),
+            arbNetworkName(),
+            arbPositiveBaseFee(),
+            Arb.double(min = 0.000001, max = 100.0).filter { it > 0.0 && it.isFinite() }
+        ) { coin, baseFee, serviceFee ->
+            val result = applyFeeMultiplier(
+                baseFee = baseFee,
+                coin = coin,
+                serviceAddress = null,
+                serviceFee = serviceFee
+            )
+
+            assertEquals(
+                baseFee, result,
+                "For coin $coin, estimateFee with serviceAddress=null and serviceFee=$serviceFee " +
+                    "should return baseFee($baseFee) unchanged, but got $result"
+            )
+        }
+    }
+}

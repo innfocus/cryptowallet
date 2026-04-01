@@ -71,13 +71,16 @@ object BitcoinTransactionBuilder {
      * @param targetAmount amount to send in satoshis
      * @param feeRatePerVbyte fee rate in sat/vB
      * @param addressType sender address type (affects input vsize)
+     * @param extraOutputCount number of additional outputs beyond recipient + change
+     *        (e.g., 1 for a service fee output)
      * @return pair of (selected UTXOs, total fee) or null if insufficient funds
      */
     fun selectUtxos(
         utxos: List<UtxoInfo>,
         targetAmount: Long,
         feeRatePerVbyte: Long,
-        addressType: BitcoinAddressType
+        addressType: BitcoinAddressType,
+        extraOutputCount: Int = 0
     ): Pair<List<UtxoInfo>, Long>? {
         // Only use confirmed UTXOs, sorted largest first
         val confirmed = utxos.filter { it.status.confirmed }.sortedByDescending { it.value }
@@ -85,13 +88,15 @@ object BitcoinTransactionBuilder {
 
         val selected = mutableListOf<UtxoInfo>()
         var totalInput = 0L
+        // Base outputs: recipient + change + any extra (e.g., service fee)
+        val baseOutputCount = 2 + extraOutputCount
 
         for (utxo in confirmed) {
             selected.add(utxo)
             totalInput += utxo.value
 
-            // Estimate fee with 2 outputs (recipient + change)
-            val estimatedVsize = estimateVsize(selected.size, 2, addressType)
+            // Estimate fee with baseOutputCount outputs (recipient + change + extras)
+            val estimatedVsize = estimateVsize(selected.size, baseOutputCount, addressType)
             val fee = estimatedVsize * feeRatePerVbyte
 
             if (totalInput >= targetAmount + fee) {
@@ -102,8 +107,8 @@ object BitcoinTransactionBuilder {
                     else -> DUST_THRESHOLD_P2WPKH
                 }
                 val actualFee = if (change < dustThreshold) {
-                    // No change output — recalculate fee with 1 output
-                    val vsizeNoChange = estimateVsize(selected.size, 1, addressType)
+                    // No change output — recalculate fee without change output
+                    val vsizeNoChange = estimateVsize(selected.size, baseOutputCount - 1, addressType)
                     val feeNoChange = vsizeNoChange * feeRatePerVbyte
                     // Absorb remaining into fee
                     totalInput - targetAmount
@@ -117,6 +122,11 @@ object BitcoinTransactionBuilder {
     }
 
     /**
+     * Simple holder for an additional transaction output (e.g., service fee).
+     */
+    data class AdditionalTxOutput(val address: String, val amountSat: Long)
+
+    /**
      * Build, sign, and serialize a Bitcoin transaction locally.
      *
      * @param utxos selected UTXOs to spend
@@ -127,6 +137,7 @@ object BitcoinTransactionBuilder {
      * @param privateKey sender's private key
      * @param publicKey sender's public key
      * @param addressType sender's address type
+     * @param additionalOutputs extra outputs to include (e.g., service fee)
      * @return BuildResult with raw tx hex and metadata
      */
     fun buildAndSign(
@@ -138,14 +149,21 @@ object BitcoinTransactionBuilder {
         privateKey: PrivateKey,
         publicKey: PublicKey,
         addressType: BitcoinAddressType,
-        chain: Chain
+        chain: Chain,
+        additionalOutputs: List<AdditionalTxOutput> = emptyList()
     ): BuildResult {
         val totalInput = utxos.sumOf { it.value }
-        val change = totalInput - amountSat - feeSat
+        val additionalTotal = additionalOutputs.sumOf { it.amountSat }
+        val change = totalInput - amountSat - feeSat - additionalTotal
 
         // Build outputs
         val outputs = mutableListOf<TxOut>()
         outputs.add(TxOut(Satoshi(amountSat), addressToScript(toAddress, chain)))
+
+        // Add additional outputs (e.g., service fee)
+        for (extra in additionalOutputs) {
+            outputs.add(TxOut(Satoshi(extra.amountSat), addressToScript(extra.address, chain)))
+        }
 
         // Only add change output if above dust threshold
         val dustThreshold = when (addressType) {

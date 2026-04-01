@@ -352,9 +352,12 @@ class CardanoManager(
     suspend fun buildAndSignTransaction(
         toAddress: String,
         amount: Long,
-        fee: Long
+        fee: Long,
+        serviceAddress: String? = null,
+        serviceFeeLovelace: Long = 0
     ): CardanoSignedTransaction {
-        logger.d { "buildAndSignTransaction: $amount lovelace to $toAddress, fee=$fee" }
+        val hasServiceFee = !serviceAddress.isNullOrBlank() && serviceFeeLovelace > 0
+        logger.d { "buildAndSignTransaction: $amount lovelace to $toAddress, fee=$fee, serviceFee=$serviceFeeLovelace, hasServiceFee=$hasServiceFee" }
         val fromAddress = getAddress()
 
         // Fetch UTXOs
@@ -371,7 +374,8 @@ class CardanoManager(
         }
 
         // Simple UTXO selection: sort by lovelace descending, pick until enough
-        val requiredTotal = amount + fee
+        val serviceFeeTotal = if (hasServiceFee) serviceFeeLovelace else 0L
+        val requiredTotal = amount + fee + serviceFeeTotal
         val sorted = utxos.sortedByDescending { it.lovelace }
         val selected = mutableListOf<CardanoUtxo>()
         var collected = 0L
@@ -401,8 +405,14 @@ class CardanoManager(
         val toAddressBytes = addressToBytes(toAddress)
         builder.addOutput(toAddressBytes, amount)
 
+        // Service fee output
+        if (hasServiceFee) {
+            val serviceAddressBytes = addressToBytes(serviceAddress!!)
+            builder.addOutput(serviceAddressBytes, serviceFeeLovelace)
+        }
+
         // Change output
-        val change = collected - amount - fee
+        val change = collected - amount - fee - serviceFeeTotal
         if (change > 0) {
             val fromAddressBytes = addressToBytes(fromAddress)
             builder.addOutput(fromAddressBytes, change)

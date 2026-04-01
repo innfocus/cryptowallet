@@ -101,15 +101,36 @@ class BitcoinApiService {
         }
     }
 
+    /**
+     * Simple holder for an additional transaction output (e.g., service fee).
+     */
+    data class AdditionalOutput(val address: String, val value: Long)
+
     suspend fun createNewTransaction(
         fromAddress: String,
         toAddress: String,
-        amount: Long
+        amount: Long,
+        additionalOutputs: List<AdditionalOutput> = emptyList()
     ): BitcoinTransactionModel? {
         try {
             val network = when (Config.shared.getNetwork()) {
                 Network.MAINNET -> "main"
                 else -> "test3"
+            }
+
+            val outputs = mutableListOf(
+                BitcoinCreateTransactionRequest.Output(
+                    listOf(toAddress),
+                    amount
+                )
+            )
+            for (extra in additionalOutputs) {
+                outputs.add(
+                    BitcoinCreateTransactionRequest.Output(
+                        listOf(extra.address),
+                        extra.value
+                    )
+                )
             }
 
             val requestBody = BitcoinCreateTransactionRequest(
@@ -118,12 +139,7 @@ class BitcoinApiService {
                         listOf(fromAddress)
                     )
                 ),
-                listOf(
-                    BitcoinCreateTransactionRequest.Output(
-                        listOf(toAddress),
-                        amount
-                    )
-                )
+                outputs
             )
             val response =
                 HttpClientService.INSTANCE.client.post(Urls.getBitcoinApiCreateNewTransaction(network)) {

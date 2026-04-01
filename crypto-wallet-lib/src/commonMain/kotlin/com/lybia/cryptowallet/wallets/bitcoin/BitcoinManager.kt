@@ -26,6 +26,15 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
     private var walletAddress: String? = null
     private var keyPath: KeyPath? = null
 
+    companion object {
+        /**
+         * Minimal satoshi value used as a placeholder when estimating fee with
+         * a service-fee output via BlockCypher. The actual service-fee amount
+         * is irrelevant for fee estimation — only the output count matters.
+         */
+        const val DUST_ESTIMATE_SATOSHI = 546L
+    }
+
     /**
      * Unified method to generate a Bitcoin address by type and account index.
      *
@@ -162,12 +171,20 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
         toAddress: String,
         amountSatoshi: Long,
         addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
-        accountIndex: Int = 0
+        accountIndex: Int = 0,
+        serviceAddress: String? = null,
+        serviceFeeAmount: Long = 0
     ): TransferResponseModel {
         val fromAddress = getAddressByType(addressType, accountIndex)
 
+        val additionalOutputs = if (!serviceAddress.isNullOrBlank() && serviceFeeAmount > 0) {
+            listOf(BitcoinApiService.AdditionalOutput(serviceAddress, serviceFeeAmount))
+        } else {
+            emptyList()
+        }
+
         val transactionRequest = BitcoinApiService.INSTANCE.createNewTransaction(
-            fromAddress, toAddress, amountSatoshi
+            fromAddress, toAddress, amountSatoshi, additionalOutputs
         ) ?: return TransferResponseModel(
             success = false,
             error = "Failed to create transaction (BlockCypher returned null)",
@@ -228,21 +245,35 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
      * BlockCypher's `/txs/new` returns the estimated fee in the tx skeleton,
      * accounting for UTXO count and script types.
      *
+     * When [serviceAddress] is provided, an additional output is included in the
+     * transaction skeleton so BlockCypher accounts for the extra output size in
+     * its fee estimate.
+     *
      * @param toAddress Destination address
      * @param amountSatoshi Amount in satoshis
      * @param addressType Sender address type
      * @param accountIndex HD wallet account index
+     * @param serviceAddress Optional service fee destination address; when non-null
+     *        and non-blank, the fee estimate includes an extra output
      * @return Fee in satoshis, or null if estimation failed
      */
     suspend fun estimateFee(
         toAddress: String,
         amountSatoshi: Long,
         addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
-        accountIndex: Int = 0
+        accountIndex: Int = 0,
+        serviceAddress: String? = null
     ): Long? {
         val fromAddress = getAddressByType(addressType, accountIndex)
+
+        val additionalOutputs = if (!serviceAddress.isNullOrBlank()) {
+            listOf(BitcoinApiService.AdditionalOutput(serviceAddress, DUST_ESTIMATE_SATOSHI))
+        } else {
+            emptyList()
+        }
+
         val txSkeleton = BitcoinApiService.INSTANCE.createNewTransaction(
-            fromAddress, toAddress, amountSatoshi
+            fromAddress, toAddress, amountSatoshi, additionalOutputs
         ) ?: return null
         return txSkeleton.tx.fees
     }
@@ -312,11 +343,16 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
         amountSatoshi: Long,
         addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
         accountIndex: Int = 0,
-        feeRateSatPerVbyte: Long? = null
+        feeRateSatPerVbyte: Long? = null,
+        serviceAddress: String? = null,
+        serviceFeeAmount: Long = 0
     ): TransferResponseModel {
         return try {
             val fromAddress = getAddressByType(addressType, accountIndex)
             val chain = if (Config.shared.getNetwork() == Network.MAINNET) Chain.Mainnet else Chain.Testnet4
+
+            val hasServiceFee = !serviceAddress.isNullOrBlank() && serviceFeeAmount > 0
+            val extraOutputCount = if (hasServiceFee) 1 else 0
 
             // 1. Fetch UTXOs
             val utxos = EsploraApiService.INSTANCE.getUtxos(fromAddress)
@@ -334,17 +370,25 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
                 recommended?.halfHourFee ?: 10L // fallback 10 sat/vB
             }
 
-            // 3. Select UTXOs
+            // 3. Select UTXOs (account for service fee output + amount)
+            val totalTarget = amountSatoshi + if (hasServiceFee) serviceFeeAmount else 0
             val (selectedUtxos, fee) = BitcoinTransactionBuilder.selectUtxos(
-                utxos, amountSatoshi, feeRate, addressType
+                utxos, totalTarget, feeRate, addressType, extraOutputCount
             ) ?: return TransferResponseModel(
                 success = false,
                 error = "Insufficient funds. Available: ${utxos.sumOf { it.value }} sat, " +
-                        "needed: $amountSatoshi + fee",
+                        "needed: $totalTarget + fee",
                 txHash = null
             )
 
-            // 4. Build and sign
+            // 4. Build additional outputs for service fee
+            val additionalOutputs = if (hasServiceFee) {
+                listOf(BitcoinTransactionBuilder.AdditionalTxOutput(serviceAddress!!, serviceFeeAmount))
+            } else {
+                emptyList()
+            }
+
+            // 5. Build and sign
             val privateKey = derivePrivateKey(addressType, accountIndex)
             val publicKey = privateKey.publicKey()
 
@@ -357,10 +401,11 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
                 privateKey = privateKey,
                 publicKey = publicKey,
                 addressType = addressType,
-                chain = chain
+                chain = chain,
+                additionalOutputs = additionalOutputs
             )
 
-            // 5. Broadcast
+            // 6. Broadcast
             val txid = EsploraApiService.INSTANCE.broadcastTransaction(buildResult.rawTxHex)
             if (txid != null) {
                 TransferResponseModel(success = true, error = null, txHash = txid)
@@ -383,11 +428,15 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
     /**
      * Estimate the transaction fee locally without building the full transaction.
      *
+     * When [serviceAddress] is provided, the estimate accounts for an additional
+     * output in the transaction (increasing the vsize and therefore the fee).
+     *
      * @param toAddress destination address
      * @param amountSatoshi amount in satoshis
      * @param addressType sender address type
      * @param accountIndex HD wallet account index
      * @param feeRateSatPerVbyte fee rate in sat/vB (null = auto)
+     * @param serviceAddress optional service fee destination address
      * @return estimated fee in satoshis, or null if estimation failed
      */
     suspend fun estimateFeeLocal(
@@ -395,7 +444,8 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
         amountSatoshi: Long,
         addressType: BitcoinAddressType = BitcoinAddressType.NATIVE_SEGWIT,
         accountIndex: Int = 0,
-        feeRateSatPerVbyte: Long? = null
+        feeRateSatPerVbyte: Long? = null,
+        serviceAddress: String? = null
     ): Long? {
         return try {
             val fromAddress = getAddressByType(addressType, accountIndex)
@@ -406,8 +456,10 @@ class BitcoinManager(mnemonics: String) : BaseCoinManager() {
                 recommended?.halfHourFee ?: 10L
             }
 
+            val extraOutputCount = if (!serviceAddress.isNullOrBlank()) 1 else 0
+
             val result = BitcoinTransactionBuilder.selectUtxos(
-                utxos, amountSatoshi, feeRate, addressType
+                utxos, amountSatoshi, feeRate, addressType, extraOutputCount
             )
             result?.second
         } catch (e: Exception) {
