@@ -203,7 +203,9 @@ class CardanoApiService(
                         }
                     }
 
-                    val txs = fetchTransactionsSafely(txHashes)
+                    val latestHashes = txHashes.takeLast(20)
+
+                    val txs = fetchTransactionsSafely(latestHashes)
                     allTxs.addAll(txs)
                 }
                 allTxs
