@@ -9,6 +9,9 @@ import io.ktor.client.call.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -96,6 +99,9 @@ class CardanoApiService(
             logger.e(e) { "Connection error" }
             throw CardanoError.ApiError(statusCode = null, message = "Connection error: ${e.message ?: "unknown"}")
         }
+        logger.d { "Request URL: ${response.call.request.url}" }
+        logger.d { "Response status: ${response.status}" }
+        logger.d { "Response Content-Type: ${response.headers["Content-Type"]}" }
         if (response.status.value !in 200..299) {
             val body = try { response.bodyAsText() } catch (_: Exception) { "" }
             throw CardanoError.ApiError(
@@ -103,7 +109,9 @@ class CardanoApiService(
                 message = body.ifEmpty { response.status.description }
             )
         }
-        return response.body<T>()
+        val rawJson = response.bodyAsText()
+        logger.d { "Response body length: ${rawJson.length}, first 200 chars: ${rawJson.take(200)}" }
+        return json.decodeFromString<T>(rawJson)
     }
 
     /**
@@ -189,14 +197,54 @@ class CardanoApiService(
             else -> {
                 val allTxs = mutableListOf<CardanoTransactionInfo>()
                 for (address in addresses) {
-                    val txs = safeRequest<List<CardanoTransactionInfo>> {
-                        get("$baseUrl/addresses/$address/transactions") { applyAuth() }
+                    val txHashes = safeRequest<List<CardanoTransactionHash>> {
+                        get("$baseUrl/addresses/$address/transactions") {
+                            applyAuth()
+                        }
                     }
+
+                    val txs = fetchTransactionsSafely(txHashes)
                     allTxs.addAll(txs)
                 }
                 allTxs
             }
         }
+    }
+
+    suspend fun fetchTransactionsSafely(txHashes: List<CardanoTransactionHash>): List<CardanoTransactionInfo> {
+        val allTxs = mutableListOf<CardanoTransactionInfo>()
+
+        val chunks = txHashes.chunked(5)
+
+        for (chunk in chunks) {
+            val chunkResult = coroutineScope {
+                chunk.map { txRef ->
+                    async {
+                        val detailDeferred = async {
+                            safeRequest<BlockfrostTxDetail> { get("$baseUrl/txs/${txRef.txHash}") { applyAuth() } }
+                        }
+                        val utxosDeferred = async {
+                            safeRequest<BlockfrostTxUtxos> { get("$baseUrl/txs/${txRef.txHash}/utxos") { applyAuth() } }
+                        }
+
+                        val txDetail = detailDeferred.await()
+                        val txUtxos = utxosDeferred.await()
+
+                        CardanoTransactionInfo(
+                            txHash = txDetail.hash,
+                            blockHeight = txDetail.blockHeight,
+                            blockTime = txDetail.blockTime,
+                            fees = txDetail.fees,
+                            inputs = txUtxos.inputs,
+                            outputs = txUtxos.outputs
+                        )
+                    }
+                }.awaitAll()
+            }
+            allTxs.addAll(chunkResult)
+        }
+
+        return allTxs
     }
 
     /**
