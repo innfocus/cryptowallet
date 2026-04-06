@@ -35,14 +35,42 @@ data class CardanoProtocolParams(
     @SerialName("coins_per_utxo_size") val coinsPerUtxoSize: String
 )
 
+
+@Serializable
+data class CardanoTransactionHash(
+    @SerialName("tx_hash") val txHash: String,
+)
+
 @Serializable
 data class CardanoTransactionInfo(
     @SerialName("tx_hash") val txHash: String,
     @SerialName("block_height") val blockHeight: Long,
     @SerialName("block_time") val blockTime: Long,
-    val fees: String,
-    val inputs: List<CardanoTxInOut>,
-    val outputs: List<CardanoTxInOut>
+    val fees: String  = "0",
+    val inputs: List<CardanoTxInOut> = emptyList(),
+    val outputs: List<CardanoTxInOut> = emptyList()
+)
+
+/**
+ * Blockfrost `/txs/{hash}` response model.
+ * Uses "hash" (not "tx_hash") and does not include inputs/outputs directly.
+ */
+@Serializable
+data class BlockfrostTxDetail(
+    val hash: String,
+    @SerialName("block_height") val blockHeight: Long,
+    @SerialName("block_time") val blockTime: Long,
+    val fees: String = "0"
+)
+
+/**
+ * Blockfrost `/txs/{hash}/utxos` response model.
+ */
+@Serializable
+data class BlockfrostTxUtxos(
+    val hash: String,
+    val inputs: List<CardanoTxInOut> = emptyList(),
+    val outputs: List<CardanoTxInOut> = emptyList()
 )
 
 @Serializable
