@@ -75,6 +75,22 @@ Lấy số dư của Token (ERC-20, Jetton, Native Token).
     - `contractAddress: String`
 - **Output:** `suspend Double`
 
+### 2.7. getTokenTransactionHistoryPaginated
+Lấy lịch sử giao dịch của native token có phân trang. Hiện hỗ trợ **Cardano native token**.
+- **Input:**
+    - `coin: NetworkName`
+    - `policyId: String` — Policy ID (56 ký tự hex)
+    - `assetName: String` — Asset name (hex-encoded)
+    - `limit: Int` (Mặc định 20, tối đa 100)
+    - `pageParam: Map<String, Any?>?` (null cho lần đầu)
+- **Output:** `suspend TransactionHistoryResult`
+    - `transactions: List<CardanoTransactionInfo>` — Danh sách giao dịch chứa token
+    - `hasMore: Boolean` — Còn trang tiếp theo
+    - `nextPageParam: Map<String, Any?>?` — `{"page": Int}` (1-based)
+    - `success: Boolean`
+    - `error: String?`
+- **API:** Blockfrost `/assets/{policyId}{assetName}/transactions?count=N&page=P&order=desc`
+
 ## 3. Sơ đồ tuần tự (Sequence Diagram - Get Balance)
 
 ```mermaid

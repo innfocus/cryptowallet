@@ -204,6 +204,27 @@ class CardanoManager(
     }
 
     /**
+     * Get transaction history for a specific native token with pagination.
+     *
+     * @param policyId 56-char hex policy ID
+     * @param assetName Hex-encoded asset name
+     * @param count Number of transactions per page (max 100)
+     * @param page 1-based page number
+     * @param order Sort order: "desc" (newest first) or "asc"
+     * @return Pair of (transactions, hasMore)
+     */
+    suspend fun getTokenTransactionHistoryPaginated(
+        policyId: String,
+        assetName: String,
+        count: Int = 20,
+        page: Int = 1,
+        order: String = "desc"
+    ): Pair<List<com.lybia.cryptowallet.models.cardano.CardanoTransactionInfo>, Boolean> {
+        logger.d { "getTokenTransactionHistoryPaginated: $policyId.$assetName, count=$count, page=$page" }
+        return apiService.getAssetTransactionsPaginated(policyId, assetName, count, page, order)
+    }
+
+    /**
      * Send native tokens to an address.
      * Builds a transaction that sends the specified token amount along with minimum ADA.
      *

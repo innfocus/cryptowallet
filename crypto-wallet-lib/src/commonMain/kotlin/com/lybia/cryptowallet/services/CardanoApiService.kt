@@ -244,6 +244,42 @@ class CardanoApiService(
         }
     }
 
+    /**
+     * Get transaction history for a specific native asset with pagination.
+     * Blockfrost: GET /assets/{asset}/transactions?count={count}&page={page}&order={order}
+     *
+     * @param policyId 56-char hex policy ID
+     * @param assetNameHex Hex-encoded asset name
+     * @param count Number of transactions per page (max 100, default 20)
+     * @param page 1-based page number
+     * @param order Sort order: "desc" (newest first) or "asc"
+     * @return Pair of (transactions, hasMore)
+     */
+    suspend fun getAssetTransactionsPaginated(
+        policyId: String,
+        assetNameHex: String,
+        count: Int = 20,
+        page: Int = 1,
+        order: String = "desc"
+    ): Pair<List<CardanoTransactionInfo>, Boolean> {
+        val asset = "$policyId$assetNameHex"
+        logger.d { "getAssetTransactionsPaginated: asset=$asset, count=$count, page=$page, order=$order" }
+
+        val txHashes = safeRequest<List<CardanoTransactionHash>> {
+            get("$baseUrl/assets/$asset/transactions") {
+                applyAuth()
+                url {
+                    parameters.append("count", count.toString())
+                    parameters.append("page", page.toString())
+                    parameters.append("order", order)
+                }
+            }
+        }
+
+        val txs = fetchTransactionsSafely(txHashes)
+        return Pair(txs, txHashes.size >= count)
+    }
+
     suspend fun fetchTransactionsSafely(txHashes: List<CardanoTransactionHash>): List<CardanoTransactionInfo> {
         val allTxs = mutableListOf<CardanoTransactionInfo>()
 

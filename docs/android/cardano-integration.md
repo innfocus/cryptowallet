@@ -106,6 +106,8 @@ val balance = cardanoManager.getBalance(address = null, coinNetwork = coinNetwor
 
 ## 5. Lịch sử giao dịch
 
+### 5.1 Không phân trang
+
 ```kotlin
 import com.lybia.cryptowallet.coinkits.TransactionsHandle
 import com.lybia.cryptowallet.coinkits.TransationData
@@ -122,6 +124,41 @@ CoinsManager.shared.getTransactions(ACTCoin.Cardano, null, object : Transactions
     }
 })
 ```
+
+### 5.2 Có phân trang (Pagination)
+
+Sử dụng `CommonCoinsManager.getTransactionHistoryPaginated()` để load từng trang.
+
+```kotlin
+import com.lybia.cryptowallet.coinkits.CommonCoinsManager
+import com.lybia.cryptowallet.enums.NetworkName
+
+val manager = CommonCoinsManager(mnemonic)
+
+// Trang đầu tiên
+viewModelScope.launch {
+    val result = manager.getTransactionHistoryPaginated(
+        coin = NetworkName.CARDANO,
+        limit = 20,         // 20 tx/trang (max 100)
+        pageParam = null    // null = trang đầu
+    )
+    if (result.success) {
+        val txs = result.transactions // List<CardanoTransactionInfo>
+        Log.d("ADA", "Loaded ${txs?.toString()}")
+
+        // Load trang tiếp theo nếu còn
+        if (result.hasMore) {
+            val page2 = manager.getTransactionHistoryPaginated(
+                coin = NetworkName.CARDANO,
+                limit = 20,
+                pageParam = result.nextPageParam  // {"page": 2}
+            )
+        }
+    }
+}
+```
+
+> **Lưu ý:** `pageParam` là `{"page": Int}` (1-based). Blockfrost sắp xếp `order=desc` (mới nhất trước) mặc định.
 
 ---
 
@@ -176,23 +213,72 @@ val result = cardanoManager.transfer(signedTx.cborHex, coinNetwork)
 
 ## 7. Native Token
 
+### 7.1 Lấy balance token
+
 ```kotlin
-// Lấy balance token
 val tokenBalance = cardanoManager.getTokenBalance(
     address = "addr1q...",
     policyId = "abcdef1234...",
-    assetName = "MyToken"
+    assetName = "4d79546f6b656e"  // hex-encoded asset name
 )
+```
 
-// Gửi token
+### 7.2 Gửi token
+
+```kotlin
 val txHex = cardanoManager.sendToken(
     toAddress = "addr1q...",
     policyId = "abcdef1234...",
-    assetName = "MyToken",
+    assetName = "4d79546f6b656e",
     amount = 100,
     fee = 200_000
 )
 ```
+
+### 7.3 Lịch sử giao dịch token (Pagination)
+
+Lấy lịch sử giao dịch của một native token cụ thể, có phân trang.
+
+```kotlin
+// Qua CommonCoinsManager
+viewModelScope.launch {
+    val result = manager.getTokenTransactionHistoryPaginated(
+        coin = NetworkName.CARDANO,
+        policyId = "abcdef1234...",
+        assetName = "4d79546f6b656e",
+        limit = 20,
+        pageParam = null  // null = trang đầu
+    )
+    if (result.success) {
+        val txs = result.transactions  // List<CardanoTransactionInfo>
+        val hasMore = result.hasMore
+
+        // Load trang tiếp
+        if (hasMore) {
+            val page2 = manager.getTokenTransactionHistoryPaginated(
+                coin = NetworkName.CARDANO,
+                policyId = "abcdef1234...",
+                assetName = "4d79546f6b656e",
+                limit = 20,
+                pageParam = result.nextPageParam  // {"page": 2}
+            )
+        }
+    }
+}
+
+// Qua CardanoManager trực tiếp
+viewModelScope.launch {
+    val (txs, hasMore) = cardanoManager.getTokenTransactionHistoryPaginated(
+        policyId = "abcdef1234...",
+        assetName = "4d79546f6b656e",
+        count = 20,
+        page = 1,
+        order = "desc"
+    )
+}
+```
+
+> **API:** Blockfrost `/assets/{policyId}{assetName}/transactions?count=N&page=P&order=desc`
 
 ---
 

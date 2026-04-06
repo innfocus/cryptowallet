@@ -121,6 +121,8 @@ func fetchBalanceDirect() async {
 
 ## 6. Lịch sử giao dịch
 
+### 6.1 Không phân trang
+
 ```swift
 func fetchTransactions() async {
     do {
@@ -132,6 +134,40 @@ func fetchTransactions() async {
     }
 }
 ```
+
+### 6.2 Có phân trang (Pagination)
+
+```swift
+func fetchTransactionsPaginated() async {
+    do {
+        // Trang đầu tiên
+        let result = try await manager.getTransactionHistoryPaginated(
+            coin: .cardano,
+            address: nil,
+            limit: 20,
+            pageParam: nil  // nil = trang đầu
+        )
+        
+        if result.success {
+            print("Transactions: \(result.transactions ?? [])")
+            
+            // Load trang tiếp theo nếu còn
+            if result.hasMore, let nextParam = result.nextPageParam {
+                let page2 = try await manager.getTransactionHistoryPaginated(
+                    coin: .cardano,
+                    address: nil,
+                    limit: 20,
+                    pageParam: nextParam  // {"page": 2}
+                )
+            }
+        }
+    } catch {
+        print("Error: \(error)")
+    }
+}
+```
+
+> **Lưu ý:** `pageParam` là `{"page": Int}` (1-based). Mặc định sắp xếp mới nhất trước (`order=desc`).
 
 ---
 
@@ -208,23 +244,78 @@ func sendByron() async {
 
 ## 8. Native Token
 
+### 8.1 Lấy balance token
+
 ```swift
-// Lấy balance token
 let tokenBalance = try await cardanoManager.getTokenBalance(
     address: "addr1q...",
     policyId: "abcdef1234...",
-    assetName: "MyToken"
+    assetName: "4d79546f6b656e"  // hex-encoded asset name
 )
+```
 
-// Gửi token
+### 8.2 Gửi token
+
+```swift
 let txHex = try await cardanoManager.sendToken(
     toAddress: "addr1q...",
     policyId: "abcdef1234...",
-    assetName: "MyToken",
+    assetName: "4d79546f6b656e",
     amount: 100,
     fee: 200_000
 )
 ```
+
+### 8.3 Lịch sử giao dịch token (Pagination)
+
+```swift
+func fetchTokenTransactions() async {
+    do {
+        // Qua CommonCoinsManager
+        let result = try await manager.getTokenTransactionHistoryPaginated(
+            coin: .cardano,
+            policyId: "abcdef1234...",
+            assetName: "4d79546f6b656e",
+            limit: 20,
+            pageParam: nil  // nil = trang đầu
+        )
+        
+        if result.success {
+            print("Token Txs: \(result.transactions ?? [])")
+            
+            // Load trang tiếp
+            if result.hasMore, let nextParam = result.nextPageParam {
+                let page2 = try await manager.getTokenTransactionHistoryPaginated(
+                    coin: .cardano,
+                    policyId: "abcdef1234...",
+                    assetName: "4d79546f6b656e",
+                    limit: 20,
+                    pageParam: nextParam
+                )
+            }
+        }
+    } catch {
+        print("Error: \(error)")
+    }
+}
+
+// Qua CardanoManager trực tiếp
+func fetchTokenTxsDirect() async {
+    do {
+        let (txs, hasMore) = try await cardanoManager.getTokenTransactionHistoryPaginated(
+            policyId: "abcdef1234...",
+            assetName: "4d79546f6b656e",
+            count: 20,
+            page: 1,
+            order: "desc"
+        )
+    } catch {
+        print("Error: \(error)")
+    }
+}
+```
+
+> **API:** Blockfrost `/assets/{policyId}{assetName}/transactions?count=N&page=P&order=desc`
 
 ---
 

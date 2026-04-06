@@ -528,6 +528,50 @@ class CommonCoinsManager(
         }
     }
 
+    /**
+     * Get token transaction history with pagination for Cardano native tokens.
+     *
+     * @param coin Target chain (currently only CARDANO supported)
+     * @param policyId Policy ID of the native token (56-char hex)
+     * @param assetName Hex-encoded asset name
+     * @param limit Max number of transactions per page (max 100)
+     * @param pageParam Pagination token from previous result's nextPageParam
+     * @return TransactionHistoryResult with transactions and pagination info
+     */
+    suspend fun getTokenTransactionHistoryPaginated(
+        coin: NetworkName,
+        policyId: String,
+        assetName: String,
+        limit: Int = 20,
+        pageParam: Map<String, Any?>? = null
+    ): TransactionHistoryResult {
+        return try {
+            when (coin) {
+                NetworkName.CARDANO -> {
+                    val manager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.cardano.CardanoManager
+                    val page = (pageParam?.get("page") as? Number)?.toInt() ?: 1
+                    val count = limit.coerceAtMost(100)
+                    val response = manager.getTokenTransactionHistoryPaginated(policyId, assetName, count, page)
+                    TransactionHistoryResult(
+                        transactions = response.first,
+                        hasMore = response.second,
+                        nextPageParam = if (response.second) mapOf("page" to (page + 1)) else null,
+                        success = true
+                    )
+                }
+                else -> {
+                    TransactionHistoryResult(
+                        success = false,
+                        error = "Token transaction history not supported for $coin"
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to get token transaction history for $coin" }
+            TransactionHistoryResult(success = false, error = e.message)
+        }
+    }
+
     // ── NFT operations ──────────────────────────────────────────────────────
 
     suspend fun getNFTs(coin: NetworkName, address: String): List<NFTItem>? {
