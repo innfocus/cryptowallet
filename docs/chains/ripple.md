@@ -1,6 +1,6 @@
 # Ripple (XRP) — Đặc tả Kỹ thuật
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Status:** ✅ Cross-platform (commonMain) | ✅ Android | ✅ iOS  
 **Scope:** `commonMain/kotlin/com/lybia/cryptowallet/wallets/ripple/`  
 **Related:** [XRP Ledger Dev Portal](https://xrpl.org/), [rippled API](https://xrpl.org/public-api-methods.html)  
@@ -204,11 +204,22 @@ val (transactions, nextMarker) = xrpManager.getTransactionHistoryPaginated(
 #### Gửi XRP
 
 ```kotlin
+// Cơ bản — trả về ngay sau submit
 val result = xrpManager.sendXrp(
     toAddress = "rRecipient...",
     amountDrops = 5_000_000L,        // 5 XRP
     feeDrops = 0L,                   // 0 = tự estimate
-    destinationTag = 12345L          // tùy chọn (cho sàn)
+    destinationTag = 12345L,         // tùy chọn (cho sàn)
+    memoText = "Invoice #42",        // tùy chọn
+    serviceAddress = "rService...",   // tùy chọn — phí dịch vụ
+    serviceFeeDrops = 100_000L       // tùy chọn — 0.1 XRP service fee
+)
+
+// Reliable — đợi TX được validated trên ledger
+val result = xrpManager.sendXrp(
+    toAddress = "rRecipient...",
+    amountDrops = 5_000_000L,
+    awaitValidated = true            // poll tx RPC cho đến khi confirmed hoặc expired
 )
 // result: TransferResponseModel(success, error, hash)
 ```
@@ -216,11 +227,32 @@ val result = xrpManager.sendXrp(
 **Flow nội bộ:**
 1. Validate `walletAddress` tồn tại
 2. Estimate fee nếu `feeDrops == 0`
-3. Lấy `sequence` từ `account_info`
-4. Lấy `currentLedgerIndex`, tính `lastLedgerSequence = ledgerIndex + 20`
-5. Ký TX bằng `XrpTransactionSigner.signPayment()` → `tx_blob` (hex)
-6. Submit `tx_blob` qua `submit` RPC
-7. Kiểm tra `engine_result`: `tesSUCCESS` hoặc `terQUEUED` = thành công
+3. Lấy `sequence` + `ledgerIndex` từ `account_info` (1 RPC call)
+4. Tính `lastLedgerSequence = ledgerIndex + 75`
+5. Validate balance >= amount + fee + 10 XRP reserve (+ service fee nếu có)
+6. Ký TX bằng `XrpTransactionSigner.signPayment()` → `SignResult(txBlob, transactionId)`
+7. Submit `txBlob` qua `submit` RPC
+8. Kiểm tra `engine_result`: `tesSUCCESS` hoặc `terQUEUED`
+9. Nếu `awaitValidated = true` → poll `tx` RPC cho đến khi validated hoặc expired
+10. Nếu có service fee → gửi TX thứ 2 với `sequence + 1` (fire-and-forget)
+
+#### Reliable Transaction Submission (awaitValidation)
+
+```kotlin
+// Poll trực tiếp (nếu cần kiểm tra TX đã submit trước đó)
+val validation = xrpManager.awaitValidation(
+    txHash = "ABCDEF...",
+    lastLedgerSequence = 90_000_075L
+)
+// validation: ValidationResult(confirmed, txHash, engineResult, ledgerIndex, error)
+```
+
+**Polling logic:**
+1. Gọi `tx` RPC với hash
+2. Nếu `validated == true` + `tesSUCCESS` → confirmed ✅
+3. Nếu `validated == true` + `tec*` → definitive failure ❌
+4. Nếu `currentLedger > lastLedgerSequence` + TX not found → expired ❌
+5. Nếu chưa → delay 4s, poll lại (max 20 lần ≈ 80s)
 
 #### Ước lượng phí
 
@@ -937,7 +969,7 @@ install(HttpTimeout) {
 | **Memo Fields (STArray)** | Serialize MemoType + MemoData trong STArray wrapper | ✅ Fixed 2026-04-06 |
 | **Account Reserve Validation** | Check 10 XRP base reserve + fee trước send | ✅ Fixed 2026-04-06 |
 | **Transaction ID (local)** | Compute TX hash = SHA-512Half(`TXN\0` + signed_blob) | ✅ Fixed 2026-04-06 |
-| **Reliable TX Submission** | Retry logic + verify qua `tx` RPC sau submit | ⏳ Chưa implement |
+| **Reliable TX Submission** | Poll `tx` RPC + `awaitValidation()` + `awaitValidated` param | ✅ Fixed 2026-04-06 |
 
 ### Priority 2 — Nên có
 

@@ -15,10 +15,12 @@ data class RippleRpcRequest(
 data class RippleRpcParam(
     val account: String? = null,
     @SerialName("tx_blob") val txBlob: String? = null,
+    @SerialName("transaction") val transaction: String? = null,
     @SerialName("ledger_index") val ledgerIndex: String? = null,
     val limit: Int? = null,
     val forward: Boolean? = null,
-    val marker: RippleMarker? = null
+    val marker: RippleMarker? = null,
+    val binary: Boolean? = null
 )
 
 // ─── account_info response ──────────────────────────────────────────
@@ -160,3 +162,31 @@ data class RippleFeeLevels(
     @SerialName("open_ledger_level") val openLedgerLevel: String? = null,
     @SerialName("reference_level") val referenceLevel: String? = null
 )
+
+// ─── tx response (Reliable TX Submission) ──────────────────────────
+
+@Serializable
+data class RippleTxResponse(
+    val result: RippleTxResult
+)
+
+@Serializable
+data class RippleTxResult(
+    val status: String? = null,
+    val validated: Boolean = false,
+    @SerialName("meta") val meta: RippleTxMeta? = null,
+    @SerialName("hash") val hash: String? = null,
+    @SerialName("ledger_index") val ledgerIndex: Long? = null,
+    @SerialName("TransactionType") val transactionType: String? = null,
+    val error: String? = null,
+    @SerialName("error_message") val errorMessage: String? = null
+) {
+    /** Transaction is definitively confirmed on a validated ledger. */
+    val isConfirmed: Boolean
+        get() = validated && meta?.transactionResult == "tesSUCCESS"
+
+    /** Transaction failed with a permanent (tec/tem/tef) code on a validated ledger. */
+    val isDefinitiveFailure: Boolean
+        get() = validated && meta?.transactionResult != null
+                && meta.transactionResult != "tesSUCCESS"
+}

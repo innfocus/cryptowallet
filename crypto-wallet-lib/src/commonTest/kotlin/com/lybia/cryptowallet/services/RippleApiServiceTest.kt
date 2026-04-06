@@ -9,6 +9,7 @@ import com.lybia.cryptowallet.utils.fromHexToByteArray
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -186,5 +187,115 @@ class RippleApiServiceTest {
         )
         val balance = response.result.accountData!!.balance.toLong() / 1_000_000.0
         assertEquals(0.0, balance)
+    }
+
+    // ── tx RPC response parsing (Reliable TX Submission) ────────────
+
+    @Test
+    fun parseTxResponse_validated_success() {
+        val txJson = """
+            {
+                "result": {
+                    "status": "success",
+                    "validated": true,
+                    "hash": "E08D6E9754025BA2534A78707605E0601F03ACE063687A0CA1BDDACFCD1698C7",
+                    "ledger_index": 12345678,
+                    "TransactionType": "Payment",
+                    "meta": {
+                        "TransactionResult": "tesSUCCESS"
+                    }
+                }
+            }
+        """.trimIndent()
+        val response = json.decodeFromString<com.lybia.cryptowallet.models.ripple.RippleTxResponse>(txJson)
+        val result = response.result
+        assertTrue(result.validated, "Should be validated")
+        assertTrue(result.isConfirmed, "Should be confirmed")
+        assertFalse(result.isDefinitiveFailure, "Should not be a failure")
+        assertEquals("E08D6E9754025BA2534A78707605E0601F03ACE063687A0CA1BDDACFCD1698C7", result.hash)
+        assertEquals(12345678L, result.ledgerIndex)
+    }
+
+    @Test
+    fun parseTxResponse_validated_failure() {
+        val txJson = """
+            {
+                "result": {
+                    "status": "success",
+                    "validated": true,
+                    "hash": "ABCDEF123456",
+                    "ledger_index": 99999,
+                    "meta": {
+                        "TransactionResult": "tecUNFUNDED_PAYMENT"
+                    }
+                }
+            }
+        """.trimIndent()
+        val response = json.decodeFromString<com.lybia.cryptowallet.models.ripple.RippleTxResponse>(txJson)
+        val result = response.result
+        assertTrue(result.validated)
+        assertFalse(result.isConfirmed, "tecUNFUNDED should not be confirmed")
+        assertTrue(result.isDefinitiveFailure, "tecUNFUNDED should be a definitive failure")
+    }
+
+    @Test
+    fun parseTxResponse_notValidatedYet() {
+        val txJson = """
+            {
+                "result": {
+                    "status": "success",
+                    "validated": false,
+                    "hash": "ABCDEF123456",
+                    "meta": {
+                        "TransactionResult": "tesSUCCESS"
+                    }
+                }
+            }
+        """.trimIndent()
+        val response = json.decodeFromString<com.lybia.cryptowallet.models.ripple.RippleTxResponse>(txJson)
+        val result = response.result
+        assertFalse(result.validated)
+        assertFalse(result.isConfirmed, "Not validated yet = not confirmed")
+        assertFalse(result.isDefinitiveFailure, "Not validated yet = not definitive failure")
+    }
+
+    @Test
+    fun parseTxResponse_notFound() {
+        val txJson = """
+            {
+                "result": {
+                    "status": "error",
+                    "error": "txnNotFound",
+                    "error_message": "Transaction not found."
+                }
+            }
+        """.trimIndent()
+        val response = json.decodeFromString<com.lybia.cryptowallet.models.ripple.RippleTxResponse>(txJson)
+        val result = response.result
+        assertEquals("error", result.status)
+        assertEquals("txnNotFound", result.error)
+        assertFalse(result.validated)
+        assertFalse(result.isConfirmed)
+        assertFalse(result.isDefinitiveFailure)
+    }
+
+    @Test
+    fun parseTxResponse_variousFailureCodes() {
+        val failureCodes = listOf("tecNO_DST", "tecNO_DST_INSUF_XRP", "tecPATH_DRY", "tecINSUFFICIENT_RESERVE")
+        for (code in failureCodes) {
+            val txJson = """
+                {
+                    "result": {
+                        "status": "success",
+                        "validated": true,
+                        "hash": "HASH_$code",
+                        "meta": { "TransactionResult": "$code" }
+                    }
+                }
+            """.trimIndent()
+            val response = json.decodeFromString<com.lybia.cryptowallet.models.ripple.RippleTxResponse>(txJson)
+            assertTrue(response.result.isDefinitiveFailure, "$code should be a definitive failure")
+            assertFalse(response.result.isConfirmed, "$code should not be confirmed")
+        }
     }
 }

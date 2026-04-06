@@ -8,6 +8,7 @@ import com.lybia.cryptowallet.models.ripple.RippleAccountTxResponse
 import com.lybia.cryptowallet.models.ripple.RippleRpcParam
 import com.lybia.cryptowallet.models.ripple.RippleMarker
 import com.lybia.cryptowallet.models.ripple.RippleRpcRequest
+import com.lybia.cryptowallet.models.ripple.RippleTxResponse
 import com.lybia.cryptowallet.models.ripple.RippleSubmitResponse
 import com.lybia.cryptowallet.models.ripple.RippleFeeResponse
 import io.ktor.client.call.body
@@ -190,6 +191,40 @@ class RippleApiService(
             } else null
         } catch (e: Exception) {
             logger.e(e) { "fee RPC failed" }
+            null
+        }
+    }
+
+    /**
+     * Look up a transaction by hash via `tx` JSON-RPC method.
+     * Used for Reliable Transaction Submission — poll until `validated == true`
+     * or until the LastLedgerSequence has passed.
+     *
+     * @param hash Transaction hash (64-char hex, uppercase)
+     * @return RippleTxResponse with `validated` flag and result code, or null on network error
+     */
+    suspend fun getTransaction(hash: String): RippleTxResponse? {
+        return try {
+            val request = RippleRpcRequest(
+                method = "tx",
+                params = listOf(
+                    RippleRpcParam(transaction = hash, binary = false)
+                )
+            )
+            val response = client.post(getRpcUrl()) {
+                timeout {
+                    requestTimeoutMillis = REQUEST_TIMEOUT_MS
+                    socketTimeoutMillis = SOCKET_TIMEOUT_MS
+                }
+                headers { append(HttpHeaders.Accept, "application/json") }
+                contentType(ContentType.Application.Json)
+                setBody(request)
+            }
+            if (response.status.value in 200..299) {
+                response.body<RippleTxResponse>()
+            } else null
+        } catch (e: Exception) {
+            logger.e(e) { "tx RPC failed for hash=$hash" }
             null
         }
     }

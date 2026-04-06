@@ -12,6 +12,7 @@ import com.lybia.cryptowallet.models.ripple.RippleTransactionEntry
 import com.lybia.cryptowallet.services.RippleApiService
 import com.lybia.cryptowallet.wallets.hdwallet.bip44.ACTAddress
 import com.lybia.cryptowallet.wallets.hdwallet.bip44.ACTHDWallet
+import kotlinx.coroutines.delay
 
 /**
  * Ripple/XRP wallet manager for commonMain.
@@ -49,6 +50,11 @@ class RippleManager(
          * 75 ledgers ≈ 5 minutes — matches code cũ, safe during network congestion.
          */
         const val LAST_LEDGER_OFFSET = 75
+
+        /** Max polling attempts for Reliable TX Submission */
+        const val VALIDATION_MAX_ATTEMPTS = 20
+        /** Delay between polls (ms) — ~4 seconds per ledger close */
+        const val VALIDATION_POLL_DELAY_MS = 4_000L
     }
 
     init {
@@ -160,6 +166,9 @@ class RippleManager(
      * @param serviceAddress Optional service fee r-address. If provided with serviceFeeDrops > 0,
      *   a second transaction is sent to this address after the primary TX succeeds.
      * @param serviceFeeDrops Service fee amount in drops (0 = no service fee)
+     * @param awaitValidated If true, polls `tx` RPC until the TX is validated on ledger
+     *   or LastLedgerSequence expires (Reliable Transaction Submission pattern).
+     *   If false (default), returns immediately after submit — faster but less certain.
      * @return TransferResponseModel with txHash on success
      */
     suspend fun sendXrp(
@@ -169,7 +178,8 @@ class RippleManager(
         destinationTag: Long? = null,
         memoText: String? = null,
         serviceAddress: String? = null,
-        serviceFeeDrops: Long = 0L
+        serviceFeeDrops: Long = 0L,
+        awaitValidated: Boolean = false
     ): TransferResponseModel {
         return try {
             val fromAddr = walletAddress
@@ -219,6 +229,8 @@ class RippleManager(
 
             val response = apiService.submitTransaction(signResult.txBlob)
             val result = response?.result
+            val txHash = result?.tx_json?.hash ?: signResult.transactionId
+
             if (result?.engineResult == "tesSUCCESS" || result?.engineResult == "terQUEUED") {
                 // Send service fee as second TX with sequence+1 (fire-and-forget)
                 if (hasServiceFee) {
@@ -227,11 +239,18 @@ class RippleManager(
                         sequence + 1, lastLedgerSeq?.let { it + LAST_LEDGER_OFFSET }
                     )
                 }
-                TransferResponseModel(
-                    success = true,
-                    error = null,
-                    txHash = result.tx_json?.hash ?: signResult.transactionId
-                )
+
+                // Reliable TX Submission: optionally poll until validated
+                if (awaitValidated && lastLedgerSeq != null) {
+                    val validation = awaitValidation(txHash, lastLedgerSeq)
+                    TransferResponseModel(
+                        success = validation.confirmed,
+                        error = validation.error,
+                        txHash = txHash
+                    )
+                } else {
+                    TransferResponseModel(success = true, error = null, txHash = txHash)
+                }
             } else {
                 TransferResponseModel(
                     success = false,
@@ -271,6 +290,109 @@ class RippleManager(
             apiService.submitTransaction(signResult.txBlob)
         } catch (_: Exception) {
             // Service fee is best-effort — don't fail the primary transaction
+        }
+    }
+
+    // ── Reliable Transaction Submission ────────────────────────────────
+
+    /**
+     * Result of awaiting transaction validation.
+     * @param confirmed true if TX is validated on ledger with tesSUCCESS
+     * @param txHash Transaction hash
+     * @param engineResult XRP Ledger result code (e.g. "tesSUCCESS", "tecUNFUNDED_PAYMENT")
+     * @param ledgerIndex Ledger index where TX was validated (null if not yet validated)
+     * @param error Human-readable error message (null on success)
+     */
+    data class ValidationResult(
+        val confirmed: Boolean,
+        val txHash: String,
+        val engineResult: String? = null,
+        val ledgerIndex: Long? = null,
+        val error: String? = null
+    )
+
+    /**
+     * Poll the XRP Ledger until a submitted transaction is validated or definitively fails.
+     *
+     * Implements the "Reliable Transaction Submission" pattern from
+     * https://xrpl.org/reliable-transaction-submission.html
+     *
+     * @param txHash Transaction hash to look up
+     * @param lastLedgerSequence The LastLedgerSequence set on the TX (expiry boundary)
+     * @param maxAttempts Maximum number of poll attempts (default: 20)
+     * @param pollDelayMs Delay between polls in ms (default: 4000ms ≈ 1 ledger close)
+     * @return ValidationResult with confirmation status and details
+     */
+    suspend fun awaitValidation(
+        txHash: String,
+        lastLedgerSequence: Long,
+        maxAttempts: Int = VALIDATION_MAX_ATTEMPTS,
+        pollDelayMs: Long = VALIDATION_POLL_DELAY_MS
+    ): ValidationResult {
+        for (attempt in 1..maxAttempts) {
+            val txResponse = apiService.getTransaction(txHash)
+            val txResult = txResponse?.result
+
+            if (txResult != null) {
+                // TX found and validated → definitive result
+                if (txResult.isConfirmed) {
+                    return ValidationResult(
+                        confirmed = true,
+                        txHash = txHash,
+                        engineResult = txResult.meta?.transactionResult,
+                        ledgerIndex = txResult.ledgerIndex
+                    )
+                }
+
+                // TX found but failed permanently (tec/tem/tef on validated ledger)
+                if (txResult.isDefinitiveFailure) {
+                    return ValidationResult(
+                        confirmed = false,
+                        txHash = txHash,
+                        engineResult = txResult.meta?.transactionResult,
+                        ledgerIndex = txResult.ledgerIndex,
+                        error = "Transaction failed: ${txResult.meta?.transactionResult}"
+                    )
+                }
+            }
+
+            // Check if LastLedgerSequence has passed → TX expired
+            val currentLedger = getCurrentLedgerIndexSafe()
+            if (currentLedger > 0 && currentLedger > lastLedgerSequence) {
+                // If TX was not found after its expiry ledger, it's definitively failed
+                if (txResult == null || txResult.error == "txnNotFound") {
+                    return ValidationResult(
+                        confirmed = false,
+                        txHash = txHash,
+                        error = "Transaction expired: LastLedgerSequence $lastLedgerSequence passed (current: $currentLedger)"
+                    )
+                }
+            }
+
+            // Wait before next poll
+            if (attempt < maxAttempts) {
+                delay(pollDelayMs)
+            }
+        }
+
+        // Exhausted all attempts without a definitive result
+        return ValidationResult(
+            confirmed = false,
+            txHash = txHash,
+            error = "Validation timeout after $maxAttempts attempts"
+        )
+    }
+
+    /**
+     * Get current ledger index without throwing. Returns 0 on failure.
+     */
+    private suspend fun getCurrentLedgerIndexSafe(): Long {
+        return try {
+            val addr = walletAddress ?: return 0L
+            val info = apiService.getAccountInfo(addr)
+            info?.result?.ledgerCurrentIndex ?: 0L
+        } catch (_: Exception) {
+            0L
         }
     }
 

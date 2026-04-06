@@ -44,6 +44,7 @@ Chào mừng bạn đến với hệ thống tài liệu kỹ thuật của dự
 - [Đặc tả Cardano Byron](chains/cardano-byron.md) — Icarus V2, Base58, CBOR, ed25519-bip32
 - [Đặc tả Cardano Shelley](chains/cardano-shelley.md) — CIP-1852, Bech32, staking, native token
 - [Tích hợp Cardano & Midnight](chains/cardano-midnight.md)
+- [Đặc tả Centrality (CENNZ)](chains/centrality.md) — SS58, SCALE codec, Sr25519, Substrate extrinsic
 
 ---
 
