@@ -36,16 +36,35 @@ object XrpTransactionSigner {
     private const val FIELD_TXN_SIGNATURE = 4      // VL (Blob)
     private const val FIELD_ACCOUNT = 1            // Account
     private const val FIELD_DESTINATION = 3        // Account
-    private const val FIELD_MEMOS = 9              // STArray (field 9, type 15)
+
+    // Memo STArray/STObject markers (XRP Ledger serialization spec)
+    private const val ST_OBJECT_END = 0xE1.toByte()  // End of STObject
+    private const val ST_ARRAY_END = 0xF1.toByte()   // End of STArray
+    private val MEMO_ARRAY_START = byteArrayOf(0xF9.toByte())   // STArray field 9 (Memos)
+    private val MEMO_OBJECT_START = byteArrayOf(0xEA.toByte())  // STObject field 10 (Memo)
+    private val MEMO_DATA_HEADER = byteArrayOf(0x7D.toByte())   // VL field 13, type 7 (MemoData)
+    private val MEMO_TYPE_HEADER = byteArrayOf(0x7C.toByte())   // VL field 12, type 7 (MemoType)
 
     // Transaction type: Payment = 0
     private const val TT_PAYMENT = 0
 
-    // Hash prefix for signing
+    // Hash prefixes
     private val HASH_PREFIX_SIGN = byteArrayOf(0x53, 0x54, 0x58, 0x00) // "STX\0"
+    private val HASH_PREFIX_TX_ID = byteArrayOf(0x54, 0x58, 0x4E, 0x00) // "TXN\0"
+
+    /** Maximum XRP supply in drops (100 billion XRP) */
+    private const val MAX_DROPS = 100_000_000_000_000_000L // 10^17
 
     /**
-     * Build, serialize, sign, and return a hex-encoded XRP Payment transaction blob.
+     * Result of signing a Payment transaction.
+     * @param txBlob Hex-encoded signed transaction blob for submit RPC
+     * @param transactionId Locally computed transaction hash (SHA-512Half of TXN\0 + signed blob)
+     */
+    data class SignResult(val txBlob: String, val transactionId: String)
+
+    /**
+     * Build, serialize, sign, and return a hex-encoded XRP Payment transaction blob
+     * together with a locally computed transaction ID.
      *
      * @param privateKey 32-byte secp256k1 private key
      * @param publicKey 33-byte compressed secp256k1 public key
@@ -56,7 +75,8 @@ object XrpTransactionSigner {
      * @param sequence Account sequence number
      * @param destinationTag Optional destination tag
      * @param lastLedgerSequence Optional last ledger sequence for expiry
-     * @return Hex-encoded signed transaction blob
+     * @param memoText Optional memo text (will be hex-encoded as MemoData with MemoType "text/plain")
+     * @return SignResult containing txBlob and transactionId
      */
     fun signPayment(
         privateKey: ByteArray,
@@ -67,14 +87,23 @@ object XrpTransactionSigner {
         feeDrops: Long,
         sequence: Long,
         destinationTag: Long? = null,
-        lastLedgerSequence: Long? = null
-    ): String {
+        lastLedgerSequence: Long? = null,
+        memoText: String? = null
+    ): SignResult {
+        // Input validation
+        require(privateKey.size == 32) { "Private key must be 32 bytes, got ${privateKey.size}" }
+        require(publicKey.size == 33) { "Public key must be 33 bytes (compressed), got ${publicKey.size}" }
+        require(amountDrops in 1..MAX_DROPS) { "Amount must be 1..$MAX_DROPS drops, got $amountDrops" }
+        require(feeDrops in 1..1_000_000_000L) { "Fee must be 1..1,000,000,000 drops, got $feeDrops" }
+        require(sequence >= 1) { "Sequence must be >= 1, got $sequence" }
+
         // Build serialized fields for signing (without TxnSignature)
         val fields = buildPaymentFields(
             publicKey, account, destination,
             amountDrops, feeDrops, sequence,
             destinationTag, lastLedgerSequence,
-            signature = null
+            signature = null,
+            memoText = memoText
         )
 
         // Hash: SHA-512Half(HASH_PREFIX_SIGN + serialized)
@@ -90,10 +119,22 @@ object XrpTransactionSigner {
             publicKey, account, destination,
             amountDrops, feeDrops, sequence,
             destinationTag, lastLedgerSequence,
-            signature = derSig
+            signature = derSig,
+            memoText = memoText
         )
 
-        return signedFields.toHexString()
+        val txBlob = signedFields.toHexString()
+        val transactionId = computeTransactionId(signedFields)
+
+        return SignResult(txBlob, transactionId)
+    }
+
+    /**
+     * Compute the transaction ID (hash) from the signed transaction bytes.
+     * TransactionID = SHA-512Half(0x54584E00 + signedBlob)
+     */
+    fun computeTransactionId(signedBlob: ByteArray): String {
+        return sha512Half(HASH_PREFIX_TX_ID + signedBlob).toHexString().uppercase()
     }
 
     // ── Serialization ───────────────────────────────────────────────
@@ -107,7 +148,8 @@ object XrpTransactionSigner {
         sequence: Long,
         destinationTag: Long?,
         lastLedgerSequence: Long?,
-        signature: ByteArray?
+        signature: ByteArray?,
+        memoText: String? = null
     ): ByteArray {
         var result = byteArrayOf()
 
@@ -161,6 +203,44 @@ object XrpTransactionSigner {
         result += encodeFieldHeader(ST_ACCOUNT, FIELD_DESTINATION)
         result += encodeAccount(destination)
 
+        // Memos (STArray) — optional
+        if (!memoText.isNullOrEmpty()) {
+            result += encodeMemos(memoText)
+        }
+
+        return result
+    }
+
+    /**
+     * Encode Memos as an STArray containing one Memo STObject.
+     * Format: STArray(Memos) → STObject(Memo) → MemoType + MemoData → EndObject → EndArray
+     *
+     * MemoType = "text/plain" (hex-encoded)
+     * MemoData = memoText bytes (UTF-8, hex-encoded in the field)
+     *
+     * Reference: https://xrpl.org/transaction-common-fields.html#memos-field
+     */
+    private fun encodeMemos(memoText: String): ByteArray {
+        val memoDataBytes = memoText.encodeToByteArray()
+        val memoTypeBytes = "text/plain".encodeToByteArray()
+
+        var result = byteArrayOf()
+        // STArray begin — Memos field (type 15, field 9 → 0xF9)
+        result += MEMO_ARRAY_START
+        // STObject begin — Memo field (type 14, field 10 → 0xEA)
+        result += MEMO_OBJECT_START
+        // MemoType (VL field 12, type 7 → 0x7C)
+        result += MEMO_TYPE_HEADER
+        result += encodeVLLength(memoTypeBytes.size)
+        result += memoTypeBytes
+        // MemoData (VL field 13, type 7 → 0x7D)
+        result += MEMO_DATA_HEADER
+        result += encodeVLLength(memoDataBytes.size)
+        result += memoDataBytes
+        // STObject end
+        result += ST_OBJECT_END
+        // STArray end
+        result += ST_ARRAY_END
         return result
     }
 

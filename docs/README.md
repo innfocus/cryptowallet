@@ -36,6 +36,8 @@ Chào mừng bạn đến với hệ thống tài liệu kỹ thuật của dự
 - [Phân tích Service Fee](api/service-fee-analysis.md)
 
 ### ⛓️ Blockchain Details
+- [Đặc tả Bitcoin (BTC)](chains/bitcoin.md) — BIP-32/39/44/84, SegWit, UTXO, fee estimation
+- [Đặc tả Ripple (XRP)](chains/ripple.md) — Base58Ripple, SHA-512Half, JSON-RPC, Destination Tag
 - [Tích hợp TON (The Open Network)](chains/ton.md)
 - [Tích hợp Cardano & Midnight](chains/cardano-midnight.md)
 

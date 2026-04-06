@@ -42,6 +42,13 @@ class RippleManager(
         const val XRP_DROPS_PER_UNIT = 1_000_000.0
         /** Default fee in drops (12 drops = 0.000012 XRP) */
         const val DEFAULT_FEE_DROPS = 12L
+        /** Base reserve required for an XRP account (10 XRP) */
+        const val BASE_RESERVE_DROPS = 10_000_000L
+        /**
+         * LastLedgerSequence offset from current ledger index.
+         * 75 ledgers ≈ 5 minutes — matches code cũ, safe during network congestion.
+         */
+        const val LAST_LEDGER_OFFSET = 75
     }
 
     init {
@@ -147,15 +154,17 @@ class RippleManager(
      *
      * @param toAddress Destination r-address
      * @param amountDrops Amount in drops (1 XRP = 1,000,000 drops)
-     * @param feeDrops Fee in drops (default: 12 drops)
+     * @param feeDrops Fee in drops (0 = auto estimate)
      * @param destinationTag Optional destination tag (UInt32)
+     * @param memoText Optional memo text
      * @return TransferResponseModel with txHash on success
      */
     suspend fun sendXrp(
         toAddress: String,
         amountDrops: Long,
         feeDrops: Long = 0L,
-        destinationTag: Long? = null
+        destinationTag: Long? = null,
+        memoText: String? = null
     ): TransferResponseModel {
         return try {
             val fromAddr = walletAddress
@@ -164,11 +173,29 @@ class RippleManager(
             // Use dynamic fee if not explicitly provided (0 = auto)
             val actualFee = if (feeDrops > 0) feeDrops else estimateFeeDynamic()
 
-            val sequence = getSequence()
-            val ledgerIndex = getCurrentLedgerIndex()
-            val lastLedgerSeq = if (ledgerIndex > 0) ledgerIndex + 20 else null
+            // Single RPC call for both sequence and ledger index (BUG-7 fix)
+            val accountInfo = apiService.getAccountInfo(fromAddr)
+                ?: return TransferResponseModel(false, "Failed to get account info", null)
+            val accountData = accountInfo.result.accountData
+                ?: return TransferResponseModel(false, "Account not found on ledger", null)
+            val sequence = accountData.sequence
+            val ledgerIndex = accountInfo.result.ledgerCurrentIndex ?: 0L
+            val lastLedgerSeq = if (ledgerIndex > 0) ledgerIndex + LAST_LEDGER_OFFSET else null
 
-            val txBlob = XrpTransactionSigner.signPayment(
+            // Balance validation: must cover amount + fee + 10 XRP reserve (BUG-3 fix)
+            val balanceDrops = accountData.balance.toLongOrNull() ?: 0L
+            val requiredDrops = amountDrops + actualFee + BASE_RESERVE_DROPS
+            if (balanceDrops < requiredDrops) {
+                return TransferResponseModel(
+                    false,
+                    "Insufficient funds: balance=${balanceDrops / XRP_DROPS_PER_UNIT} XRP, " +
+                            "required=${requiredDrops / XRP_DROPS_PER_UNIT} XRP " +
+                            "(amount + fee + 10 XRP reserve)",
+                    null
+                )
+            }
+
+            val signResult = XrpTransactionSigner.signPayment(
                 privateKey = privateKeyBytes,
                 publicKey = publicKeyBytes,
                 account = fromAddr,
@@ -177,16 +204,18 @@ class RippleManager(
                 feeDrops = actualFee,
                 sequence = sequence,
                 destinationTag = destinationTag,
-                lastLedgerSequence = lastLedgerSeq
+                lastLedgerSequence = lastLedgerSeq,
+                memoText = memoText
             )
 
-            val response = apiService.submitTransaction(txBlob)
+            val response = apiService.submitTransaction(signResult.txBlob)
             val result = response?.result
             if (result?.engineResult == "tesSUCCESS" || result?.engineResult == "terQUEUED") {
                 TransferResponseModel(
                     success = true,
                     error = null,
-                    txHash = result.tx_json?.hash
+                    // Prefer server hash, fallback to locally computed TX ID
+                    txHash = result.tx_json?.hash ?: signResult.transactionId
                 )
             } else {
                 TransferResponseModel(
