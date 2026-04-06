@@ -409,14 +409,23 @@ class CardanoManager(
             builder.addOutput(serviceAddressBytes, serviceFeeLovelace)
         }
 
-        // Change output
-        val change = collected - amount - fee - serviceFeeTotal
-        if (change > 0) {
+        // Change output: dust (<1 ADA) is absorbed into fee to keep output above MIN_UTXO
+        val rawChange = collected - amount - fee - serviceFeeTotal
+        val effectiveFee: Long
+        val actualChange: Long
+        if (rawChange > 0L && rawChange < CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
+            effectiveFee = fee + rawChange  // absorb dust into fee
+            actualChange = 0L
+        } else {
+            effectiveFee = fee
+            actualChange = rawChange
+        }
+        if (actualChange > 0L) {
             val fromAddressBytes = addressToBytes(fromAddress)
-            builder.addOutput(fromAddressBytes, change)
+            builder.addOutput(fromAddressBytes, actualChange)
         }
 
-        builder.setFee(fee)
+        builder.setFee(effectiveFee)
         builder.setTtl(ttl)
 
         val body = builder.build()
@@ -431,7 +440,136 @@ class CardanoManager(
             .addVKeyWitness(paymentPub, signature)
             .build()
 
-        return CardanoSignedTransaction(body, witnessSet)
+        val signedTx = CardanoSignedTransaction(body, witnessSet)
+        val txBytes = signedTx.serialize()
+        if (txBytes.size > CardanoTransactionBuilder.MAX_TX_SIZE_BYTES) {
+            throw CardanoError.ApiError(
+                statusCode = null,
+                message = "Transaction too large: ${txBytes.size} bytes (max ${CardanoTransactionBuilder.MAX_TX_SIZE_BYTES})"
+            )
+        }
+        return signedTx
+    }
+
+    // ── Byron Transaction (Bug #5-#8 fix) ──────────────────────────────────
+
+    /**
+     * Build and sign a Byron ADA transfer transaction.
+     *
+     * Byron UTXOs (from addresses starting with "Ae2") require:
+     * - Icarus ed25519-bip32 signing (NOT RFC 8032 / ton-kotlin Ed25519)
+     * - BootstrapWitness (CBOR key 2) with pubKey + signature + chainCode + attributes
+     *
+     * Use this when the sender has funds in an old Byron address.
+     * For Shelley addresses use [buildAndSignTransaction].
+     *
+     * @param toAddress   Destination address (Byron or Shelley)
+     * @param amount      Amount to send in lovelace
+     * @param fee         Network fee in lovelace
+     * @param fromIndex   Byron address derivation index (default 0)
+     * @param serviceAddress Optional service fee address
+     * @param serviceFeeLovelace Optional service fee amount in lovelace
+     */
+    suspend fun buildAndSignByronTransaction(
+        toAddress: String,
+        amount: Long,
+        fee: Long,
+        fromIndex: Int = 0,
+        serviceAddress: String? = null,
+        serviceFeeLovelace: Long = 0
+    ): CardanoSignedTransaction {
+        val hasServiceFee = !serviceAddress.isNullOrBlank() && serviceFeeLovelace > 0
+        logger.d { "buildAndSignByronTransaction: $amount lovelace to $toAddress, fee=$fee, index=$fromIndex" }
+
+        // Derive Byron key at m/44'/1815'/0'/0/fromIndex
+        val (pubKey32, chainCode32, extKey64) = deriveByronKey(fromIndex)
+        val fromAddress = CardanoAddress.createByronAddress(pubKey32, chainCode32)
+
+        // Fetch UTXOs for the Byron address
+        val apiUtxos = apiService.getUtxos(listOf(fromAddress))
+        val utxos = apiUtxos.map { apiUtxo ->
+            val lovelace = apiUtxo.amount
+                .filter { it.unit == "lovelace" }
+                .sumOf { it.quantity.toLongOrNull() ?: 0L }
+            CardanoUtxo(txHash = apiUtxo.txHash, index = apiUtxo.txIndex, lovelace = lovelace)
+        }
+
+        // UTXO selection
+        val serviceFeeTotal = if (hasServiceFee) serviceFeeLovelace else 0L
+        val requiredTotal = amount + fee + serviceFeeTotal
+        val sorted = utxos.sortedByDescending { it.lovelace }
+        val selected = mutableListOf<CardanoUtxo>()
+        var collected = 0L
+        for (utxo in sorted) {
+            if (collected >= requiredTotal) break
+            selected.add(utxo)
+            collected += utxo.lovelace
+        }
+        if (collected < requiredTotal) {
+            throw CardanoError.ApiError(
+                statusCode = null,
+                message = "Insufficient ADA: available=$collected, required=$requiredTotal"
+            )
+        }
+
+        // Get TTL
+        val currentBlock = apiService.getCurrentBlock()
+        val ttl = currentBlock.slot + 7200
+
+        // Build transaction body
+        val builder = CardanoTransactionBuilder()
+        for (utxo in selected) {
+            builder.addInput(utxo.txHash, utxo.index)
+        }
+
+        val toAddressBytes = addressToBytes(toAddress)
+        builder.addOutput(toAddressBytes, amount)
+
+        if (hasServiceFee) {
+            val serviceAddressBytes = addressToBytes(serviceAddress!!)
+            builder.addOutput(serviceAddressBytes, serviceFeeLovelace)
+        }
+
+        // Change output: dust (<1 ADA) is absorbed into fee to keep output above MIN_UTXO
+        val rawChange = collected - amount - fee - serviceFeeTotal
+        val effectiveFee: Long
+        val actualChange: Long
+        if (rawChange > 0L && rawChange < CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
+            effectiveFee = fee + rawChange  // absorb dust into fee
+            actualChange = 0L
+        } else {
+            effectiveFee = fee
+            actualChange = rawChange
+        }
+        if (actualChange > 0L) {
+            val fromAddressBytes = addressToBytes(fromAddress)
+            builder.addOutput(fromAddressBytes, actualChange)
+        }
+
+        builder.setFee(effectiveFee)
+        builder.setTtl(ttl)
+
+        val body = builder.build()
+
+        // Sign using Icarus ed25519-bip32 — NOT standard RFC 8032
+        val txHash = body.getHash()
+        val signature = Ed25519Icarus.sign(extKey64, txHash)
+
+        // Bootstrap witness: [pubKey32, sig64, chainCode32, 0xa0 (CBOR empty map)]
+        val attributes = byteArrayOf(0xa0.toByte())
+        val witnessSet = CardanoWitnessBuilder()
+            .addBootstrapWitness(pubKey32, signature, chainCode32, attributes)
+            .build()
+
+        val signedTx = CardanoSignedTransaction(body, witnessSet)
+        val txBytes = signedTx.serialize()
+        if (txBytes.size > CardanoTransactionBuilder.MAX_TX_SIZE_BYTES) {
+            throw CardanoError.ApiError(
+                statusCode = null,
+                message = "Transaction too large: ${txBytes.size} bytes (max ${CardanoTransactionBuilder.MAX_TX_SIZE_BYTES})"
+            )
+        }
+        return signedTx
     }
 
     // ── IStakingManager implementation ──────────────────────────────────

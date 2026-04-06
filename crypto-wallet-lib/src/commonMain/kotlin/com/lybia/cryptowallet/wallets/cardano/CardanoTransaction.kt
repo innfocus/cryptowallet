@@ -225,7 +225,10 @@ class CardanoTransactionBuilder {
     private val certificates = mutableListOf<CardanoCertificate>()
 
     fun addInput(txHash: ByteArray, index: Int): CardanoTransactionBuilder {
-        inputs.add(CardanoTransactionInput(txHash, index))
+        val input = CardanoTransactionInput(txHash, index)
+        if (!inputs.contains(input)) {
+            inputs.add(input)
+        }
         return this
     }
 
@@ -234,6 +237,9 @@ class CardanoTransactionBuilder {
     }
 
     fun addOutput(addressBytes: ByteArray, lovelace: Long): CardanoTransactionBuilder {
+        require(lovelace >= MIN_UTXO_LOVELACE) {
+            "Output amount $lovelace lovelace is below minimum UTXO ($MIN_UTXO_LOVELACE lovelace)"
+        }
         outputs.add(CardanoTransactionOutput(addressBytes, lovelace))
         return this
     }
@@ -243,6 +249,9 @@ class CardanoTransactionBuilder {
         lovelace: Long,
         assets: Map<ByteArray, Map<ByteArray, Long>>
     ): CardanoTransactionBuilder {
+        require(lovelace >= MIN_UTXO_LOVELACE) {
+            "Multi-asset output ADA $lovelace lovelace is below minimum UTXO ($MIN_UTXO_LOVELACE lovelace)"
+        }
         outputs.add(CardanoTransactionOutput(addressBytes, lovelace, assets))
         return this
     }
@@ -283,6 +292,12 @@ class CardanoTransactionBuilder {
     }
 
     companion object {
+        /** Minimum lovelace per output (IOHK protocol parameter). */
+        const val MIN_UTXO_LOVELACE = 1_000_000L
+
+        /** Maximum serialised transaction size in bytes (IOHK protocol parameter). */
+        const val MAX_TX_SIZE_BYTES = 16_384
+
         private fun hexToBytes(hex: String): ByteArray {
             val len = hex.length / 2
             val result = ByteArray(len)

@@ -2,6 +2,7 @@ package com.lybia.cryptowallet.wallets.cardano
 
 import com.ionspin.kotlin.bignum.integer.BigInteger
 import com.ionspin.kotlin.bignum.integer.Sign
+import korlibs.crypto.SHA512
 
 /**
  * Ed25519 public key derivation for Icarus (ed25519-bip32) extended keys.
@@ -20,6 +21,11 @@ internal object Ed25519Icarus {
     // Ed25519 field prime p = 2^255 − 19
     private val P = BigInteger.parseString(
         "7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffed", 16
+    )
+
+    // Ed25519 group order l = 2^252 + 27742317777372353535851937790883648493
+    private val L = BigInteger.parseString(
+        "1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed", 16
     )
 
     // Twisted Edwards constant d = −121665 * 121666^{−1} mod p
@@ -48,7 +54,56 @@ internal object Ed25519Icarus {
         return encodePoint(x, y)
     }
 
+    /**
+     * Sign a message using the Icarus ed25519-bip32 signing algorithm.
+     *
+     * This differs from RFC 8032 in two ways:
+     *  - Scalar = kL (already clamped) — no SHA-512 expansion of a seed
+     *  - Nonce prefix = kR (second half of extended key), not SHA-512(seed)[32..63]
+     *
+     * Algorithm:
+     *  1. r = SHA512(kR || message) interpreted as little-endian integer, mod L
+     *  2. R = r * B
+     *  3. A = publicKeyFromScalar(kL)
+     *  4. k = SHA512(R_enc || A || message) mod L
+     *  5. S = (r + k * scalar) mod L
+     *  6. return R_enc (32 bytes) || S_enc (32 bytes)
+     *
+     * @param extKey64 64-byte Icarus extended key (kL[32] ‖ kR[32])
+     * @param message  arbitrary-length message to sign (typically 32-byte tx hash)
+     * @return 64-byte signature
+     */
+    fun sign(extKey64: ByteArray, message: ByteArray): ByteArray {
+        require(extKey64.size == 64) { "extKey must be 64 bytes, got ${extKey64.size}" }
+        val kL = extKey64.copyOfRange(0, 32)
+        val kR = extKey64.copyOfRange(32, 64)
+        val scalar = fromLittleEndian(kL)
+
+        // 1. Nonce r = SHA512(kR || message) mod L
+        val rHash = sha512(kR + message)
+        val r = fromLittleEndian(rHash).mod(L)
+
+        // 2. R = r * B, encoded
+        val (rx, ry) = scalarMultBase(r)
+        val rEnc = encodePoint(rx, ry)      // 32 bytes
+
+        // 3. Public key A
+        val aEnc = publicKeyFromScalar(kL)  // 32 bytes
+
+        // 4. Challenge k = SHA512(R || A || message) mod L
+        val kHash = sha512(rEnc + aEnc + message)
+        val k = fromLittleEndian(kHash).mod(L)
+
+        // 5. S = (r + k * scalar) mod L
+        val s = (r + k * scalar).mod(L)
+        val sEnc = toLittleEndian32(s)      // 32 bytes
+
+        return rEnc + sEnc
+    }
+
     // ── Private helpers ───────────────────────────────────────────────────────
+
+    private fun sha512(data: ByteArray): ByteArray = SHA512.digest(data).bytes
 
     private fun fromLittleEndian(le: ByteArray): BigInteger {
         return BigInteger.fromByteArray(le.reversedArray(), Sign.POSITIVE)

@@ -1,8 +1,8 @@
 # Cardano Byron Address Management — Technical Specification
 
-**Version:** 1.1  
-**Status:** Fixed ✅ — Build verified (`./gradlew :crypto-wallet-lib:compileAndroidMain` SUCCESS)  
-**Scope:** `commonMain` — Icarus-style Byron address generation only
+**Version:** 1.4  
+**Status:** Address generation ✅ Fixed | Transaction signing ✅ Fixed | IOHK protocol gaps ✅ Fixed | Build verified  
+**Scope:** `commonMain` — Icarus-style Byron address generation + transaction signing
 
 ---
 
@@ -131,7 +131,80 @@ publicKey = encodePoint(A)  // 32 bytes
 
 **⚠️ Nguy hiểm:** `PrivateKeyEd25519(seed)` từ ton-kotlin sẽ SHA-512 hash `seed` trước khi multiply. Với Icarus keys, `kL` ĐÃ là scalar rồi — không được hash lại! Phải dùng `Ed25519Icarus.publicKeyFromScalar(kL)`.
 
-### 2.6 Byron Address Encoding
+### 2.6 Byron Transaction Signing (Icarus Ed25519)
+
+Byron transactions spending UTXOs từ Byron addresses phải dùng **Bootstrap witnesses** (key 2 trong CBOR witness set), không phải VKey witnesses (key 0 dành cho Shelley).
+
+#### 2.6.1 Signing algorithm (ed25519-bip32)
+
+```
+sign(extKey64, message):
+    kL = extKey64[0..31]   // pre-clamped scalar (KHÔNG hash SHA-512)
+    kR = extKey64[32..63]  // nonce generation material (prefix)
+
+    scalar = fromLE(kL)    // interpret as little-endian integer
+
+    // 1. Nonce r (deterministic, from kR)
+    r_bytes = SHA512(kR || message)  // 64 bytes
+    r_int   = fromLE(r_bytes) mod L  // L = Ed25519 group order
+
+    // 2. Commitment R
+    R     = r_int * BasePoint        // EC scalar multiplication
+    R_enc = encodePoint(R)           // 32 bytes compressed
+
+    // 3. Challenge k
+    A     = publicKeyFromScalar(kL)  // 32 bytes — Icarus public key
+    k     = SHA512(R_enc || A || message)
+    k_int = fromLE(k) mod L
+
+    // 4. Signature S
+    S     = (r_int + k_int * scalar) mod L
+    S_enc = toLE32(S)               // 32 bytes
+
+    return R_enc || S_enc           // 64 bytes total
+```
+
+**Khác với RFC 8032 ở chỗ:**
+- RFC 8032: `scalar = clamp(SHA512(seed)[0..31])` — hash seed rồi lấy nửa đầu
+- Icarus: `scalar = kL` trực tiếp — kL ĐÃ là scalar pre-clamped, không hash thêm
+- Prefix cho nonce: RFC 8032 dùng `SHA512(seed)[32..63]`, Icarus dùng `kR` (extKey[32..63])
+
+#### 2.6.2 Bootstrap Witness structure
+
+```
+BootstrapWitness = CBOR array [
+    pubKey32    : bytes  // Ed25519 public key (Icarus, 32 bytes)
+    signature64 : bytes  // Icarus Ed25519 signature (64 bytes)
+    chainCode32 : bytes  // Icarus chain code (32 bytes) — from derivation
+    attributes  : bytes  // CBOR empty map = 0xa0
+]
+```
+
+Witness set CBOR map:
+```
+{
+    2: [BootstrapWitness, ...]   // key 2 = Bootstrap witnesses (Byron)
+    // key 0 = VKey witnesses (Shelley) — KHÔNG dùng cho Byron
+}
+```
+
+#### 2.6.3 Full Byron transaction flow
+
+```
+1. Derive Byron key: (extKey64, chainCode32) = IcarusKeyDerivation.deriveByronAddressKey(mnemonic, index)
+2. Derive public key: pubKey32 = IcarusKeyDerivation.publicKeyFromExtended(extKey64)
+3. Build tx body (CBOR map: inputs, outputs, fee, ttl)
+4. TxID = Blake2b-256(CBOR_encode(tx_body_map))  → 32 bytes (raw, not hex)
+5. Sign:   sig64 = Ed25519Icarus.sign(extKey64, txID_bytes)
+6. Build witness: BootstrapWitness(pubKey32, sig64, chainCode32, 0xa0)
+7. Build WitnessSet: {2: [BootstrapWitness]}
+8. Signed tx: CBOR array [tx_body, witness_set, null]
+9. Submit: POST txBytes to Blockfrost /tx/submit (Content-Type: application/cbor)
+```
+
+---
+
+### 2.7 Byron Address Encoding
 
 ```
 xpub = publicKey (32 bytes) || chainCode (32 bytes)  // 64 bytes total
@@ -179,14 +252,14 @@ return Base58.encode(CBOR.encode(byronAddr))
 
 ```
 commonMain/kotlin/com/lybia/cryptowallet/wallets/cardano/
-├── CardanoManager.kt       — Entry point, getByronAddress(), getShelleyAddress()
-├── IcarusKeyDerivation.kt  — Master key + child key derivation (Icarus V2)
-├── Ed25519Icarus.kt        — Ed25519 scalar multiplication (pre-clamped, no SHA-512)
-├── Ed25519.kt              — Standard Ed25519 (for Shelley/TON — uses SHA-512)
-└── CardanoAddress.kt       — Address encoding/decoding (Byron + Shelley)
+├── CardanoManager.kt          — Entry point; getByronAddress(), buildAndSignByronTransaction()
+├── IcarusKeyDerivation.kt     — Master key + child key derivation (Icarus V2)
+├── Ed25519Icarus.kt           — Icarus Ed25519: publicKeyFromScalar() + sign(extKey64, msg)
+├── Ed25519.kt                 — Standard Ed25519 (for Shelley/TON — uses SHA-512)
+└── CardanoAddress.kt          — Address encoding/decoding (Byron + Shelley)
 
 commonTest/kotlin/com/lybia/cryptowallet/cardano/
-└── CardanoByronKeyTest.kt  — Unit tests cho Icarus derivation
+└── CardanoByronKeyTest.kt     — 45 unit tests (address derivation + Icarus signing)
 ```
 
 ---
@@ -233,13 +306,141 @@ commonTest/kotlin/com/lybia/cryptowallet/cardano/
 
 ---
 
+## 5b. Bug Fixes — Transaction Signing (✅ Đã fix)
+
+> Phần này document 4 bugs trong signing Byron transactions, phát hiện qua so sánh với source cũ tại `/Users/thanhphat/GitHub/demo/cryptowallet/crypto-wallet-lib/src/androidMain/kotlin/com/lybia/cryptowallet/coinkits/cardano/`.
+
+### Bug #5 — Sai loại witness: VKey thay vì Bootstrap ✅ Đã fix
+
+| | Code location | Triệu chứng |
+|---|---|---|
+| **Sai** | `CardanoManager.kt:428-433` | `CardanoWitnessBuilder().addVKeyWitness(pubKey, sig)` → key 0 trong CBOR |
+| **Đúng** | — | `CardanoWitnessBuilder().addBootstrapWitness(pubKey, sig, chainCode, 0xa0)` → key 2 |
+
+**Nguyên nhân gốc:** Developer dùng Shelley witness (VKeyWitness, key 0) cho Byron UTXOs. Cardano node sẽ **từ chối** transaction vì không thể verify chữ ký Byron mà không có chainCode và attributes.
+
+**So sánh với source cũ:**
+```kotlin
+// Source cũ (đúng) — TransactionWitnessSet.kt
+class TransactionWitnessSet(val bootstraps: Array<TxWitness>) {
+    fun serializer() = CborBuilder().addMap()
+        .putArray(2)   // key 2 = Bootstrap witnesses
+        ...
+}
+
+// Source mới (sai) — CardanoWitnessBuilder.kt
+entries.add(CborValue.CborUInt(0u) to ...)  // key 0 = VKey witnesses (Shelley only)
+```
+
+---
+
+### Bug #6 — Sai thuật toán ký: RFC 8032 thay vì Icarus Ed25519 ✅ Đã fix
+
+| | Code location | Triệu chứng |
+|---|---|---|
+| **Sai** | `CardanoManager.kt:427` | `ed25519Sign(paymentPriv, txHash)` → ton-kotlin RFC 8032 |
+| **Đúng** | — | `Ed25519Icarus.sign(extKey64, txHash)` → Icarus ed25519-bip32 |
+
+**Chi tiết khác biệt:**
+
+| Bước | RFC 8032 (sai) | Icarus ed25519-bip32 (đúng) |
+|---|---|---|
+| Scalar | `SHA512(seed32)[0..31]` clamped | `kL` trực tiếp (đã clamped) |
+| Prefix cho nonce | `SHA512(seed32)[32..63]` | `kR = extKey64[32..63]` |
+| `r` | `SHA512(prefix \|\| msg) mod L` | `SHA512(kR \|\| msg) mod L` |
+| S | `(r + k * scalar) mod L` | `(r + k * scalar) mod L` |
+
+**So sánh với source cũ:**
+```kotlin
+// Source cũ (đúng) — CarKeyPair.sign() dùng 64-byte extended key
+val scalar = BigInteger(1, privBytes.copyOfRange(0, 32).reversedArray())  // kL directly
+val prefix = privBytes.copyOfRange(32, 64)  // kR as prefix
+// r = SHA512(prefix || message)
+```
+
+---
+
+### Bug #7 — Thiếu hàm `Ed25519Icarus.sign()` ✅ Đã fix
+
+| | Trạng thái |
+|---|---|
+| **Cũ** | `Ed25519Icarus.kt` chỉ có `publicKeyFromScalar()` — không có `sign()` |
+| **Đã fix** | `fun sign(extKey64: ByteArray, message: ByteArray): ByteArray` — thêm vào `Ed25519Icarus.kt` |
+
+**Pseudo-code cần implement:**
+```kotlin
+// Thêm vào Ed25519Icarus.kt
+fun sign(extKey64: ByteArray, message: ByteArray): ByteArray {
+    require(extKey64.size == 64)
+    val kL = extKey64.copyOfRange(0, 32)
+    val kR = extKey64.copyOfRange(32, 64)
+    val scalar = fromLittleEndian(kL)
+
+    // Nonce r
+    val rHash = sha512(kR + message)
+    val r = fromLittleEndian(rHash).mod(L)
+
+    // R = r * B
+    val (rx, ry) = scalarMultBase(r)
+    val rEnc = encodePoint(rx, ry)   // 32 bytes
+
+    // Public key A
+    val aEnc = publicKeyFromScalar(kL)  // 32 bytes
+
+    // Challenge k
+    val kHash = sha512(rEnc + aEnc + message)
+    val k = fromLittleEndian(kHash).mod(L)
+
+    // S = (r + k * scalar) mod L
+    val s = (r + k * scalar).mod(L)
+    val sEnc = toLittleEndian32(s)   // 32 bytes
+
+    return rEnc + sEnc   // 64 bytes
+}
+```
+
+Cần thêm:
+- `L` (Ed25519 group order): `1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed` (hex)
+- SHA-512 utility function (platform-specific actual implementation)
+
+---
+
+### Bug #8 — `buildAndSignTransaction` dùng sai key cho Byron UTXOs ✅ Đã fix
+
+| | Code location | Triệu chứng |
+|---|---|---|
+| **Sai** | `CardanoManager.kt` (cũ) | `derivePaymentKey(0, 0)` → SLIP-0010 32-byte key |
+| **Đã fix** | `CardanoManager.buildAndSignByronTransaction()` | `deriveByronKey(index)` → Icarus (pubKey32, chainCode32, extKey64) |
+
+**Nguyên nhân gốc:** `buildAndSignTransaction()` hardcode dùng Shelley payment key cho mọi loại transaction. Byron UTXOs cần Icarus key (64 bytes) để tạo chữ ký và cung cấp chainCode trong Bootstrap witness.
+
+**Fix đã implement:**
+```kotlin
+suspend fun buildAndSignByronTransaction(
+    toAddress: String, amount: Long, fee: Long, fromIndex: Int = 0, ...
+): CardanoSignedTransaction {
+    val (pubKey32, chainCode32, extKey64) = deriveByronKey(fromIndex)
+    val fromAddress = CardanoAddress.createByronAddress(pubKey32, chainCode32)
+    // ... fetch UTXOs for fromAddress, build body ...
+    val sig64 = Ed25519Icarus.sign(extKey64, body.getHash())
+    val witnessSet = CardanoWitnessBuilder()
+        .addBootstrapWitness(pubKey32, sig64, chainCode32, byteArrayOf(0xa0.toByte()))
+        .build()
+    return CardanoSignedTransaction(body, witnessSet)
+}
+```
+
+---
+
 ## 6. Quy tắc phòng tránh lỗi cho team
 
 ### ✅ DO
 
 - Dùng `IcarusKeyDerivation` cho tất cả Byron address generation
 - Kiểm tra địa chỉ generate ra bằng cách import mnemonic vào Yoroi browser extension
-- Dùng `Ed25519Icarus.publicKeyFromScalar()` cho Icarus keys
+- Dùng `Ed25519Icarus.publicKeyFromScalar()` cho Icarus public keys
+- Dùng `Ed25519Icarus.sign(extKey64, msg)` (khi có) cho Byron transaction signing
+- Dùng `addBootstrapWitness(pubKey, sig, chainCode, 0xa0)` cho Byron witness — key 2 trong CBOR
 - Dùng `Ed25519.publicKey()` (ton-kotlin wrapper) cho Shelley và TON keys
 
 ### ❌ DON'T
@@ -249,14 +450,16 @@ commonTest/kotlin/com/lybia/cryptowallet/cardano/
 - **Đừng** hardened hóa role (`0`) và address index trong Byron path
 - **Đừng** dùng `PrivateKeyEd25519(seed)` (ton-kotlin) trực tiếp với Icarus extended key
 - **Đừng** nhầm "Icarus" với "Daedalus Byron HD" (V1 scheme — khác hoàn toàn)
+- **Đừng** dùng `addVKeyWitness` (Shelley key 0) để ký Byron UTXOs — node sẽ reject
+- **Đừng** dùng 32-byte key cho Byron signing — cần 64-byte extKey (kL||kR) vì kR là prefix cho nonce
 
 ### 🔑 Cheat Sheet: Khi nào dùng thuật toán nào?
 
-| Chain/Era | Key derivation | Ed25519 public key |
-|---|---|---|
-| Cardano Byron (Icarus) | `IcarusKeyDerivation` | `Ed25519Icarus.publicKeyFromScalar(kL)` |
-| Cardano Shelley (CIP-1852) | `slip10DeriveEd25519` | `Ed25519.publicKey(seed)` (ton-kotlin) |
-| TON | SLIP-0010 (ton-kotlin) | `Ed25519.publicKey(seed)` (ton-kotlin) |
+| Chain/Era | Key derivation | Ed25519 public key | Signing | Witness type |
+|---|---|---|---|---|
+| Cardano Byron (Icarus) | `IcarusKeyDerivation` | `Ed25519Icarus.publicKeyFromScalar(kL)` | `Ed25519Icarus.sign(extKey64, msg)` | Bootstrap (key 2) — cần chainCode |
+| Cardano Shelley (CIP-1852) | Icarus (sau khi fix) | `IcarusKeyDerivation.publicKeyFromExtended(ext)` | `Ed25519.sign(kL, msg)` | VKey (key 0) |
+| TON | SLIP-0010 (ton-kotlin) | `Ed25519.publicKey(seed)` (ton-kotlin) | ton-kotlin | — |
 
 ---
 
@@ -272,19 +475,19 @@ commonTest/kotlin/com/lybia/cryptowallet/cardano/
 ### 7.2 Lệnh chạy test
 
 ```bash
-# Chạy 3 known-vector test cases (Byron pass, Shelley skipped)
+# Chạy toàn bộ CardanoByronKeyTest (45 tests: address derivation + Icarus signing)
+./gradlew :crypto-wallet-lib:cleanJvmTest :crypto-wallet-lib:jvmTest \
+  --tests "com.lybia.cryptowallet.cardano.CardanoByronKeyTest"
+
+# Chạy known-vector tests (Byron pass, Shelley skipped)
 ./gradlew :crypto-wallet-lib:cleanJvmTest :crypto-wallet-lib:jvmTest \
   --tests "com.lybia.cryptowallet.cardano.CardanoByronKeyTest.knownVector_byronAddress_index0" \
   --tests "com.lybia.cryptowallet.cardano.CardanoManagerTest.knownVector_byronAddress_index0" \
   --tests "com.lybia.cryptowallet.cardano.CardanoManagerTest.knownVector_shelleyAddress_account0_index0"
 
-# Chạy toàn bộ test Cardano (Byron + Manager + Transaction + ...)
+# Chạy toàn bộ test Cardano
 ./gradlew :crypto-wallet-lib:cleanJvmTest :crypto-wallet-lib:jvmTest \
   --tests "com.lybia.cryptowallet.cardano.*"
-
-# Chạy chỉ CardanoByronKeyTest (unit tests cho Icarus derivation)
-./gradlew :crypto-wallet-lib:cleanJvmTest :crypto-wallet-lib:jvmTest \
-  --tests "com.lybia.cryptowallet.cardano.CardanoByronKeyTest"
 ```
 
 > **Lưu ý:** Dùng `cleanJvmTest` trước `jvmTest` để tránh Gradle cache kết quả cũ (`UP-TO-DATE` / `FROM-CACHE`).
@@ -292,7 +495,7 @@ commonTest/kotlin/com/lybia/cryptowallet/cardano/
 ### 7.3 Kết quả test hiện tại
 
 ```
-CardanoByronKeyTest[jvm]
+CardanoByronKeyTest[jvm]  — 45 tests, 0 failures ✅
   ✅ multiply8LE_singleBit
   ✅ multiply8LE_carryPropagation
   ✅ multiply8LE_maxCarryToOverflowByte
@@ -313,7 +516,7 @@ CardanoByronKeyTest[jvm]
   ✅ deriveChildKey_deterministic
   ✅ ed25519Icarus_publicKeySize
   ✅ ed25519Icarus_deterministicForSameScalar
-  ✅ ed25519Icarus_differentScalarsDifferentKeys
+  ✅ ed25519Icarus.differentScalarsDifferentKeys
   ✅ ed25519Icarus_rejectsNon32ByteInput
   ✅ publicKeyFromExtended_uses_kL_only
   ✅ deriveByronPath_returnsCorrectSizes
@@ -329,6 +532,14 @@ CardanoByronKeyTest[jvm]
   ✅ regression_bug1_masterKeyUsesEntropyNotSeed
   ✅ regression_bug3_byronPathUsesSoftDerivationForRoleAndIndex
   ✅ regression_bug4_icarusPublicKeyDiffersFromStandardEd25519
+  ✅ icarusSign_returnsCorrectSize             (signing tests)
+  ✅ icarusSign_isDeterministic
+  ✅ icarusSign_differentMessages_differentSignatures
+  ✅ icarusSign_differentKeys_differentSignatures
+  ✅ icarusSign_rejectsNon64ByteKey
+  ✅ icarusSign_sComponentLessThanGroupOrder
+  ✅ icarusSign_nonZeroComponents
+  ✅ icarusSign_bootstrapWitnessTupleSizes
   ✅ knownVector_byronAddress_index0
 
 CardanoManagerTest[jvm]
@@ -346,9 +557,42 @@ CardanoManagerTest[jvm]
 
 ---
 
-## 8. References
+## 8. Ghi chú về iOS source
 
+> Source iOS tại `/Users/thanhphat/GitHub/fg-wallet/ios/FGWallet/CoinKit/Cardano/`
+
+**⚠️ iOS Byron signing bị broken (đừng follow):**
+
+iOS đã migrate từ `CEd25519` sang `Sr25519` (Schnorr signature), làm hỏng Byron:
+
+| File iOS | Trạng thái |
+|---|---|
+| `CarKeyPair.sign()` | Dùng **Sr25519** — không tương thích Byron/Ed25519 |
+| `CarPublicKey.derive(fromSecret:)` | **Trả về zero key** (log error, không throw) — broken |
+| `CarDerivation.swift` | Icarus V2 child derivation đúng — có thể tham khảo |
+| `TransactionWitnessSet.swift` | Witness key **2** (Bootstrap) — đúng |
+
+iOS có comment giải thích:
+```
+// The original CEd25519 ed25519_add_scalar performed direct scalar addition on Ed25519 keys.
+// This replacement uses Sr25519 hard derivation, which is semantically different.
+// HD wallet paths that relied on scalar addition must be re-derived using the new scheme.
+```
+
+**Kết luận:** iOS Byron signing là broken do migration. KMP code đã implement đúng thuật toán gốc (old Android `CarKeyPair.sign()` + Icarus spec). Đừng dùng iOS `CarKeyPair.sign()` làm reference.
+
+---
+
+## 9. References
+
+**Address generation:**
 - [CIP-0003 — Icarus master key](https://github.com/cardano-foundation/CIPs/blob/master/CIP-0003/Icarus.md)
 - [ed25519-bip32 spec](https://input-output-hk.github.io/adrestia/cardano-wallet/concepts/master-key-generation)
-- [Cardano address structure](https://github.com/input-output-hk/cardano-wallet/wiki/About-Address-Format---Byron)
+- [Cardano address structure — Byron](https://github.com/input-output-hk/cardano-wallet/wiki/About-Address-Format---Byron)
 - [BIP-44 for Cardano (coin type 1815)](https://github.com/satoshilabs/slips/blob/master/slip-0044.md)
+
+**Transaction signing:**
+- [IOHK ed25519-bip32 paper](https://iohk.io/en/research/library/papers/ouroboros-praos-an-adaptively-secure-semi-synchronous-proof-of-stake-protocol/) — original ed25519-bip32 signing spec
+- [RFC 8032 — Ed25519](https://tools.ietf.org/html/rfc8032) — standard Ed25519 (dùng để hiểu điểm khác biệt)
+- [Cardano CDDL — transaction witness set](https://github.com/input-output-hk/cardano-ledger/blob/master/eras/shelley/test-suites/cddl-files/shelley.cddl) — CBOR witness format (key 2 = bootstrap_witnesses)
+- [Blockfrost — submit transaction](https://docs.blockfrost.io/#tag/Cardano-Transactions/paths/~1tx~1submit/post) — submission API

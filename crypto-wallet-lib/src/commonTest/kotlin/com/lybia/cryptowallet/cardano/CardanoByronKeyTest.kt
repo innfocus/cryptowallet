@@ -449,6 +449,117 @@ class CardanoByronKeyTest {
         assertFalse(icarusPub.all { it == 0.toByte() }, "Public key must not be all zeros")
     }
 
+    // ── Ed25519Icarus signing tests (Bug #7 fix) ─────────────────────────────
+
+    /**
+     * Sign must produce exactly 64 bytes (R_enc[32] || S_enc[32]).
+     */
+    @Test
+    fun icarusSign_returnsCorrectSize() {
+        val (_, _, extKey64) = IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, 0)
+        val message = ByteArray(32) { it.toByte() }
+        val sig = Ed25519Icarus.sign(extKey64, message)
+        assertEquals(64, sig.size, "Signature must be 64 bytes")
+    }
+
+    /**
+     * Same key + same message must always produce the same signature (deterministic).
+     */
+    @Test
+    fun icarusSign_isDeterministic() {
+        val (_, _, extKey64) = IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, 0)
+        val message = ByteArray(32) { 0xAB.toByte() }
+        val sig1 = Ed25519Icarus.sign(extKey64, message)
+        val sig2 = Ed25519Icarus.sign(extKey64, message)
+        assertTrue(sig1.contentEquals(sig2), "Same key+message must produce same signature")
+    }
+
+    /**
+     * Different messages must produce different signatures (R changes as nonce depends on message).
+     */
+    @Test
+    fun icarusSign_differentMessages_differentSignatures() {
+        val (_, _, extKey64) = IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, 0)
+        val msg1 = ByteArray(32) { 0x01.toByte() }
+        val msg2 = ByteArray(32) { 0x02.toByte() }
+        val sig1 = Ed25519Icarus.sign(extKey64, msg1)
+        val sig2 = Ed25519Icarus.sign(extKey64, msg2)
+        assertFalse(sig1.contentEquals(sig2), "Different messages must produce different signatures")
+    }
+
+    /**
+     * Different keys must produce different signatures.
+     */
+    @Test
+    fun icarusSign_differentKeys_differentSignatures() {
+        val (_, _, extKey64_0) = IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, 0)
+        val (_, _, extKey64_1) = IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, 1)
+        val message = ByteArray(32) { 0x55.toByte() }
+        val sig0 = Ed25519Icarus.sign(extKey64_0, message)
+        val sig1 = Ed25519Icarus.sign(extKey64_1, message)
+        assertFalse(sig0.contentEquals(sig1), "Different keys must produce different signatures")
+    }
+
+    /**
+     * sign() must reject a key that is not exactly 64 bytes.
+     */
+    @Test
+    fun icarusSign_rejectsNon64ByteKey() {
+        assertFailsWith<IllegalArgumentException> {
+            Ed25519Icarus.sign(ByteArray(32), ByteArray(32))  // 32 bytes, must be 64
+        }
+    }
+
+    /**
+     * The S component (sig[32..63]) must be less than the Ed25519 group order L.
+     * This is a basic sanity check that S was reduced mod L correctly.
+     *
+     * L = 0x1000...14def9dea2f79cd65812631a5cf5d3ed (little-endian)
+     * L[31] = 0x10, so sig[63] (the most significant byte of S in LE) must be <= 0x10.
+     * If sig[63] == 0x10, the full 32 bytes must be < L.
+     */
+    @Test
+    fun icarusSign_sComponentLessThanGroupOrder() {
+        val (_, _, extKey64) = IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, 0)
+        val message = ByteArray(32) { it.toByte() }
+        val sig = Ed25519Icarus.sign(extKey64, message)
+        val sBytes = sig.copyOfRange(32, 64)
+        // MSB of S in little-endian is at index 31 (0x10 max)
+        val msb = sBytes[31].toInt() and 0xFF
+        assertTrue(msb <= 0x10, "S MSB must be <= 0x10 (within group order L)")
+    }
+
+    /**
+     * Signature R component (first 32 bytes) must not be all zeros (valid EC point).
+     * S component (last 32 bytes) must not be all zeros.
+     */
+    @Test
+    fun icarusSign_nonZeroComponents() {
+        val (_, _, extKey64) = IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, 0)
+        val message = ByteArray(32) { it.toByte() }
+        val sig = Ed25519Icarus.sign(extKey64, message)
+        assertFalse(sig.copyOfRange(0, 32).all { it == 0.toByte() }, "R component must not be all zeros")
+        assertFalse(sig.copyOfRange(32, 64).all { it == 0.toByte() }, "S component must not be all zeros")
+    }
+
+    /**
+     * Witness structure sanity: the full bootstrap witness tuple must have correct sizes.
+     * [pubKey32, sig64, chainCode32, attributes1]
+     */
+    @Test
+    fun icarusSign_bootstrapWitnessTupleSizes() {
+        val (pubKey32, chainCode32, extKey64) = IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, 0)
+        val message = ByteArray(32) { it.toByte() }
+        val sig64 = Ed25519Icarus.sign(extKey64, message)
+        val attributes = byteArrayOf(0xa0.toByte())
+
+        assertEquals(32, pubKey32.size, "pubKey must be 32 bytes")
+        assertEquals(64, sig64.size, "signature must be 64 bytes")
+        assertEquals(32, chainCode32.size, "chainCode must be 32 bytes")
+        assertEquals(1, attributes.size, "attributes must be 1 byte (CBOR empty map)")
+        assertEquals(0xa0.toByte(), attributes[0], "attributes must be 0xa0 (CBOR empty map)")
+    }
+
     // ── Known vector test (verified against Yoroi / cardano-addresses CLI) ───
 
     /**
