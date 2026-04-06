@@ -10,8 +10,6 @@ import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.errors.StakingError
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.CardanoApiService
-import fr.acinq.bitcoin.Crypto
-import fr.acinq.bitcoin.MnemonicCode
 
 /**
  * Main Cardano wallet manager.
@@ -32,78 +30,37 @@ class CardanoManager(
     private val logger = Logger.withTag("CardanoManager")
     private val mnemonicWords = mnemonic.split(" ").filter { it.isNotEmpty() }
 
-    // ── BIP-39 seed & SLIP-0010 Ed25519 master key ──────────────────────────
+    // ── Key derivation — Icarus V2 (ed25519-bip32) for both Shelley and Byron ──
 
-    private val seed: ByteArray = MnemonicCode.toSeed(mnemonicWords, "")
-
-    /**
-     * SLIP-0010 Ed25519 key derivation (hardened only).
-     * Returns (privateKey 32 bytes, chainCode 32 bytes).
-     */
-    private fun slip10DeriveEd25519(path: IntArray): Pair<ByteArray, ByteArray> {
-        var iBytes = Crypto.hmac512("ed25519 seed".encodeToByteArray(), seed)
-        var kL = iBytes.sliceArray(0 until 32)
-        var kR = iBytes.sliceArray(32 until 64)
-
-        for (index in path) {
-            val data = ByteArray(37)
-            data[0] = 0x00
-            kL.copyInto(data, 1)
-            data[33] = (index ushr 24).toByte()
-            data[34] = (index ushr 16).toByte()
-            data[35] = (index ushr 8).toByte()
-            data[36] = index.toByte()
-            iBytes = Crypto.hmac512(kR, data)
-            kL = iBytes.sliceArray(0 until 32)
-            kR = iBytes.sliceArray(32 until 64)
-        }
-        return kL to kR
+    // Shelley payment key: m/1852'/1815'/account'/0/index
+    // Per CIP-1852: purpose, coin_type, account = hardened; role, index = SOFT
+    // Returns Triple(pubKey32, chainCode32, extKey64)
+    private fun deriveShelleyPaymentKey(account: Int, index: Int): Triple<ByteArray, ByteArray, ByteArray> {
+        val (masterExt, masterCC) = IcarusKeyDerivation.masterKeyFromMnemonic(mnemonicWords)
+        var k = masterExt; var cc = masterCC
+        IcarusKeyDerivation.deriveChildKey(k, cc, 1852, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
+        IcarusKeyDerivation.deriveChildKey(k, cc, 1815, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
+        IcarusKeyDerivation.deriveChildKey(k, cc, account, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
+        IcarusKeyDerivation.deriveChildKey(k, cc, 0, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }
+        IcarusKeyDerivation.deriveChildKey(k, cc, index, hardened = false).let { (nk, nc) -> k = nk; cc = nc }
+        return Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
     }
 
-    /**
-     * Derive Ed25519 public key from private key using Crypto.
-     * Returns 32-byte compressed Ed25519 public key.
-     */
-    private fun ed25519PublicKey(privateKey: ByteArray): ByteArray {
-        // fr.acinq.bitcoin.Crypto provides Ed25519 via libsecp256k1 or platform impl
-        // However, bitcoin-kmp doesn't expose Ed25519 directly.
-        // We use the same approach as TonManager: SLIP-0010 derives the private key,
-        // then we compute the public key via the available crypto primitives.
-        //
-        // For Cardano CIP-1852, we need Ed25519 key pairs.
-        // We'll use a minimal Ed25519 implementation via the available libraries.
-        return computeEd25519PublicKey(privateKey)
+    // Shelley staking key: m/1852'/1815'/account'/2/0
+    // Returns Triple(pubKey32, chainCode32, extKey64)
+    private fun deriveShelleyStakingKey(account: Int): Triple<ByteArray, ByteArray, ByteArray> {
+        val (masterExt, masterCC) = IcarusKeyDerivation.masterKeyFromMnemonic(mnemonicWords)
+        var k = masterExt; var cc = masterCC
+        IcarusKeyDerivation.deriveChildKey(k, cc, 1852, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
+        IcarusKeyDerivation.deriveChildKey(k, cc, 1815, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
+        IcarusKeyDerivation.deriveChildKey(k, cc, account, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
+        IcarusKeyDerivation.deriveChildKey(k, cc, 2, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }
+        IcarusKeyDerivation.deriveChildKey(k, cc, 0, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }
+        return Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
     }
 
-    // ── CIP-1852 derivation paths ───────────────────────────────────────────
-    // m / 1852' / 1815' / account' / role / index
-    // role: 0 = external (payment), 1 = internal (change), 2 = staking
-
-    private fun hardenedIndex(i: Int): Int = 0x80000000.toInt() or i
-
-    private fun derivePaymentKey(account: Int, index: Int): Pair<ByteArray, ByteArray> {
-        return slip10DeriveEd25519(intArrayOf(
-            hardenedIndex(1852),
-            hardenedIndex(1815),
-            hardenedIndex(account),
-            hardenedIndex(0), // external/payment role (hardened for SLIP-0010)
-            hardenedIndex(index)
-        ))
-    }
-
-    private fun deriveStakingKey(account: Int): Pair<ByteArray, ByteArray> {
-        return slip10DeriveEd25519(intArrayOf(
-            hardenedIndex(1852),
-            hardenedIndex(1815),
-            hardenedIndex(account),
-            hardenedIndex(2), // staking role
-            hardenedIndex(0)
-        ))
-    }
-
-    // Byron key derivation uses Icarus V2 (ed25519-bip32), NOT SLIP-0010.
+    // Byron payment key: m/44'/1815'/0'/0/index
     // See docs/CARDANO_BYRON_SPEC.md for the full algorithm explanation.
-    // Path: m/44'/1815'/0'/0/index — role (0) and index are SOFT (non-hardened).
     private fun deriveByronKey(index: Int): Triple<ByteArray, ByteArray, ByteArray> {
         return IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, index)
     }
@@ -118,12 +75,10 @@ class CardanoManager(
      * @return Bech32-encoded Shelley base address
      */
     fun getShelleyAddress(account: Int = 0, index: Int = 0): String {
-        val (paymentPriv, _) = derivePaymentKey(account, index)
-        val paymentPub = ed25519PublicKey(paymentPriv)
+        val (paymentPub, _, _) = deriveShelleyPaymentKey(account, index)
         val paymentKeyHash = CardanoAddress.hashKey(paymentPub)
 
-        val (stakingPriv, _) = deriveStakingKey(account)
-        val stakingPub = ed25519PublicKey(stakingPriv)
+        val (stakingPub, _, _) = deriveShelleyStakingKey(account)
         val stakingKeyHash = CardanoAddress.hashKey(stakingPub)
 
         val isTestnet = Config.shared.getNetwork() == Network.TESTNET
@@ -150,8 +105,7 @@ class CardanoManager(
      * @return Bech32-encoded staking address
      */
     fun getStakingAddress(account: Int = 0): String {
-        val (stakingPriv, _) = deriveStakingKey(account)
-        val stakingPub = ed25519PublicKey(stakingPriv)
+        val (stakingPub, _, _) = deriveShelleyStakingKey(account)
         val stakingKeyHash = CardanoAddress.hashKey(stakingPub)
 
         val isTestnet = Config.shared.getNetwork() == Network.TESTNET
@@ -323,11 +277,10 @@ class CardanoManager(
 
         val body = builder.build()
 
-        // Sign
-        val (paymentPriv, _) = derivePaymentKey(0, 0)
-        val paymentPub = ed25519PublicKey(paymentPriv)
+        // Sign with Icarus ed25519-bip32
+        val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0)
         val txHash = body.getHash()
-        val signature = ed25519Sign(paymentPriv, txHash)
+        val signature = Ed25519Icarus.sign(paymentExtKey, txHash)
 
         val witnessSet = CardanoWitnessBuilder()
             .addVKeyWitness(paymentPub, signature)
@@ -430,11 +383,10 @@ class CardanoManager(
 
         val body = builder.build()
 
-        // Sign with payment key
-        val (paymentPriv, _) = derivePaymentKey(0, 0)
-        val paymentPub = ed25519PublicKey(paymentPriv)
+        // Sign with Icarus ed25519-bip32 — kL as scalar directly (NOT RFC 8032)
+        val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0)
         val txHash = body.getHash()
-        val signature = ed25519Sign(paymentPriv, txHash)
+        val signature = Ed25519Icarus.sign(paymentExtKey, txHash)
 
         val witnessSet = CardanoWitnessBuilder()
             .addVKeyWitness(paymentPub, signature)
@@ -601,8 +553,7 @@ class CardanoManager(
             }
 
             // Get staking key hash
-            val (stakingPriv, _) = deriveStakingKey(0)
-            val stakingPub = ed25519PublicKey(stakingPriv)
+            val (stakingPub, _, stakingExtKey) = deriveShelleyStakingKey(0)
             val stakingKeyHash = CardanoAddress.hashKey(stakingPub)
 
             // Check balance
@@ -666,12 +617,11 @@ class CardanoManager(
 
             val body = builder.build()
 
-            // Sign with both payment key and staking key
-            val (paymentPriv, _) = derivePaymentKey(0, 0)
-            val paymentPub = ed25519PublicKey(paymentPriv)
+            // Sign with both payment key and staking key (Icarus ed25519-bip32)
+            val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0)
             val txHash = body.getHash()
-            val paymentSig = ed25519Sign(paymentPriv, txHash)
-            val stakingSig = ed25519Sign(stakingPriv, txHash)
+            val paymentSig = Ed25519Icarus.sign(paymentExtKey, txHash)
+            val stakingSig = Ed25519Icarus.sign(stakingExtKey, txHash)
 
             val witnessSet = CardanoWitnessBuilder()
                 .addVKeyWitness(paymentPub, paymentSig)
@@ -715,8 +665,7 @@ class CardanoManager(
             }
 
             // Get staking key hash
-            val (stakingPriv, _) = deriveStakingKey(0)
-            val stakingPub = ed25519PublicKey(stakingPriv)
+            val (stakingPub, _, stakingExtKey) = deriveShelleyStakingKey(0)
             val stakingKeyHash = CardanoAddress.hashKey(stakingPub)
 
             // Get UTXOs for fee
@@ -766,12 +715,11 @@ class CardanoManager(
 
             val body = builder.build()
 
-            // Sign with both payment key and staking key
-            val (paymentPriv, _) = derivePaymentKey(0, 0)
-            val paymentPub = ed25519PublicKey(paymentPriv)
+            // Sign with both payment key and staking key (Icarus ed25519-bip32)
+            val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0)
             val txHash = body.getHash()
-            val paymentSig = ed25519Sign(paymentPriv, txHash)
-            val stakingSig = ed25519Sign(stakingPriv, txHash)
+            val paymentSig = Ed25519Icarus.sign(paymentExtKey, txHash)
+            val stakingSig = Ed25519Icarus.sign(stakingExtKey, txHash)
 
             val witnessSet = CardanoWitnessBuilder()
                 .addVKeyWitness(paymentPub, paymentSig)
@@ -834,23 +782,6 @@ class CardanoManager(
     // ── Ed25519 helpers ─────────────────────────────────────────────────────
 
     companion object {
-        /**
-         * Compute Ed25519 public key from a 32-byte private key.
-         * Uses a minimal pure-Kotlin Ed25519 implementation.
-         */
-        internal fun computeEd25519PublicKey(privateKey: ByteArray): ByteArray {
-            require(privateKey.size == 32) { "Private key must be 32 bytes" }
-            return Ed25519.publicKey(privateKey)
-        }
-
-        /**
-         * Sign a message with Ed25519.
-         */
-        internal fun ed25519Sign(privateKey: ByteArray, message: ByteArray): ByteArray {
-            require(privateKey.size == 32) { "Private key must be 32 bytes" }
-            return Ed25519.sign(privateKey, message)
-        }
-
         /**
          * Convert a Cardano address string to raw bytes for transaction outputs.
          * Handles both Shelley (Bech32) and Byron (Base58) addresses.

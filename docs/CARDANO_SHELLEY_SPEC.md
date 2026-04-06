@@ -1,9 +1,9 @@
 # Cardano Shelley Address Management — Technical Specification
 
-**Version:** 1.0  
-**Status:** 🔴 Chưa fix — địa chỉ sinh ra SAI so với Yoroi/Daedalus  
+**Version:** 2.0  
+**Status:** ✅ Tất cả 5 bugs đã fix — address generation + transaction signing đúng theo IOHK  
 **Scope:** `commonMain` — Shelley base address, enterprise address, reward/staking address  
-**Liên quan:** Đọc `docs/CARDANO_BYRON_SPEC.md` trước — Shelley mắc cùng 4 bug pattern với Byron
+**Liên quan:** `docs/CARDANO_BYRON_SPEC.md` — Byron và Shelley dùng chung Icarus master key (CIP-0003)
 
 ---
 
@@ -184,6 +184,7 @@ fun getShelleyAddress(account: Int = 0, index: Int = 0): String {
 | **Bug 3c** | `CardanoManager.kt:99` | `hardenedIndex(2)` — role hardened | `2` (soft) | Staking key sai |
 | **Bug 3d** | `CardanoManager.kt:100` | `hardenedIndex(0)` — hardened | `0` (soft) | Staking key sai |
 | **Bug 4** | `CardanoManager.kt:67-76` | `Ed25519.publicKey(seed)` — SHA-512 hashes | `IcarusKeyDerivation.publicKeyFromExtended(ext)` | Public key sai |
+| **Bug 5** | `buildAndSignTransaction()`, `sendToken()`, `stake()`, `unstake()` | `ed25519Sign(priv32, txHash)` — RFC 8032 với 32-byte key | `Ed25519Icarus.sign(extKey64, txHash)` — ed25519-bip32 với 64-byte extKey | Signature sai |
 
 > `CardanoAddress.createBaseAddress/createRewardAddress` — **✅ không có lỗi**, không cần sửa.
 
@@ -242,28 +243,52 @@ A = scalar * B
 
 Với Icarus extended key, `kL` **ĐÃ là scalar** (đã được clamp ở bước master key). Nếu gọi `Ed25519.publicKey(kL)` thì nó sẽ SHA-512 hash `kL` rồi mới multiply — cho ra public key hoàn toàn sai.
 
+### Bug 5 — ed25519Sign(priv32) thay vì Ed25519Icarus.sign(extKey64)
+
+**Tiêu chuẩn (ed25519-bip32 spec, IOHK):**
+```
+signature = Ed25519Icarus.sign(extKey64, Blake2b-256(txBody))
+  kL = extKey[0..31]   — scalar trực tiếp
+  kR = extKey[32..63]  — nonce prefix cho SHA-512(kR || message)
+```
+
+**Code sai (trước fix):**
+```kotlin
+val (paymentPriv, _) = derivePaymentKey(0, 0)  // 32-byte SLIP-0010 key
+val signature = ed25519Sign(paymentPriv, txHash) // Ed25519.sign → SHA-512(key32) → RFC 8032
+```
+
+`ed25519Sign()` gọi `Ed25519.sign(key32, msg)` (ton-kotlin RFC 8032): lấy `SHA-512(key32)[0..31]` clamped làm scalar. Nhưng sau khi fix derivation, `derivePaymentKey()` trả về 64-byte extended key mà `kL[0..31]` ĐÃ là scalar — nếu SHA-512 lại sẽ cho scalar hoàn toàn khác.
+
+**Code đúng:**
+```kotlin
+val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0) // 64-byte Icarus key
+val signature = Ed25519Icarus.sign(paymentExtKey, txHash) // kL as scalar, kR as nonce prefix
+```
+
+Áp dụng cho tất cả: `buildAndSignTransaction()`, `sendToken()`, `stake()`, `unstake()`.
+
 ---
 
 ## 5. Cách fix
 
-### 5.1 Thay thế cần thiết trong `CardanoManager.kt`
+### 5.1 Thay thế trong `CardanoManager.kt` (✅ Đã fix)
 
-**Xóa/không dùng:**
-- `private val seed` (BIP-39 seed field)
-- `slip10DeriveEd25519()` (toàn bộ hàm)
-- `ed25519PublicKey()` dùng cho Shelley
-- `hardenedIndex()` cho role và index trong Shelley paths
+**Đã xóa:**
+- `private val seed` (BIP-39 seed field) — `MnemonicCode.toSeed()` không dùng cho Cardano
+- `slip10DeriveEd25519()` — SLIP-0010 hoàn toàn sai cho Cardano
+- `ed25519PublicKey()` — SHA-512 kL nội bộ, sai cho Icarus key
+- `hardenedIndex()` — artifact của SLIP-0010
+- `computeEd25519PublicKey()`, `ed25519Sign()` trong companion — không còn caller
+- Imports: `fr.acinq.bitcoin.Crypto`, `fr.acinq.bitcoin.MnemonicCode` — không còn dùng
 
-**Thêm mới:**
-- `private fun deriveShelleyPaymentKey(account: Int, index: Int)` → dùng `IcarusKeyDerivation.deriveByronPath`-style với path `m/1852'/1815'/account'/0/index`
-- `private fun deriveShelleyStakingKey(account: Int)` → path `m/1852'/1815'/account'/2/0`
-
-**Hàm fix mẫu:**
+**Đã thêm:**
 ```kotlin
-// ✅ Đúng
+// Shelley key derivation dùng Icarus V2 (ed25519-bip32), giống Byron.
+// Path: m/1852'/1815'/account'/0/index — role=0 và index đều SOFT (CIP-1852).
 private fun deriveShelleyPaymentKey(account: Int, index: Int): Triple<ByteArray, ByteArray, ByteArray> {
     val (masterExt, masterCC) = IcarusKeyDerivation.masterKeyFromMnemonic(mnemonicWords)
-    var (k, cc) = masterExt to masterCC
+    var k = masterExt; var cc = masterCC
     IcarusKeyDerivation.deriveChildKey(k, cc, 1852, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
     IcarusKeyDerivation.deriveChildKey(k, cc, 1815, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
     IcarusKeyDerivation.deriveChildKey(k, cc, account, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
@@ -272,9 +297,10 @@ private fun deriveShelleyPaymentKey(account: Int, index: Int): Triple<ByteArray,
     return Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
 }
 
+// Path: m/1852'/1815'/account'/2/0 — role=2, index=0 đều SOFT.
 private fun deriveShelleyStakingKey(account: Int): Triple<ByteArray, ByteArray, ByteArray> {
     val (masterExt, masterCC) = IcarusKeyDerivation.masterKeyFromMnemonic(mnemonicWords)
-    var (k, cc) = masterExt to masterCC
+    var k = masterExt; var cc = masterCC
     IcarusKeyDerivation.deriveChildKey(k, cc, 1852, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
     IcarusKeyDerivation.deriveChildKey(k, cc, 1815, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
     IcarusKeyDerivation.deriveChildKey(k, cc, account, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
@@ -282,6 +308,20 @@ private fun deriveShelleyStakingKey(account: Int): Triple<ByteArray, ByteArray, 
     IcarusKeyDerivation.deriveChildKey(k, cc, 0, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }  // index=0, SOFT
     return Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
 }
+```
+
+**Signing fix (Bug 5) — tất cả 4 methods đã fix:**
+```kotlin
+// buildAndSignTransaction(), sendToken():
+val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0)
+val signature = Ed25519Icarus.sign(paymentExtKey, body.getHash())
+CardanoWitnessBuilder().addVKeyWitness(paymentPub, signature).build()
+
+// stake(), unstake() — cần ký bằng cả payment + staking key:
+val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0)
+val (stakingPub, _, stakingExtKey) = deriveShelleyStakingKey(0)
+val paymentSig = Ed25519Icarus.sign(paymentExtKey, txHash)
+val stakingSig = Ed25519Icarus.sign(stakingExtKey, txHash)
 ```
 
 ### 5.2 Không cần thay đổi
@@ -306,12 +346,11 @@ Mnemonic  : left arena awkward spin damp pipe liar ribbon few husband execute wh
 Expected Shelley base address (account=0, index=0, mainnet):
   addr1qxhj6eqf65yt283f4vwuasfjag7v485g0szrce84hhldd8jrmw23wageh85y8qgjrgxd70k8s44j2wuex329wk5xqfpqu3zkwl
 
-Code hiện tại sinh ra (SAI):
+Code trước fix sinh ra (SAI):
   addr1qymvqhg06hxwhf427ndg5xkkv64k9295y0za2g0a39cz4656mksn358rpx05m5lesajc5qqthc9zqapgqvkwch6g2zwssdc42h
 ```
 
-Test case đã có trong `CardanoManagerTest.kt::knownVector_shelleyAddress_account0_index0` — đang `@Ignore`.  
-Sau khi fix, bỏ `@Ignore` để test pass.
+Test case `CardanoManagerTest.kt::knownVector_shelleyAddress_account0_index0` — ✅ đã bỏ `@Ignore`, test PASS.
 
 ---
 

@@ -4,14 +4,14 @@ import com.lybia.cryptowallet.utils.ACTCrypto
 import fr.acinq.bitcoin.MnemonicCode
 
 /**
- * Icarus-style Byron key derivation (CIP-0003 / ed25519-bip32 V2).
+ * Icarus key derivation (CIP-0003 / ed25519-bip32 V2).
  *
  * This is the key derivation scheme used by Yoroi, Daedalus (Icarus-compatible wallets)
- * for Byron-era addresses. It is INCOMPATIBLE with SLIP-0010 which is used by Shelley.
+ * for **both Byron AND Shelley** addresses. It is INCOMPATIBLE with SLIP-0010.
  *
  * ## Core differences from SLIP-0010
  *
- * | Aspect            | Icarus V2 (Byron)                        | SLIP-0010 (Shelley/TON)       |
+ * | Aspect            | Icarus V2 (Byron + Shelley)              | SLIP-0010 (TON, Solana)       |
  * |-------------------|------------------------------------------|-------------------------------|
  * | Master input      | PBKDF2(password="", salt=entropy, 96B)   | HMAC("ed25519 seed", seed)    |
  * | Private key size  | 64 bytes (kL‖kR)                         | 32 bytes                      |

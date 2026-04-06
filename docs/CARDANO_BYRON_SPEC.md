@@ -432,6 +432,126 @@ suspend fun buildAndSignByronTransaction(
 
 ---
 
+## 5c. IOHK Protocol Gap Fixes (✅ Đã fix)
+
+> Phần này document 4 điểm thiếu sót so với tiêu chuẩn kỹ thuật IOHK, phát hiện qua so sánh với source cũ (`Gada.kt`) và protocol params chính thức.
+
+### Fix #9 — Input Deduplication ✅
+
+| | File | Chi tiết |
+|---|---|---|
+| **Cũ** | `CardanoTransaction.kt:227-230` | `inputs.add(...)` — không kiểm tra trùng lặp |
+| **Đã fix** | `CardanoTransaction.kt` | Kiểm tra `!inputs.contains(input)` trước khi add |
+
+**Nguyên nhân:** Nếu cùng một UTXO (txHash + index) được add 2 lần, node sẽ reject transaction vì "duplicate input". Cần dedup tại tầng builder.
+
+```kotlin
+// Đã fix trong CardanoTransactionBuilder.addInput()
+fun addInput(txHash: ByteArray, index: Int): CardanoTransactionBuilder {
+    val input = CardanoTransactionInput(txHash, index)
+    if (!inputs.contains(input)) {
+        inputs.add(input)
+    }
+    return this
+}
+```
+
+> `CardanoTransactionInput.equals()` so sánh `txHash.contentEquals()` + `index` — đúng với protocol (một UTXO = một txHash+index tuple).
+
+---
+
+### Fix #10 — Minimum UTXO Output: 1 ADA ✅
+
+| | File | Chi tiết |
+|---|---|---|
+| **Cũ** | `CardanoTransaction.kt:236-239` | `addOutput()` cho phép `lovelace < 1_000_000` |
+| **Đã fix** | `CardanoTransactionBuilder` | `require(lovelace >= MIN_UTXO_LOVELACE)` trong `addOutput()` và `addMultiAssetOutput()` |
+
+**Protocol param:** `minUTxOValue = 1_000_000 lovelace` (1 ADA). Node từ chối output nhỏ hơn.
+
+```kotlin
+companion object {
+    /** Minimum lovelace per output (IOHK protocol parameter). */
+    const val MIN_UTXO_LOVELACE = 1_000_000L
+
+    /** Maximum serialised transaction size in bytes (IOHK protocol parameter). */
+    const val MAX_TX_SIZE_BYTES = 16_384
+}
+```
+
+**So sánh với source cũ:**
+```kotlin
+// Source cũ (Gada.kt)
+val MIN_AMOUNT_PER_TX = 1000000.0  // 1 ADA minimum per output
+```
+
+---
+
+### Fix #11 — Change < 1 ADA → Absorb vào Fee ✅
+
+| | File | Chi tiết |
+|---|---|---|
+| **Cũ** | `CardanoManager.kt:413-417` | `if (change > 0) builder.addOutput(fromAddress, change)` — tạo output nhỏ hơn 1 ADA |
+| **Đã fix** | `buildAndSignTransaction()` và `buildAndSignByronTransaction()` | Nếu `0 < change < MIN_UTXO`, gộp vào fee thay vì tạo output |
+
+**Lý do:** Nếu change < 1 ADA mà vẫn tạo change output → node reject (vi phạm Min UTXO). Nếu bỏ change output mà không điều chỉnh fee → `inputs - outputs ≠ declared_fee` → node reject. Giải pháp đúng: tăng `declared_fee` lên bằng `fee + change`.
+
+```kotlin
+// Đã fix trong buildAndSignTransaction() và buildAndSignByronTransaction()
+val rawChange = collected - amount - fee - serviceFeeTotal
+val effectiveFee: Long
+val actualChange: Long
+if (rawChange > 0L && rawChange < CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
+    effectiveFee = fee + rawChange  // absorb dust into fee
+    actualChange = 0L
+} else {
+    effectiveFee = fee
+    actualChange = rawChange
+}
+if (actualChange > 0L) {
+    builder.addOutput(fromAddressBytes, actualChange)
+}
+builder.setFee(effectiveFee)
+```
+
+**So sánh với source cũ:**
+```kotlin
+// Source cũ (Gada.kt)
+val changeAmount = input - fee - amount
+if (changeAmount < MIN_AMOUNT_PER_TX) {
+    // absorb into fee — no change output
+} else {
+    // create change output
+}
+```
+
+---
+
+### Fix #12 — Transaction Size Limit: 16,384 bytes ✅
+
+| | File | Chi tiết |
+|---|---|---|
+| **Cũ** | `CardanoManager.kt` | Không có kiểm tra kích thước transaction |
+| **Đã fix** | `buildAndSignTransaction()` và `buildAndSignByronTransaction()` | Check `signedTx.serialize().size <= MAX_TX_SIZE_BYTES` sau khi tạo `CardanoSignedTransaction` |
+
+**Protocol param:** `maxTxSize = 16_384 bytes`. Node từ chối transaction lớn hơn.
+
+```kotlin
+val signedTx = CardanoSignedTransaction(body, witnessSet)
+val txBytes = signedTx.serialize()
+if (txBytes.size > CardanoTransactionBuilder.MAX_TX_SIZE_BYTES) {
+    throw CardanoError.ApiError(
+        statusCode = null,
+        message = "Transaction too large: ${txBytes.size} bytes (max ${CardanoTransactionBuilder.MAX_TX_SIZE_BYTES})"
+    )
+}
+return signedTx
+```
+
+**Khi nào vi phạm:** Khi tx có quá nhiều inputs (> ~50-100 UTXOs nhỏ). Caller cần chọn UTXO lớn hơn hoặc consolidate trước.
+
+---
+
 ## 6. Quy tắc phòng tránh lỗi cho team
 
 ### ✅ DO
@@ -557,29 +677,154 @@ CardanoManagerTest[jvm]
 
 ---
 
-## 8. Ghi chú về iOS source
+## 8. Phân tích iOS source — So sánh 3 phiên bản
 
-> Source iOS tại `/Users/thanhphat/GitHub/fg-wallet/ios/FGWallet/CoinKit/Cardano/`
+> Source iOS tại `/Users/thanhphat/GitHub/fg-wallet/ios/FGWallet/CoinKit/Cardano/`  
+> iOS đã **revert** về Ed25519 sau khi migration sang Sr25519 bị broken.
 
-**⚠️ iOS Byron signing bị broken (đừng follow):**
+### 8.1 Kiến trúc signing của iOS — Điểm then chốt
 
-iOS đã migrate từ `CEd25519` sang `Sr25519` (Schnorr signature), làm hỏng Byron:
+iOS có **hai code path hoàn toàn khác nhau** cho Shelley và Byron:
 
-| File iOS | Trạng thái |
-|---|---|
-| `CarKeyPair.sign()` | Dùng **Sr25519** — không tương thích Byron/Ed25519 |
-| `CarPublicKey.derive(fromSecret:)` | **Trả về zero key** (log error, không throw) — broken |
-| `CarDerivation.swift` | Icarus V2 child derivation đúng — có thể tham khảo |
-| `TransactionWitnessSet.swift` | Witness key **2** (Bootstrap) — đúng |
+#### Shelley → GadaShelley.swift — Server-side signing ✅
 
-iOS có comment giải thích:
+```swift
+// GadaShelley.transferAda() — gửi privateKey lên server, server ký và broadcast
+let params = [
+    "fromAddress": fromAddress,
+    "toAddress": toAddress,
+    "privateKey": userDefaults.string(forKey: "AdaWIFS") ?? "",  // private key gửi lên server
+    ...
+]
+AF.request(ADAAPI.transfer, ...)  // fgwallet.srsfc.com ký và broadcast
 ```
-// The original CEd25519 ed25519_add_scalar performed direct scalar addition on Ed25519 keys.
-// This replacement uses Sr25519 hard derivation, which is semantically different.
-// HD wallet paths that relied on scalar addition must be re-derived using the new scheme.
+
+**CarKeyPair.sign() KHÔNG được gọi cho Shelley.** Signing hoàn toàn ở server side. Đây là lý do iOS team nói "hoạt động tốt" — họ đang test Shelley, không phải Byron.
+
+#### Byron → Gada.swift — On-device signing
+
+```swift
+// Gada.createTxAux()
+prvKeys.append(keys!.1.raw.bytes)       // 64-byte Icarus extKey (kL||kR)
+chainCodes.append(keys!.1.chainCode.bytes)
+// ...
+let inWitnesses = TxWitnessBuilder.builder(txId: txId, prvKeys: prvKeys, chainCodes: chainCodes)
 ```
 
-**Kết luận:** iOS Byron signing là broken do migration. KMP code đã implement đúng thuật toán gốc (old Android `CarKeyPair.sign()` + Icarus spec). Đừng dùng iOS `CarKeyPair.sign()` làm reference.
+```swift
+// TxWitnessBuilder.builder()
+let pub = CarPublicKey.derive(fromSecret: prvKeys[i])  // ed25519_extract_public_key → kL*B
+let pairKey = try CarKeyPair(publicKey: pub.bytes, privateKey: prvKeys[i])
+let signature = pairKey.sign(Data(hex: txId).bytes)   // ← ĐÂY là chỗ CryptoKit được gọi
+let witness = TxWitness(extendedPublicKey: pub.bytes, signature: signature, chainCode: chainCodes[i], attributes: Data(hex: "0xa0").bytes)
+```
+
+**CarKeyPair.sign() ĐƯỢC gọi cho Byron.** Và đây là nơi có bug CryptoKit.
+
+---
+
+### 8.2 Phân tích bug signing trong Byron path
+
+**`CarPublicKey.derive(fromSecret:)` — Đúng ✅**
+```swift
+ed25519_extract_public_key(pub.baseAddress, priv.baseAddress)
+// priv = 64-byte Icarus extKey → dùng priv[0..31] = kL làm scalar
+// pubKey = kL * B  ← đúng với Icarus
+```
+
+**`CarKeyPair.sign()` — Primary path: Sai ❌**
+```swift
+let seedData = Data(privBytes.prefix(32))  // chỉ lấy kL (32 bytes)
+let ckPrivateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: seedData)
+// CryptoKit RFC 8032: scalar_internal = SHA-512(kL)[0..31] clamped  ← KHÁC kL!
+// Public key tương ứng của CryptoKit = SHA-512(kL)[0..31] * B ≠ kL * B
+let ckSignature = try ckPrivateKey.signature(for: msgData)
+// → Signature ký bằng SHA-512(kL) scalar
+// → Nhưng pubKey trong witness = kL * B (từ bước trên)
+// → KHÔNG nhất quán → Node reject
+```
+
+**`CarKeyPair.sign()` — Fallback: Đúng ✅ nhưng không bao giờ chạy**
+```swift
+} catch {
+    // Chỉ chạy khi CryptoKit throw — nhưng CryptoKit không throw với 32-byte input hợp lệ
+    ed25519_sign(sigAddr, msgAddr, messageCount, pubAddr, privAddr)
+    // privAddr = full 64-byte kL||kR → kL làm scalar, kR làm nonce prefix → ĐÚNG Icarus
+}
+```
+
+**Kết quả của Byron transaction với CryptoKit:**
+- Witness = `[pubKey = kL*B, sig = SHA-512(kL)_signed, chainCode, 0xa0]`
+- Node verify: `sig` phải verify với `pubKey = kL*B`
+- Nhưng `sig` được tạo với scalar `SHA-512(kL)[0..31]` → point tương ứng = `SHA-512(kL)[0..31]*B` ≠ `kL*B`
+- **Verification fail → Node reject transaction**
+
+iOS có test function `testSigningLogic()` chính xác để phát hiện điều này:
+```swift
+if sigC == sigCK {
+    logger.debug("=> RESULTS MATCH! (CryptoKit is safe to replace CEd25519)")
+} else {
+    logger.error("=> RESULTS DIFFER! (Warning: You MUST rollback to CEd25519 because Cardano uses Extended-Ed25519)")
+}
+```
+Test này sẽ print **RESULTS DIFFER** vì CEd25519 (đúng) ≠ CryptoKit (sai).
+
+---
+
+### 8.3 Tại sao iOS team nói "hoạt động tốt với Byron"?
+
+**Khả năng 1 — Đang test Shelley, nhầm là Byron:**  
+`GadaShelley` (server-side) hoạt động hoàn toàn vì server ký. iOS team có thể đang test Shelley địa chỉ mà nhầm là Byron.
+
+**Khả năng 2 — "Hoạt động tốt" nghĩa là xem balance, không phải send:**  
+`CarPublicKey.derive()` đúng → Byron address generation đúng → balance display đúng. Nhưng SEND từ Byron address thực sự chưa được test kỹ.
+
+**Khả năng 3 — Yoroi Byron API đã deprecate:**  
+`Gada.swift` dùng `iohk-mainnet.yoroiwallet.com` API. API này có thể đã ngưng hỗ trợ, nên "hoạt động tốt" theo nghĩa không crash (API trả về error không có nghĩa là sign đúng).
+
+---
+
+### 8.4 Fix cần thiết cho iOS Byron
+
+Chỉ cần thay thế CryptoKit primary path bằng CEd25519 trong `CarKeyPair.sign()`:
+
+```swift
+// HIỆN TẠI (SAI):
+do {
+    let seedData = Data(privBytes.prefix(32))
+    let ckPrivateKey = try Curve25519.Signing.PrivateKey(rawRepresentation: seedData)
+    let ckSignature = try ckPrivateKey.signature(for: msgData)
+    ckSignature.copyBytes(to: sigAddr, count: 64)
+} catch {
+    ed25519_sign(sigAddr, msgAddr, messageCount, pubAddr, privAddr)
+}
+
+// CẦN FIX (ĐÚNG):
+// Bỏ CryptoKit hoàn toàn — dùng CEd25519 trực tiếp
+// privAddr = pointer to full 64-byte kL||kR → CEd25519 dùng kL làm scalar, kR làm nonce prefix
+ed25519_sign(sigAddr, msgAddr, messageCount, pubAddr, privAddr)
+```
+
+---
+
+### 8.5 So sánh 3 phiên bản
+
+| Tiêu chí | KMP (current) | Android cũ | iOS (reverted) |
+|---|---|---|---|
+| **Shelley signing** | On-device ✅ | On-device ✅ | **Server-side** ✅ |
+| **Byron key derivation** | `IcarusKeyDerivation` ✅ | `CarDerivation.kt` ✅ | `CarDerivation.swift` ✅ |
+| **Byron pubKey từ extKey** | `Ed25519Icarus.publicKeyFromScalar(kL)` ✅ | `CarPublicKey.derive()` CEd25519 ✅ | `ed25519_extract_public_key(kL)` ✅ |
+| **Byron signing algorithm** | `Ed25519Icarus.sign(extKey64)` — kL scalar, kR nonce ✅ | `CarKeyPair.sign()` — kL scalar, kR nonce ✅ | CryptoKit `SHA-512(kL)` scalar ❌ |
+| **Byron witness type** | Bootstrap key 2 + chainCode ✅ | Bootstrap key 2 + chainCode ✅ | Bootstrap key 2 + chainCode ✅ |
+| **Min UTXO** | 1 ADA enforced ✅ | Có trong `Gada.kt` ✅ | Có trong `YOROIAPI.MIN_AMOUNT_PER_TX` ✅ |
+| **Change dust absorption** | ✅ Fix #11 | ✅ Có trong `Gada.kt` | ✅ Có trong `Gada.swift` |
+| **Max tx size** | ✅ Fix #12 | Không có | Không có |
+| **Input dedup** | ✅ Fix #9 | Không có | Không có |
+
+**Kết luận:**
+- **KMP** — đúng hoàn toàn sau các fix (#5–#12). **Implementation tham chiếu tốt nhất.**
+- **Android cũ** — signing đúng, protocol checks cơ bản đủ dùng. Thiếu tx size check và dedup.
+- **iOS (reverted)** — Shelley đúng (server-side). Byron signing **vẫn sai** (CryptoKit SHA-512s kL). Cần thay CryptoKit bằng CEd25519 `ed25519_sign()` trực tiếp.
 
 ---
 
