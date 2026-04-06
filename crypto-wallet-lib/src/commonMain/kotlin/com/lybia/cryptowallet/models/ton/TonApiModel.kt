@@ -101,6 +101,8 @@ data class TonRunGetMethodResponse(
 data class TonRunGetMethodResult(
     @SerialName("@type")
     val type: String,
+    @SerialName("exit_code")
+    val exitCode: Int? = null,
     val stack: List<List<kotlinx.serialization.json.JsonElement>>
 )
 
@@ -156,6 +158,32 @@ data class TonNFTAttribute(
     @SerialName("trait_type")
     val traitType: String,
     val value: String
+)
+
+// ─── Parsed Jetton Transaction ───────────────────────────────────────────────
+
+/**
+ * Parsed Jetton transaction with human-readable fields.
+ * Extracted from raw TonTransaction by decoding Jetton-specific opcodes.
+ */
+@Serializable
+data class JettonTransactionParsed(
+    /** "send", "receive", "burn", "unknown" */
+    val type: String,
+    /** Amount in nano-tokens (raw, before decimal conversion) */
+    val amountNano: Long,
+    /** Sender address (null for mints) */
+    val sender: String?,
+    /** Recipient address (null for burns) */
+    val recipient: String?,
+    /** Optional memo/comment */
+    val memo: String? = null,
+    /** Unix timestamp */
+    val timestamp: Long,
+    /** Transaction fee in nanoTON */
+    val fee: String,
+    /** Original transaction ID */
+    val transactionId: TonTransactionId
 )
 
 

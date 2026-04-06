@@ -20,6 +20,9 @@ sealed class WalletError(override val message: String) : Exception(message) {
 
     data class UnsupportedOperation(val operation: String, val chain: String) :
         WalletError("Unsupported operation '$operation' for chain '$chain'")
+
+    data class NetworkError(val reason: String) :
+        WalletError("Network error: $reason")
 }
 
 /**

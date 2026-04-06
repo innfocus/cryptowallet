@@ -388,7 +388,7 @@ class EthereumManager(
 
     // ── ITokenAndNFT (existing) ─────────────────────────────────────
 
-    override suspend fun getBalanceToken(address: String, contractAddress: String, coinNetwork: CoinNetwork): Double {
+    override suspend fun getBalanceToken(address: String, contractAddress: String, coinNetwork: CoinNetwork, decimals: Int): Double {
         val balance = ExplorerRpcService.INSTANCE.getBalanceToken(coinNetwork, address, contractAddress)
         return balance?.toDoubleOrNull() ?: 0.0
     }

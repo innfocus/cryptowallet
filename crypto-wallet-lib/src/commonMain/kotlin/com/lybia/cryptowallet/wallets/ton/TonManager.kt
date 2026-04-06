@@ -29,6 +29,7 @@ import org.ton.tlb.constructor.AnyTlbConstructor
 import com.lybia.cryptowallet.base.INFTManager
 import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.enums.ACTCoin
+import com.lybia.cryptowallet.currentEpochSeconds
 import com.lybia.cryptowallet.errors.WalletError
 import com.lybia.cryptowallet.models.NFTItem
 
@@ -232,8 +233,8 @@ class TonManager(
         val isTestnet = Config.shared.getNetwork() == Network.TESTNET
         val walletId = calculateW5WalletId(isTestnet)
 
-        // validUntil: 0xFFFFFFFF for seqno==0 (deployment), MAX_VALUE otherwise
-        val validUntilBits = if (seqno == 0) 0xFFFFFFFFL else Int.MAX_VALUE.toLong()
+        // validUntil: 0xFFFFFFFF for seqno==0 (deployment), currentTime+60s otherwise
+        val validUntilBits = if (seqno == 0) 0xFFFFFFFFL else defaultValidUntil().toLong()
 
         val signingBody = CellBuilder.createCell {
             storeUInt(0x7369676E, 32)           // PREFIX_SIGNED_EXTERNAL ("sign")
@@ -322,9 +323,10 @@ class TonManager(
     override suspend fun getBalanceToken(
         address: String,
         contractAddress: String,
-        coinNetwork: CoinNetwork
+        coinNetwork: CoinNetwork,
+        decimals: Int
     ): Double {
-        logger.i { "Getting Jetton balance for $address, Token: $contractAddress" }
+        logger.i { "Getting Jetton balance for $address, Token: $contractAddress, decimals: $decimals" }
         val jettonWalletAddr =
             getJettonWalletAddress(address, contractAddress, coinNetwork) ?: return 0.0
 
@@ -340,8 +342,9 @@ class TonManager(
                 0L
             }
 
-            val balance = balanceNano.toDouble() / 1_000_000_000.0
-            logger.i { "Jetton balance for $address: $balance" }
+            val divisor = Math.pow(10.0, decimals.toDouble())
+            val balance = balanceNano.toDouble() / divisor
+            logger.i { "Jetton balance for $address: $balance (decimals=$decimals)" }
             return balance
         }
         return 0.0
@@ -379,9 +382,127 @@ class TonManager(
         coinNetwork: CoinNetwork
     ): Any? {
         logger.i { "Getting Jetton transaction history for $address, Token: $contractAddress" }
+        return getJettonTransactionsParsed(address, contractAddress, coinNetwork)
+    }
+
+    /**
+     * Get parsed Jetton transaction history with human-readable fields.
+     * Decodes TEP-74 opcodes from raw messages:
+     * - 0x0f8a7ea5 = transfer (outgoing)
+     * - 0x7362d09c = transfer_notification (incoming)
+     * - 0x595f07bc = burn
+     * - 0xd53276db = excesses (refund, skipped)
+     */
+    suspend fun getJettonTransactionsParsed(
+        address: String,
+        contractAddress: String,
+        coinNetwork: CoinNetwork,
+        limit: Int = 10,
+        lt: String? = null,
+        hash: String? = null
+    ): List<JettonTransactionParsed>? {
         val jettonWalletAddr =
             getJettonWalletAddress(address, contractAddress, coinNetwork) ?: return null
-        return TonApiService.INSTANCE.getTransactions(coinNetwork, jettonWalletAddr)
+        val rawTxs = TonApiService.INSTANCE.getTransactions(
+            coinNetwork, jettonWalletAddr, limit, lt, hash
+        ) ?: return null
+
+        return rawTxs.mapNotNull { tx -> parseJettonTransaction(tx, address) }
+    }
+
+    private fun parseJettonTransaction(tx: TonTransaction, userAddress: String): JettonTransactionParsed? {
+        // Try to parse outgoing messages first (user sent a Jetton transfer)
+        tx.out_msgs?.forEach { msg ->
+            val parsed = tryParseJettonMessage(msg)
+            if (parsed != null) {
+                return JettonTransactionParsed(
+                    type = parsed.type,
+                    amountNano = parsed.amount,
+                    sender = userAddress,
+                    recipient = parsed.destination,
+                    memo = parsed.memo,
+                    timestamp = tx.utime,
+                    fee = tx.fee,
+                    transactionId = tx.transactionId
+                )
+            }
+        }
+        // Try incoming message (received Jetton transfer_notification)
+        tx.in_msg?.let { msg ->
+            val parsed = tryParseJettonMessage(msg)
+            if (parsed != null) {
+                return JettonTransactionParsed(
+                    type = if (parsed.type == "transfer_notification") "receive" else parsed.type,
+                    amountNano = parsed.amount,
+                    sender = parsed.sender ?: msg.source,
+                    recipient = userAddress,
+                    memo = parsed.memo,
+                    timestamp = tx.utime,
+                    fee = tx.fee,
+                    transactionId = tx.transactionId
+                )
+            }
+        }
+        // Fallback: return basic info from value fields
+        val inMsg = tx.in_msg
+        if (inMsg != null && inMsg.value != "0") {
+            return JettonTransactionParsed(
+                type = "unknown",
+                amountNano = inMsg.value.toLongOrNull() ?: 0L,
+                sender = inMsg.source,
+                recipient = inMsg.destination,
+                memo = inMsg.message,
+                timestamp = tx.utime,
+                fee = tx.fee,
+                transactionId = tx.transactionId
+            )
+        }
+        return null
+    }
+
+    private data class ParsedJettonMsg(
+        val type: String,
+        val amount: Long,
+        val sender: String?,
+        val destination: String?,
+        val memo: String?
+    )
+
+    private fun tryParseJettonMessage(msg: TonMessage): ParsedJettonMsg? {
+        val body = msg.message ?: return null
+        if (body.length < 8) return null
+
+        return try {
+            val bodyBytes = try {
+                Base64.Default.decode(body)
+            } catch (_: Exception) {
+                return null
+            }
+            if (bodyBytes.size < 4) return null
+
+            val opcode = ((bodyBytes[0].toInt() and 0xFF) shl 24) or
+                    ((bodyBytes[1].toInt() and 0xFF) shl 16) or
+                    ((bodyBytes[2].toInt() and 0xFF) shl 8) or
+                    (bodyBytes[3].toInt() and 0xFF)
+
+            when (opcode.toLong() and 0xFFFFFFFFL) {
+                0x0f8a7ea5L -> { // transfer
+                    ParsedJettonMsg("send", 0L, null, msg.destination, null)
+                }
+                0x7362d09cL -> { // transfer_notification
+                    ParsedJettonMsg("transfer_notification", 0L, msg.source, null, null)
+                }
+                0x595f07bcL -> { // burn
+                    ParsedJettonMsg("burn", 0L, null, null, null)
+                }
+                0xd53276dbL -> { // excesses (refund, skip)
+                    null
+                }
+                else -> null
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     override suspend fun getNFT() {
@@ -442,6 +563,7 @@ class TonManager(
 
     suspend fun getSeqno(coinNetwork: CoinNetwork): Int {
         val s = TonApiService.INSTANCE.getSeqno(coinNetwork, getAddress())
+            ?: throw WalletError.NetworkError("Failed to retrieve seqno for ${getAddress()}")
         logger.i { "Current seqno: $s" }
         return s
     }
@@ -557,6 +679,9 @@ class TonManager(
         }
     }
 
+    /** Transaction expiry: current time + 60 seconds. Prevents stale signed messages. */
+    private fun defaultValidUntil(): Int = (currentEpochSeconds() + 60).toInt()
+
     // ─── Private signing helpers ──────────────────────────────────────────────
 
     private fun signTransferV4(transfer: WalletTransfer, seqno: Int): String {
@@ -570,7 +695,7 @@ class TonManager(
             stateInit = stateInit,
             privateKey = privateKey,
             walletId = walletId,
-            validUntil = Int.MAX_VALUE,
+            validUntil = if (seqno == 0) Int.MAX_VALUE else defaultValidUntil(),
             seqno = seqno,
             transfer
         )
@@ -595,6 +720,19 @@ class TonManager(
         val addr = address ?: getAddress()
         logger.i { "Getting TON transaction history for $addr" }
         return TonApiService.INSTANCE.getTransactions(coinNetwork, addr)
+    }
+
+    /** Paginated transaction history. Pass lt/hash from the last TonTransaction.transactionId for next page. */
+    suspend fun getTransactionHistory(
+        address: String? = null,
+        coinNetwork: CoinNetwork,
+        limit: Int = 10,
+        lt: String? = null,
+        hash: String? = null
+    ): List<TonTransaction>? {
+        val addr = address ?: getAddress()
+        logger.i { "Getting TON transaction history (paginated) for $addr, lt=$lt" }
+        return TonApiService.INSTANCE.getTransactions(coinNetwork, addr, limit, lt, hash)
     }
 
     suspend fun estimateFee(coinNetwork: CoinNetwork, address: String, bodyBoc: String): Double {
@@ -900,6 +1038,43 @@ class TonManager(
         return signTransaction(masterAddress, amountNano, seqno)
     }
 
+    /**
+     * Signs a TEP-74 Jetton burn message.
+     * Used for unstaking from liquid staking pools (Tonstakers, Bemo).
+     * Opcode: 0x595f07bc
+     */
+    suspend fun signJettonBurn(
+        jettonMasterAddress: String,
+        jettonAmountNano: Long,
+        seqno: Int,
+        coinNetwork: CoinNetwork,
+        totalTonAmountNano: Long = 50_000_000L
+    ): String {
+        logger.i { "Signing Jetton burn: $jettonAmountNano from master $jettonMasterAddress" }
+        val myJettonWallet = getJettonWalletAddress(getAddress(), jettonMasterAddress, coinNetwork)
+            ?: throw Exception("Could not find Jetton Wallet for burn")
+
+        val burnBody = CellBuilder.createCell {
+            storeUInt(0x595f07bc, 32)  // burn op-code (TEP-74)
+            storeUInt(0, 64)           // query_id
+            storeTlb(Coins, Coins(jettonAmountNano))
+            storeTlb(MsgAddressInt, address) // response_destination = sender
+            storeBoolean(false)              // custom_payload = null
+        }
+
+        val transfer = WalletTransfer {
+            destination = AddrStd.parse(myJettonWallet)
+            bounceable = true
+            coins = Coins(totalTonAmountNano)
+            messageData = MessageData.Raw(burnBody, null, null)
+        }
+
+        return when (walletVersion) {
+            WalletVersion.W4 -> signTransferV4(transfer, seqno)
+            WalletVersion.W5 -> signTransferV5(transfer, seqno)
+        }.also { logger.i { "Signed Jetton burn BOC: $it" } }
+    }
+
     // ─── Pool Type Detection ──────────────────────────────────────────────────
 
     /**
@@ -970,7 +1145,42 @@ class TonManager(
     }
 
     override suspend fun unstake(amount: Long, coinNetwork: CoinNetwork): TransferResponseModel {
-        throw WalletError.UnsupportedOperation("unstake", "TON")
+        throw WalletError.UnsupportedOperation(
+            "unstake",
+            "TON — use unstake(amount, poolAddress, coinNetwork) instead"
+        )
+    }
+
+    /**
+     * Unstake from a liquid staking pool by burning staking tokens.
+     * Only supported for TONSTAKERS and BEMO pools.
+     * NOMINATOR pools handle withdrawals automatically via the pool contract.
+     */
+    suspend fun unstake(
+        amount: Long,
+        poolAddress: String,
+        coinNetwork: CoinNetwork
+    ): TransferResponseModel {
+        val poolType = detectPoolType(poolAddress, coinNetwork)
+        val seqno = getSeqno(coinNetwork)
+
+        val boc = when (poolType) {
+            TonPoolType.TONSTAKERS, TonPoolType.BEMO ->
+                signJettonBurn(poolAddress, amount, seqno, coinNetwork)
+            TonPoolType.NOMINATOR -> throw WalletError.UnsupportedOperation(
+                "unstake", "TON Nominator pools (withdrawals are automatic)"
+            )
+            TonPoolType.UNKNOWN -> throw WalletError.UnsupportedOperation(
+                "unstake", "TON (unknown pool type for $poolAddress)"
+            )
+        }
+
+        val result = TonApiService.INSTANCE.sendBoc(coinNetwork, boc)
+        return if (result == "success") {
+            TransferResponseModel(success = true, error = null, txHash = "pending")
+        } else {
+            TransferResponseModel(success = false, error = "Failed to broadcast unstaking transaction", txHash = null)
+        }
     }
 
     override suspend fun getStakingRewards(address: String, coinNetwork: CoinNetwork): Double {

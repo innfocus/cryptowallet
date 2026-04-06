@@ -44,14 +44,15 @@ class TonService(
         scope.launch {
             try {
                 val mgr = manager()
-                val balance = mgr.getBalanceToken(address, contractAddress, coinNetwork)
                 val metadata = mgr.getJettonMetadata(contractAddress, coinNetwork)
+                val decimals = metadata?.decimals ?: 9
+                val balance = mgr.getBalanceToken(address, contractAddress, coinNetwork, decimals)
                 val info = TokenInfo(
                     coin = ACTCoin.TON,
                     contractAddress = contractAddress,
                     name = metadata?.name,
                     symbol = metadata?.symbol,
-                    decimals = metadata?.decimals ?: 9,
+                    decimals = decimals,
                     balance = balance,
                     imageUrl = metadata?.image
                 )

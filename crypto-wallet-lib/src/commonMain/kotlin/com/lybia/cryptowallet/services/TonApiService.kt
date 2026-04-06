@@ -60,8 +60,14 @@ class TonApiService {
         }
     }
 
-    suspend fun getTransactions(coin: CoinNetwork, address: String, limit: Int = 10): List<TonTransaction>? {
-        logger.d { "getTransactions: address=$address, limit=$limit" }
+    suspend fun getTransactions(
+        coin: CoinNetwork,
+        address: String,
+        limit: Int = 10,
+        lt: String? = null,
+        hash: String? = null
+    ): List<TonTransaction>? {
+        logger.d { "getTransactions: address=$address, limit=$limit, lt=$lt, hash=$hash" }
         return try {
             val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
                 contentType(ContentType.Application.Json)
@@ -72,6 +78,8 @@ class TonApiService {
                         params = buildJsonObject {
                             put("address", address)
                             put("limit", limit)
+                            if (lt != null) put("lt", lt)
+                            if (hash != null) put("hash", hash)
                         }
                     )
                 )
@@ -178,7 +186,7 @@ class TonApiService {
         }
     }
 
-    suspend fun getSeqno(coin: CoinNetwork, address: String): Int {
+    suspend fun getSeqno(coin: CoinNetwork, address: String): Int? {
         val body = runGetMethod(coin, address, "seqno")
         if (body?.ok == true && body.result?.stack?.isNotEmpty() == true) {
             val element = body.result.stack[0]
@@ -194,11 +202,16 @@ class TonApiService {
                 }
             }
         } else if (body != null && !body.ok) {
+            // Wallet not yet deployed on-chain — seqno is 0
+            if (body.result?.exitCode == -13 || body.result?.exitCode == -14) {
+                logger.i { "Wallet not deployed, seqno = 0" }
+                return 0
+            }
             logger.e { "getSeqno failed: $body" }
         } else {
-            logger.e { "getSeqno failed: Unknown error" }
+            logger.e { "getSeqno failed: Unknown error (network or API issue)" }
         }
-        return 0
+        return null
     }
 
     suspend fun getNFTItems(coin: CoinNetwork, ownerAddress: String, limit: Int = 50): List<TonNFTItem>? {
