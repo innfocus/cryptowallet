@@ -31,6 +31,8 @@ Chào mừng bạn đến với hệ thống tài liệu kỹ thuật của dự
 - [**Dành cho Android:** Tích hợp Cardano (Byron + Shelley)](android/cardano-integration.md)
 - [**Dành cho iOS:** Cách dùng Swift async/await](ios/swift-integration.md)
 - [**Dành cho iOS:** Tích hợp Cardano (Byron + Shelley)](ios/cardano-integration.md)
+- [**Dành cho Android:** Tích hợp Ripple (XRP)](android/ripple-integration.md)
+- [**Dành cho iOS:** Tích hợp Ripple (XRP)](ios/ripple-integration.md)
 - [Hướng dẫn cho User cuối](architecture/user-guide.md)
 
 ### 🔌 API Reference
