@@ -252,7 +252,68 @@ API key (optional, for rate limits): `Config.shared.apiKeyToncenter`
 
 ---
 
-## 13. Tích hợp Android
+## 13. Tích hợp qua CommonCoinsManager (Recommended)
+
+`CommonCoinsManager` là facade thống nhất — nên dùng cho cả Android và iOS.
+
+```kotlin
+val ccm = CommonCoinsManager.shared
+
+// ── Balance ──
+val balance = ccm.getBalance(NetworkName.TON)
+val tokenBalance = ccm.getTokenBalance(NetworkName.TON, address, jettonMasterAddr)
+
+// ── Send TON ──
+val result = ccm.sendCoin(NetworkName.TON, toAddress, 1.5, memo = MemoData("Hello"))
+
+// ── Send Jetton (convenience) ──
+val result = ccm.sendJetton(
+    toAddress = "UQ...",
+    jettonMasterAddress = "EQ...",
+    amount = 10.5,
+    decimals = 6,  // USDT
+    memo = "Payment"
+)
+
+// ── Transaction History (paginated) ──
+val page1 = ccm.getTransactionHistoryPaginated(NetworkName.TON, limit = 20)
+val page2 = ccm.getTransactionHistoryPaginated(
+    NetworkName.TON, limit = 20,
+    pageParam = page1.nextPageParam  // {"lt": "...", "hash": "..."}
+)
+
+// ── Token Transaction History (paginated) ──
+val tokenTxs = ccm.getTokenTransactionHistoryPaginated(
+    NetworkName.TON,
+    policyId = "EQ...jettonMaster",  // Jetton Master address
+    assetName = "",
+    limit = 20
+)
+
+// ── Jetton Metadata ──
+val metadata = ccm.getJettonMetadata("EQ...jettonMaster")
+// metadata.name, metadata.symbol, metadata.decimals
+
+// ── NFT ──
+val nfts = ccm.getNFTs(NetworkName.TON, address)
+val nftResult = ccm.transferNFT(NetworkName.TON, nftAddress, toAddress, "Gift")
+
+// ── Staking ──
+val stakeResult = ccm.stake(NetworkName.TON, 10_000_000_000L, poolAddress)
+val unstakeResult = ccm.unstake(NetworkName.TON, 5_000_000_000L, poolAddress)  // poolAddress required!
+val stakingBalance = ccm.getStakingBalance(NetworkName.TON, poolAddress = poolAddress)
+
+// ── DNS ──
+val resolved = ccm.resolveTonDns("alice.ton")
+val domain = ccm.reverseResolveTonDns("UQ...")
+
+// ── Pool Detection ──
+val poolType = ccm.detectTonPoolType(poolAddress)  // NOMINATOR, TONSTAKERS, BEMO
+```
+
+---
+
+## 14. Tích hợp Android (Low-level)
 
 ### Sử dụng qua TonService (Callback pattern)
 
@@ -285,7 +346,7 @@ tonService.getNFTs(address) { nfts, error -> ... }
 tonService.transferNFT(nftAddr, toAddr, memo) { txHash, success, error -> ... }
 ```
 
-### Sử dụng trực tiếp TonManager (Coroutines)
+### Sử dụng trực tiếp TonManager (Coroutines, low-level)
 
 ```kotlin
 val mgr = TonManager(mnemonic, WalletVersion.W5)
@@ -323,7 +384,7 @@ val page2 = mgr.getTransactionHistory(
 
 ---
 
-## 14. Tích hợp iOS (Swift)
+## 15. Tích hợp iOS (Swift)
 
 TON được export qua XCFramework. Sử dụng trong Swift:
 
@@ -377,7 +438,7 @@ let nfts = try await manager.getNFTs(address: address, coinNetwork: coinNetwork)
 
 ---
 
-## 15. Task Tracker
+## 16. Task Tracker
 
 ### Phase 1-5: Core (Completed)
 | Task | Status |

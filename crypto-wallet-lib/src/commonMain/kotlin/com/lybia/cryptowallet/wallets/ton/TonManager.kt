@@ -4,6 +4,7 @@ import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.base.BaseCoinManager
 import com.lybia.cryptowallet.base.ITokenAndNFT
+import com.lybia.cryptowallet.base.ITokenManager
 import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.models.ton.*
@@ -80,7 +81,7 @@ private fun slip10DeriveEd25519(seed: ByteArray, path: IntArray): ByteArray {
 class TonManager(
     mnemonics: String,
     val walletVersion: WalletVersion = WalletVersion.W5
-) : BaseCoinManager(), ITokenAndNFT, IStakingManager, INFTManager {
+) : BaseCoinManager(), ITokenAndNFT, ITokenManager, IStakingManager, INFTManager {
 
     private val logger = Logger.withTag("TonManager")
     private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
@@ -514,6 +515,20 @@ class TonManager(
         val result = TonApiService.INSTANCE.sendBoc(coinNetwork, dataSigned)
         logger.i { "Broadcasting result: $result" }
         return if (result == "success") "pending" else null
+    }
+
+    // ─── ITokenManager Implementation ────────────────────────────────────────
+
+    override suspend fun getTokenBalance(address: String, contractAddress: String, coinNetwork: CoinNetwork): Double {
+        return getBalanceToken(address, contractAddress, coinNetwork)
+    }
+
+    override suspend fun getTokenTransactionHistory(address: String, contractAddress: String, coinNetwork: CoinNetwork): Any? {
+        return getTransactionHistoryToken(address, contractAddress, coinNetwork)
+    }
+
+    override suspend fun transferToken(dataSigned: String, coinNetwork: CoinNetwork): String? {
+        return TransferToken(dataSigned, coinNetwork)
     }
 
     suspend fun signJettonTransaction(
@@ -1156,7 +1171,7 @@ class TonManager(
      * Only supported for TONSTAKERS and BEMO pools.
      * NOMINATOR pools handle withdrawals automatically via the pool contract.
      */
-    suspend fun unstake(
+    override suspend fun unstake(
         amount: Long,
         poolAddress: String,
         coinNetwork: CoinNetwork

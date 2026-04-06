@@ -17,6 +17,7 @@ import com.lybia.cryptowallet.wallets.cardano.CardanoAddress
 import com.lybia.cryptowallet.wallets.cardano.CardanoAddressType
 import com.lybia.cryptowallet.wallets.cardano.CardanoError
 import com.lybia.cryptowallet.wallets.centrality.CentralityManager
+import com.lybia.cryptowallet.models.ton.TonTransaction
 import com.lybia.cryptowallet.wallets.ton.TonManager
 import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
 import com.lybia.cryptowallet.enums.ACTCoin
@@ -448,6 +449,26 @@ class CommonCoinsManager(
                     )
                 }
 
+                NetworkName.TON -> {
+                    val tonManager = getOrCreateManager(coin) as TonManager
+                    val addr = address ?: tonManager.getAddress()
+                    val coinNetwork = CoinNetwork(coin)
+                    val lt = pageParam?.get("lt") as? String
+                    val hash = pageParam?.get("hash") as? String
+                    val count = limit.coerceAtMost(100)
+                    val txs = tonManager.getTransactionHistory(addr, coinNetwork, count, lt, hash)
+                    val lastTx = txs?.lastOrNull()
+                    val hasMore = txs != null && txs.size >= count
+                    TransactionHistoryResult(
+                        transactions = txs,
+                        hasMore = hasMore,
+                        nextPageParam = if (hasMore && lastTx != null)
+                            mapOf("lt" to lastTx.transactionId.lt, "hash" to lastTx.transactionId.hash)
+                        else null,
+                        success = true
+                    )
+                }
+
                 else -> {
                     // Chains without pagination — delegate to standard method
                     val txs = getTransactionHistory(coin, address)
@@ -560,6 +581,29 @@ class CommonCoinsManager(
                         success = true
                     )
                 }
+                NetworkName.TON -> {
+                    val tonManager = getOrCreateManager(coin) as TonManager
+                    val addr = tonManager.getAddress()
+                    val coinNetwork = CoinNetwork(coin)
+                    val lt = pageParam?.get("lt") as? String
+                    val hash = pageParam?.get("hash") as? String
+                    val count = limit.coerceAtMost(100)
+                    // policyId is used as contractAddress for TON Jetton
+                    val txs = tonManager.getJettonTransactionsParsed(
+                        addr, policyId, coinNetwork, count, lt, hash
+                    )
+                    val lastTx = txs?.lastOrNull()
+                    val hasMore = txs != null && txs.size >= count
+                    TransactionHistoryResult(
+                        transactions = txs,
+                        hasMore = hasMore,
+                        nextPageParam = if (hasMore && lastTx != null)
+                            mapOf("lt" to lastTx.transactionId.lt, "hash" to lastTx.transactionId.hash)
+                        else null,
+                        success = true
+                    )
+                }
+
                 else -> {
                     TransactionHistoryResult(
                         success = false,
@@ -698,8 +742,12 @@ class CommonCoinsManager(
     /**
      * Undelegate / unstake.
      * Delegates to the [IStakingManager] of the corresponding chain.
+     *
+     * @param poolAddress Required for TON liquid staking (Tonstakers, Bemo).
+     *   TON Nominator pools handle withdrawal automatically.
+     *   For Cardano, poolAddress is ignored (pass null or empty).
      */
-    suspend fun unstake(coin: NetworkName, amount: Long): SendResult {
+    suspend fun unstake(coin: NetworkName, amount: Long, poolAddress: String? = null): SendResult {
         if (!supportsStaking(coin)) {
             return SendResult(
                 txHash = "",
@@ -711,7 +759,11 @@ class CommonCoinsManager(
             val manager = getOrCreateManager(coin)
             val stakingManager = manager as IStakingManager
             val coinNetwork = CoinNetwork(coin)
-            val result = stakingManager.unstake(amount, coinNetwork)
+            val result = if (!poolAddress.isNullOrBlank()) {
+                stakingManager.unstake(amount, poolAddress, coinNetwork)
+            } else {
+                stakingManager.unstake(amount, coinNetwork)
+            }
             SendResult(
                 txHash = result.txHash ?: "",
                 success = result.success,
@@ -851,6 +903,101 @@ class CommonCoinsManager(
         } catch (e: Exception) {
             logger.e(e) { "Failed to get bridge status for $txHash" }
             "unknown"
+        }
+    }
+
+    // ── TON-specific operations ───────────────────────────────────────────
+
+    /**
+     * Send Jetton (TON token) directly — handles signing + broadcast internally.
+     *
+     * @param toAddress Recipient address
+     * @param jettonMasterAddress Jetton Master contract address
+     * @param amount Amount in major unit (e.g. 10.5 USDT)
+     * @param decimals Token decimals (USDT=6, default=9). Must match token metadata.
+     * @param memo Optional comment
+     */
+    suspend fun sendJetton(
+        toAddress: String,
+        jettonMasterAddress: String,
+        amount: Double,
+        decimals: Int = 9,
+        memo: String? = null
+    ): SendResult {
+        return try {
+            val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            val seqno = tonManager.getSeqno(coinNetwork)
+            val amountNano = doubleToSmallestUnit(amount, Math.pow(10.0, decimals.toDouble()).toLong())
+            val boc = tonManager.signJettonTransaction(
+                jettonMasterAddress = jettonMasterAddress,
+                toAddress = toAddress,
+                jettonAmountNano = amountNano,
+                seqno = seqno,
+                coinNetwork = coinNetwork,
+                memo = memo?.takeIf { it.isNotEmpty() }
+            )
+            val txHash = tonManager.TransferToken(boc, coinNetwork)
+            SendResult(txHash = txHash ?: "", success = txHash != null)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to send Jetton" }
+            SendResult("", false, e.message)
+        }
+    }
+
+    /**
+     * Get Jetton (TON token) metadata: name, symbol, decimals, image.
+     */
+    suspend fun getJettonMetadata(contractAddress: String): com.lybia.cryptowallet.models.ton.JettonMetadata? {
+        return try {
+            val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            tonManager.getJettonMetadata(contractAddress, coinNetwork)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to get Jetton metadata" }
+            null
+        }
+    }
+
+    /**
+     * Resolve TON DNS domain to address (e.g. "alice.ton" → "UQ...").
+     */
+    suspend fun resolveTonDns(domain: String): String? {
+        return try {
+            val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            tonManager.resolveDns(domain, coinNetwork)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to resolve TON DNS for $domain" }
+            null
+        }
+    }
+
+    /**
+     * Reverse resolve TON address to domain (e.g. "UQ..." → "alice.ton").
+     */
+    suspend fun reverseResolveTonDns(address: String): String? {
+        return try {
+            val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            tonManager.reverseResolveDns(address, coinNetwork)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to reverse resolve TON DNS for $address" }
+            null
+        }
+    }
+
+    /**
+     * Detect TON staking pool type (Nominator, Tonstakers, Bemo, Unknown).
+     */
+    suspend fun detectTonPoolType(poolAddress: String): com.lybia.cryptowallet.wallets.ton.TonPoolType {
+        return try {
+            val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            tonManager.detectPoolType(poolAddress, coinNetwork)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to detect TON pool type for $poolAddress" }
+            com.lybia.cryptowallet.wallets.ton.TonPoolType.UNKNOWN
         }
     }
 
