@@ -448,4 +448,36 @@ class CardanoByronKeyTest {
         assertEquals(32, icarusPub.size)
         assertFalse(icarusPub.all { it == 0.toByte() }, "Public key must not be all zeros")
     }
+
+    // ── Known vector test (verified against Yoroi / cardano-addresses CLI) ───
+
+    /**
+     * Known test vector — verified with Yoroi browser extension (Byron Icarus restore).
+     *
+     * Mnemonic : "left arena awkward spin damp pipe liar ribbon few husband execute whisper"
+     * Expected Byron  address (index 0, mainnet):
+     *   Ae2tdPwUPEZ6tWFJJ7kmDCN2GyGnJgH4nCARQyrkgWNMzBHnUqEJmX5V15F
+     *
+     * To reproduce manually:
+     *   1. Open Yoroi browser extension → Add wallet → Restore → Byron-era wallet
+     *   2. Enter the 12-word mnemonic above
+     *   3. The first address shown should match EXPECTED_BYRON_ADDRESS
+     */
+    @Test
+    fun knownVector_byronAddress_index0() {
+        val mnemonic = "left arena awkward spin damp pipe liar ribbon few husband execute whisper"
+        val words    = mnemonic.split(" ")
+
+        val (pubKey, chainCode, _) = IcarusKeyDerivation.deriveByronAddressKey(words, index = 0)
+        val address = CardanoAddress.createByronAddress(pubKey, chainCode)
+
+        assertEquals(
+            "Ae2tdPwUPEZ6tWFJJ7kmDCN2GyGnJgH4nCARQyrkgWNMzBHnUqEJmX5V15F",
+            address,
+            "Byron address at index 0 must match known Yoroi output"
+        )
+        // Extra sanity checks
+        assertTrue(CardanoAddress.isValidByronAddress(address))
+        assertTrue(address.startsWith("Ae2"))
+    }
 }

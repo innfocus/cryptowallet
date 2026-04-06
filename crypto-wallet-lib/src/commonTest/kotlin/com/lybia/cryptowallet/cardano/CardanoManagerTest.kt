@@ -15,6 +15,7 @@ import io.ktor.serialization.kotlinx.json.*
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.Json
 import kotlin.test.*
+import kotlin.test.Ignore
 
 /**
  * Unit tests for CardanoManager with mock API service.
@@ -216,6 +217,58 @@ class CardanoManagerTest {
         val addr1 = manager.getStakingAddress(0)
         val addr2 = manager.getStakingAddress(0)
         assertEquals(addr1, addr2)
+        client.close()
+    }
+
+    // ── Known vector tests (verified against Yoroi / cardano-addresses CLI) ───
+
+    /**
+     * Known test vector — verified with Yoroi browser extension.
+     *
+     * Mnemonic : "left arena awkward spin damp pipe liar ribbon few husband execute whisper"
+     *
+     * Expected Byron address (index 0, mainnet):
+     *   Ae2tdPwUPEZ6tWFJJ7kmDCN2GyGnJgH4nCARQyrkgWNMzBHnUqEJmX5V15F
+     *
+     * Expected Shelley base address (account=0, index=0, mainnet):
+     *   addr1qxhj6eqf65yt283f4vwuasfjag7v485g0szrce84hhldd8jrmw23wageh85y8qgjrgxd70k8s44j2wuex329wk5xqfpqu3zkwl
+     */
+    @Test
+    fun knownVector_byronAddress_index0() {
+        val mnemonic = "left arena awkward spin damp pipe liar ribbon few husband execute whisper"
+        val client  = jsonMockClient("[]")
+        val manager = CardanoManager(mnemonic, mockApiService(client))
+
+        val address = manager.getByronAddress(0)
+
+        assertEquals(
+            "Ae2tdPwUPEZ6tWFJJ7kmDCN2GyGnJgH4nCARQyrkgWNMzBHnUqEJmX5V15F",
+            address,
+            "Byron address at index 0 must match known Yoroi output"
+        )
+        client.close()
+    }
+
+    // TODO: Shelley derivation cũng đang dùng SLIP-0010 thay vì Icarus ed25519-bip32.
+    //   Yoroi dùng Icarus cho cả Shelley (path m/1852'/1815'/0'/0/0, role+index non-hardened).
+    //   Kết quả hiện tại: addr1qymvqhg06hxwhf427ndg5xkkv64k9295y0za2g0a39cz4656mksn358rpx05m5lesajc5qqthc9zqapgqvkwch6g2zwssdc42h
+    //   Kết quả mong đợi: addr1qxhj6eqf65yt283f4vwuasfjag7v485g0szrce84hhldd8jrmw23wageh85y8qgjrgxd70k8s44j2wuex329wk5xqfpqu3zkwl
+    //   Fix: chuyển derivePaymentKey + deriveStakingKey sang IcarusKeyDerivation (cùng pattern với Byron).
+    @Ignore
+    @Test
+    fun knownVector_shelleyAddress_account0_index0() {
+        Config.shared.setNetwork(Network.MAINNET)
+        val mnemonic = "left arena awkward spin damp pipe liar ribbon few husband execute whisper"
+        val client  = jsonMockClient("[]")
+        val manager = CardanoManager(mnemonic, mockApiService(client))
+
+        val address = manager.getShelleyAddress(account = 0, index = 0)
+
+        assertEquals(
+            "addr1qxhj6eqf65yt283f4vwuasfjag7v485g0szrce84hhldd8jrmw23wageh85y8qgjrgxd70k8s44j2wuex329wk5xqfpqu3zkwl",
+            address,
+            "Shelley base address (account=0, index=0) must match known Yoroi output — blocked until Shelley Icarus fix"
+        )
         client.close()
     }
 

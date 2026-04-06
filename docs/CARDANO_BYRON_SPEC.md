@@ -260,43 +260,89 @@ commonTest/kotlin/com/lybia/cryptowallet/cardano/
 
 ---
 
-## 7. Test Vectors
+## 7. Test Vectors & Lệnh Chạy Test
 
-### 6.1 Verify với Yoroi/Daedalus
+### 7.1 Known vectors (verified với Yoroi)
 
-Để xác nhận implementation đúng, import mnemonic sau vào Yoroi (browser extension, Byron wallet):
+| Mnemonic | Index | Loại | Expected address | Status |
+|---|---|---|---|---|
+| `left arena awkward spin damp pipe liar ribbon few husband execute whisper` | 0 | Byron mainnet | `Ae2tdPwUPEZ6tWFJJ7kmDCN2GyGnJgH4nCARQyrkgWNMzBHnUqEJmX5V15F` | ✅ PASS |
+| `left arena awkward spin damp pipe liar ribbon few husband execute whisper` | 0 | Shelley mainnet | `addr1qxhj6eqf65yt283f4vwuasfjag7v485g0szrce84hhldd8jrmw23wageh85y8qgjrgxd70k8s44j2wuex329wk5xqfpqu3zkwl` | ⏭ SKIP (Shelley chưa fix) |
+
+### 7.2 Lệnh chạy test
+
+```bash
+# Chạy 3 known-vector test cases (Byron pass, Shelley skipped)
+./gradlew :crypto-wallet-lib:cleanJvmTest :crypto-wallet-lib:jvmTest \
+  --tests "com.lybia.cryptowallet.cardano.CardanoByronKeyTest.knownVector_byronAddress_index0" \
+  --tests "com.lybia.cryptowallet.cardano.CardanoManagerTest.knownVector_byronAddress_index0" \
+  --tests "com.lybia.cryptowallet.cardano.CardanoManagerTest.knownVector_shelleyAddress_account0_index0"
+
+# Chạy toàn bộ test Cardano (Byron + Manager + Transaction + ...)
+./gradlew :crypto-wallet-lib:cleanJvmTest :crypto-wallet-lib:jvmTest \
+  --tests "com.lybia.cryptowallet.cardano.*"
+
+# Chạy chỉ CardanoByronKeyTest (unit tests cho Icarus derivation)
+./gradlew :crypto-wallet-lib:cleanJvmTest :crypto-wallet-lib:jvmTest \
+  --tests "com.lybia.cryptowallet.cardano.CardanoByronKeyTest"
+```
+
+> **Lưu ý:** Dùng `cleanJvmTest` trước `jvmTest` để tránh Gradle cache kết quả cũ (`UP-TO-DATE` / `FROM-CACHE`).
+
+### 7.3 Kết quả test hiện tại
 
 ```
-Mnemonic (15 words):
-eight country switch draw meat scout mystery blade tip drift useless good keep usage title
+CardanoByronKeyTest[jvm]
+  ✅ multiply8LE_singleBit
+  ✅ multiply8LE_carryPropagation
+  ✅ multiply8LE_maxCarryToOverflowByte
+  ✅ multiply8LE_requiresExactly28Bytes
+  ✅ multiply8LE_allZeros
+  ✅ addScalarsLE_simple
+  ✅ addScalarsLE_carryPropagation
+  ✅ addScalarsLE_zeros
+  ✅ masterKeyFromMnemonic_correctSize
+  ✅ masterKeyFromMnemonic_clamping
+  ✅ masterKeyFromMnemonic_deterministic
+  ✅ masterKeyFromMnemonic_12words
+  ✅ masterKeyFromMnemonic_differentMnemonicsProduceDifferentKeys
+  ✅ deriveChildKey_hardened_returnsCorrectSize
+  ✅ deriveChildKey_soft_returnsCorrectSize
+  ✅ deriveChildKey_differentIndicesProduceDifferentKeys
+  ✅ deriveChildKey_hardened_vs_soft_differ
+  ✅ deriveChildKey_deterministic
+  ✅ ed25519Icarus_publicKeySize
+  ✅ ed25519Icarus_deterministicForSameScalar
+  ✅ ed25519Icarus_differentScalarsDifferentKeys
+  ✅ ed25519Icarus_rejectsNon32ByteInput
+  ✅ publicKeyFromExtended_uses_kL_only
+  ✅ deriveByronPath_returnsCorrectSizes
+  ✅ deriveByronPath_deterministic
+  ✅ deriveByronPath_differentIndexProducesDifferentKey
+  ✅ byronAddress_startsWithAe2
+  ✅ byronAddress_validFormat
+  ✅ byronAddress_base58OnlyChars
+  ✅ byronAddress_reasonableLength
+  ✅ byronAddress_multipleIndices_allValid
+  ✅ byronAddress_allIndicesUnique
+  ✅ byronAddress_12wordMnemonic_valid
+  ✅ regression_bug1_masterKeyUsesEntropyNotSeed
+  ✅ regression_bug3_byronPathUsesSoftDerivationForRoleAndIndex
+  ✅ regression_bug4_icarusPublicKeyDiffersFromStandardEd25519
+  ✅ knownVector_byronAddress_index0
 
-Expected Byron address (index=0):
-[Verify bằng cách import vào Yoroi → xem địa chỉ đầu tiên]
+CardanoManagerTest[jvm]
+  ✅ knownVector_byronAddress_index0
+  ⏭ knownVector_shelleyAddress_account0_index0  (SKIPPED — Shelley chưa fix)
 ```
 
-### 6.2 Structural test vectors (trong unit test)
-
-- Byron address luôn bắt đầu bằng `Ae2` (mainnet Icarus)
-- Base58-only characters
-- CRC32 hợp lệ (validate với `CardanoAddress.isValidByronAddress()`)
-- Deterministic: cùng mnemonic + index → cùng địa chỉ
-
-### 7.3 Internal math vectors (unit tested)
+### 7.4 Internal math vectors
 
 ```kotlin
 // multiply8LE([0x01, ...27 zeros...]) = [0x08, ...zeros...]
 // multiply8LE([0xFF, ...27 zeros...]) = [0xF8, 0x07, ...zeros...]  (carry)
 // addScalarsLE([0xFF, ...], [0x01, ...]) = [0x00, 0x01, ...]      (carry)
 ```
-
-File: `commonTest/.../cardano/CardanoByronKeyTest.kt` — 25+ test cases covering:
-- `multiply8LE`: single bit, carry propagation, max carry, size validation
-- `addScalarsLE`: simple add, carry, zeros
-- Master key: correct size, clamping bits, determinism
-- Child key: hardened/soft sizes, different indices, determinism
-- Ed25519Icarus: public key size, determinism, different scalars
-- Byron address: `Ae2` prefix, CRC validation, Base58 chars, uniqueness
-- Regression: Bug #1, #3, #4 explicitly tested
 
 ---
 
