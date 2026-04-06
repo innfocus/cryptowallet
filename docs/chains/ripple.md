@@ -1,6 +1,6 @@
 # Ripple (XRP) — Đặc tả Kỹ thuật
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Status:** ✅ Cross-platform (commonMain) | ✅ Android | ✅ iOS  
 **Scope:** `commonMain/kotlin/com/lybia/cryptowallet/wallets/ripple/`  
 **Related:** [XRP Ledger Dev Portal](https://xrpl.org/), [rippled API](https://xrpl.org/public-api-methods.html)  
@@ -23,11 +23,11 @@ Module Ripple trong `crypto-wallet-lib` hỗ trợ tạo ví XRP từ BIP-39 mne
 | Gửi XRP (Payment) | ✅ | Client-side signing + submit |
 | Destination Tag | ✅ | Tùy chọn (cho sàn giao dịch) |
 | Dynamic fee estimation | ✅ | JSON-RPC `fee` |
-| Memo support | ❌ **Thiếu** | Constant defined nhưng chưa serialize — xem [#BUG-1](#bug-1-thiếu-memo-serialization-medium) |
-| Balance validation trước send | ❌ **Thiếu** | Code cũ có, KMP chưa — xem [#BUG-3](#bug-3-thiếu-balance-validation-trước-khi-gửi-low-medium) |
-| Local Transaction ID | ❌ **Thiếu** | Code cũ tính local, KMP phụ thuộc response — xem [#BUG-4](#bug-4-thiếu-local-transaction-id-low) |
+| Memo support | ✅ | STArray serialization (MemoType + MemoData) — fixed 2026-04-06 |
+| Balance validation trước send | ✅ | Check reserve 10 XRP + amount + fee — fixed 2026-04-06 |
+| Local Transaction ID | ✅ | SHA-512Half(TXN\0 + blob) — fixed 2026-04-06 |
 | Service fee (multi-TX) | ❌ **Thiếu** | Code cũ gửi TX thứ 2 cho service fee — xem [#BUG-5](#bug-5-thiếu-service-fee-second-transaction-low) |
-| Input validation (signer) | ❌ **Thiếu** | Không validate key size, amount range — xem [#BUG-6](#bug-6-thiếu-input-validation-trong-xrptransactionsigner-medium) |
+| Input validation (signer) | ✅ | Validate key size, amount range, sequence — fixed 2026-04-06 |
 | Mainnet / Testnet | ✅ | Chuyển đổi qua `Config.shared` |
 
 ### So sánh với Bitcoin
@@ -649,15 +649,15 @@ val drops = (xrp * 1_000_000).toLong()
 
 ## 13. Lưu ý quan trọng
 
-1. **Account reserve:** Mỗi XRP account cần tối thiểu **10 XRP** để kích hoạt trên ledger. Gửi ít hơn đến account mới → `tecNO_DST_INSUF_XRP`. ⚠️ KMP chưa validate reserve trước send ([BUG-3](#bug-3-thiếu-balance-validation-trước-khi-gửi-low-medium)).
+1. **Account reserve:** Mỗi XRP account cần tối thiểu **10 XRP** để kích hoạt trên ledger. Gửi ít hơn đến account mới → `tecNO_DST_INSUF_XRP`. ✅ `sendXrp()` đã validate reserve trước send.
 2. **Destination Tag:** Bắt buộc khi gửi đến sàn giao dịch. Quên → mất XRP.
 3. **Base58 Alphabet:** XRP dùng bảng chữ cái **khác Bitcoin**. Không bao giờ dùng Bitcoin Base58 để decode XRP address.
 4. **Sequence number:** Mỗi TX phải có sequence tăng dần. Lấy từ `account_info` trước mỗi lần gửi.
-5. **LastLedgerSequence:** Code cũ dùng `+75` (~5 phút), KMP hiện tại dùng `+20` (~1 phút) — có thể quá chặt khi congestion ([BUG-2](#bug-2-lastledgersequence-offset-quá-nhỏ-medium)).
+5. **LastLedgerSequence:** Đã sửa thành `+75` (~5 phút), an toàn khi network congestion.
 6. **Ripple epoch:** Thời gian trong TX = Unix timestamp - 946684800 (offset từ 2000-01-01).
 7. **SHA-512Half:** XRP dùng 32 byte đầu của SHA-512, **không phải** SHA-256 như Bitcoin.
 8. **Fee mặc định:** 12 drops (0.000012 XRP). Dùng `estimateFeeDynamic()` cho fee chính xác.
-9. **Memo:** ⚠️ KMP hiện tại **không hỗ trợ** memo text trong TX, chỉ có DestinationTag ([BUG-1](#bug-1-thiếu-memo-serialization-medium)).
+9. **Memo:** ✅ Đã hỗ trợ memo text (STArray format, MemoType = "text/plain").
 
 ---
 
@@ -711,16 +711,16 @@ val drops = (xrp * 1_000_000).toLong()
 
 | # | Vấn đề | Mức độ | File | Trạng thái |
 |---|--------|--------|------|-----------|
-| BUG-1 | Thiếu Memo serialization | 🟡 MEDIUM | `XrpTransactionSigner.kt` | ❌ Chưa fix |
-| BUG-2 | LastLedgerSequence offset quá nhỏ (20 vs 75) | 🟡 MEDIUM | `RippleManager.kt:169` | ❌ Chưa fix |
-| BUG-3 | Thiếu balance validation trước send | 🟠 LOW-MEDIUM | `RippleManager.kt:154` | ❌ Chưa fix |
-| BUG-4 | Thiếu local Transaction ID | 🟢 LOW | `RippleManager.kt` | ❌ Chưa fix |
+| BUG-1 | Thiếu Memo serialization | 🟡 MEDIUM | `XrpTransactionSigner.kt` | ✅ Fixed 2026-04-06 |
+| BUG-2 | LastLedgerSequence offset quá nhỏ (20 vs 75) | 🟡 MEDIUM | `RippleManager.kt` | ✅ Fixed 2026-04-06 |
+| BUG-3 | Thiếu balance validation trước send | 🟠 LOW-MEDIUM | `RippleManager.kt` | ✅ Fixed 2026-04-06 |
+| BUG-4 | Thiếu local Transaction ID | 🟢 LOW | `XrpTransactionSigner.kt` | ✅ Fixed 2026-04-06 |
 | BUG-5 | Thiếu service fee (second TX) | 🟢 LOW | `RippleManager.kt` | ❌ Chưa fix |
-| BUG-6 | Thiếu input validation trong signer | 🟡 MEDIUM | `XrpTransactionSigner.kt:61` | ❌ Chưa fix |
-| BUG-7 | Duplicate RPC call (getSequence + getLedgerIndex) | 🟢 LOW | `RippleManager.kt:167-168` | ❌ Chưa fix |
+| BUG-6 | Thiếu input validation trong signer | 🟡 MEDIUM | `XrpTransactionSigner.kt:92-98` | ✅ Fixed 2026-04-06 |
+| BUG-7 | Duplicate RPC call (getSequence + getLedgerIndex) | 🟢 LOW | `RippleManager.kt` | ✅ Fixed 2026-04-06 |
 | IMPROVE-1 | `e.printStackTrace()` thay vì logger | 🟢 LOW | `RippleApiService.kt` | ❌ Chưa fix |
 | IMPROVE-2 | Thiếu HTTP request timeout | 🟡 MEDIUM | `RippleApiService.kt` | ❌ Chưa fix |
-| IMPROVE-3 | Duplicate Base58 decode (signer vs Base58Ext) | 🟢 LOW | `XrpTransactionSigner.kt:271` | ❌ Chưa fix |
+| IMPROVE-3 | Duplicate Base58 decode (signer vs Base58Ext) | 🟢 LOW | `XrpTransactionSigner.kt:351` | ❌ Chưa fix |
 
 ### Chi tiết từng vấn đề
 

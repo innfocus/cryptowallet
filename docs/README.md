@@ -28,7 +28,9 @@ Chào mừng bạn đến với hệ thống tài liệu kỹ thuật của dự
 
 ### 📱 Hướng dẫn theo Nền tảng
 - [**Dành cho Android:** Cách dùng CoinsManager](android/usage-guide.md)
+- [**Dành cho Android:** Tích hợp Cardano (Byron + Shelley)](android/cardano-integration.md)
 - [**Dành cho iOS:** Cách dùng Swift async/await](ios/swift-integration.md)
+- [**Dành cho iOS:** Tích hợp Cardano (Byron + Shelley)](ios/cardano-integration.md)
 - [Hướng dẫn cho User cuối](architecture/user-guide.md)
 
 ### 🔌 API Reference
@@ -39,6 +41,8 @@ Chào mừng bạn đến với hệ thống tài liệu kỹ thuật của dự
 - [Đặc tả Bitcoin (BTC)](chains/bitcoin.md) — BIP-32/39/44/84, SegWit, UTXO, fee estimation
 - [Đặc tả Ripple (XRP)](chains/ripple.md) — Base58Ripple, SHA-512Half, JSON-RPC, Destination Tag
 - [Tích hợp TON (The Open Network)](chains/ton.md)
+- [Đặc tả Cardano Byron](chains/cardano-byron.md) — Icarus V2, Base58, CBOR, ed25519-bip32
+- [Đặc tả Cardano Shelley](chains/cardano-shelley.md) — CIP-1852, Bech32, staking, native token
 - [Tích hợp Cardano & Midnight](chains/cardano-midnight.md)
 
 ---

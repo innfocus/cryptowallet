@@ -21,7 +21,7 @@ class XrpTransactionSignerTest {
 
     // Well-known test private key (32 bytes) — NOT a real wallet
     private val testPrivateKey = ByteArray(32) { (it + 1).toByte() }
-    private val testPublicKey: ByteArray = Secp256k1.pubkeyCreate(testPrivateKey)
+    private val testPublicKey: ByteArray = Secp256k1.pubKeyCompress(Secp256k1.pubkeyCreate(testPrivateKey))
 
     // Well-known XRP testnet addresses (derived from test keys, Base58Ripple)
     // Using the "abandon" mnemonic address for account, and a second for destination
