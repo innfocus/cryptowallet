@@ -77,16 +77,25 @@ enum class ACTCoin(val assetId: Int = 0) {
         override fun baseApiUrl() = ""
         override fun allowNewAddress() = false
     },
-    Centrality {
+    Centrality(assetId = 1) {
         override fun feeDefault() = 15287.0
         override fun minimumAmount() = 0.0
         override fun supportMemo() = false
-        override fun nameCoin(): String = when (assetId) {
-            1 -> "CENNZnet"; 2 -> "CPAY"; else -> "Centrality"
-        }
-        override fun symbolName(): String = when (assetId) {
-            1 -> "CENNZ"; 2 -> "CPAY"; else -> "CENNZ"
-        }
+        override fun nameCoin() = "CENNZnet"
+        override fun symbolName() = "CENNZ"
+        override fun minimumValue() = 0.01
+        override fun unitValue() = 10_000.0
+        override fun regex() = "(?:(5|[a-km-zA-HJ-NP-Z1-9]{47,}))"
+        override fun algorithm() = Algorithm.Sr25519
+        override fun baseApiUrl() = ""
+        override fun allowNewAddress() = false
+    },
+    CPAY(assetId = 2) {
+        override fun feeDefault() = 15287.0
+        override fun minimumAmount() = 0.0
+        override fun supportMemo() = false
+        override fun nameCoin() = "CPAY"
+        override fun symbolName() = "CPAY"
         override fun minimumValue() = 0.01
         override fun unitValue() = 10_000.0
         override fun regex() = "(?:(5|[a-km-zA-HJ-NP-Z1-9]{47,}))"

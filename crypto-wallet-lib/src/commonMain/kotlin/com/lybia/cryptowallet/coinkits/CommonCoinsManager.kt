@@ -437,12 +437,13 @@ class CommonCoinsManager(
                     val manager = getOrCreateManager(coin) as CentralityManager
                     val addr = address ?: manager.getAddressAsync()
                     val page = (pageParam?.get("page") as? Number)?.toInt() ?: 0
-                    val result = manager.getTransactionHistoryPaginated(addr, limit, page)
+                    val assetId = (pageParam?.get("assetId") as? Number)?.toInt() ?: CentralityManager.ASSET_CENNZ
+                    val result = manager.getTransactionHistoryPaginated(addr, assetId, limit, page)
                     val nextPage = if (result.isNotEmpty() && result.size >= limit) page + 1 else null
                     TransactionHistoryResult(
                         transactions = result,
                         hasMore = nextPage != null,
-                        nextPageParam = nextPage?.let { mapOf("page" to it) },
+                        nextPageParam = nextPage?.let { mapOf("page" to it, "assetId" to assetId) },
                         success = true
                     )
                 }
@@ -1388,24 +1389,44 @@ class CommonCoinsManager(
 
     // ── Centrality-specific operations ──────────────────────────────────────
 
-    suspend fun getCentralityBalance(address: String? = null): BalanceResult {
-        return getBalance(NetworkName.CENTRALITY, address)
+    /**
+     * Get balance for a Centrality asset (CENNZ or CPAY).
+     * @param assetId 1 = CENNZ, 2 = CPAY (see [CentralityManager.ASSET_CENNZ], [CentralityManager.ASSET_CPAY])
+     */
+    suspend fun getCentralityBalance(address: String? = null, assetId: Int = CentralityManager.ASSET_CENNZ): BalanceResult {
+        return try {
+            val manager = getOrCreateManager(NetworkName.CENTRALITY) as CentralityManager
+            val balance = manager.getBalance(address, assetId)
+            BalanceResult(balance = balance, success = true)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to get Centrality balance (assetId=$assetId)" }
+            BalanceResult(balance = 0.0, success = false, error = e.message)
+        }
     }
 
-    suspend fun getCentralityTransactions(address: String? = null): Any? {
-        return getTransactionHistory(NetworkName.CENTRALITY, address)
+    /**
+     * Get transaction history for a Centrality asset (CENNZ or CPAY).
+     * @param assetId 1 = CENNZ, 2 = CPAY
+     */
+    suspend fun getCentralityTransactions(address: String? = null, assetId: Int = CentralityManager.ASSET_CENNZ): Any? {
+        return try {
+            val manager = getOrCreateManager(NetworkName.CENTRALITY) as CentralityManager
+            manager.getTransactionHistory(address, assetId)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to get Centrality transactions (assetId=$assetId)" }
+            null
+        }
     }
 
     suspend fun sendCentrality(
         fromAddress: String,
         toAddress: String,
         amount: Double,
-        assetId: Int = 1
+        assetId: Int = CentralityManager.ASSET_CENNZ
     ): SendResult {
         return try {
-            val manager = getOrCreateManager(NetworkName.CENTRALITY)
-            val centralityManager = manager as CentralityManager
-            val result = centralityManager.sendCoin(fromAddress, toAddress, amount, assetId)
+            val manager = getOrCreateManager(NetworkName.CENTRALITY) as CentralityManager
+            val result = manager.sendCoin(fromAddress, toAddress, amount, assetId)
             SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
         } catch (e: Exception) {
             SendResult(txHash = "", success = false, error = e.message)

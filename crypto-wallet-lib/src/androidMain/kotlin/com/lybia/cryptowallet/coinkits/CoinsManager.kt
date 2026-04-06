@@ -152,7 +152,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
     private var addressesManager = mutableMapOf<String, Array<ACTAddress>>()
     private var coinsSupported = arrayListOf(
         ACTCoin.Bitcoin, ACTCoin.Ethereum, ACTCoin.Cardano, ACTCoin.Ripple,
-        ACTCoin.Centrality, ACTCoin.XCoin, ACTCoin.TON
+        ACTCoin.Centrality, ACTCoin.CPAY, ACTCoin.XCoin, ACTCoin.TON
     )
     private var networkManager = mutableMapOf(
         ACTCoin.Bitcoin.symbolName() to ACTNetwork(ACTCoin.Bitcoin, true),
@@ -246,17 +246,17 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
         addressesManager[symbolName]?.let { return it }
 
         return when (coin) {
-            ACTCoin.Centrality -> {
-                logger.d { "Generating Centrality address via commonManager" }
+            ACTCoin.Centrality, ACTCoin.CPAY -> {
+                logger.d { "Generating Centrality address via commonManager for $coin" }
                 launch {
                     try {
                         val addr = commonManager.getAddressAsync(NetworkName.CENTRALITY)
                         if (addr.isNotEmpty()) {
-                            val actAddress = ACTAddress(addr, ACTNetwork(ACTCoin.Centrality, false))
+                            val actAddress = ACTAddress(addr, ACTNetwork(coin, false))
                             addressesManager[symbolName] = arrayOf(actAddress)
                         }
                     } catch (e: Exception) {
-                        logger.e(e) { "Failed to get Centrality address" }
+                        logger.e(e) { "Failed to get Centrality address for $coin" }
                     }
                 }
                 addressesManager[symbolName]
@@ -300,15 +300,15 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
             ACTCoin.Ethereum -> getETHBalance(adds.first(), completionHandler)
             ACTCoin.Cardano -> getADABalance(adds, completionHandler)
             ACTCoin.Ripple -> getXRPBalance(adds.first(), completionHandler)
-            ACTCoin.Centrality -> {
+            ACTCoin.Centrality, ACTCoin.CPAY -> {
                 launch {
                     try {
-                        val result = commonManager.getBalance(NetworkName.CENTRALITY, adds.first().rawAddressString())
+                        val result = commonManager.getCentralityBalance(adds.first().rawAddressString(), coin.assetId)
                         withContext(Dispatchers.Main) {
                             completionHandler.completionHandler(result.balance, result.success)
                         }
                     } catch (e: Exception) {
-                        logger.e(e) { "Failed to get Centrality balance" }
+                        logger.e(e) { "Failed to get Centrality balance for $coin" }
                         withContext(Dispatchers.Main) { completionHandler.completionHandler(0.0, false) }
                     }
                 }
@@ -341,6 +341,26 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
             ACTCoin.Cardano -> getADATransactions(adds, completionHandler)
             ACTCoin.Ripple -> getXRPTransactions(adds.first(), moreParam, completionHandler)
             ACTCoin.TON -> getTonTransactions(adds.first(), completionHandler)
+            ACTCoin.Centrality, ACTCoin.CPAY -> {
+                launch {
+                    try {
+                        val myAddress = adds.first().rawAddressString()
+                        val transfers = commonManager.getCentralityTransactions(myAddress, coin.assetId)
+                        val txDatas = (transfers as? List<*>)
+                            ?.filterIsInstance<com.lybia.cryptowallet.wallets.centrality.model.CennzTransfer>()
+                            ?.toTransactionDatas(myAddress, coin)
+                            ?.toTypedArray()
+                        withContext(Dispatchers.Main) {
+                            completionHandler.completionHandler(txDatas, null, "")
+                        }
+                    } catch (e: Exception) {
+                        logger.e(e) { "Failed to get Centrality transactions for $coin" }
+                        withContext(Dispatchers.Main) {
+                            completionHandler.completionHandler(arrayOf(), null, e.message ?: "Error")
+                        }
+                    }
+                }
+            }
             else -> {
                 logger.w { "Coin $coin not supported for transactions" }
                 completionHandler.completionHandler(arrayOf(), null, "Not supported")
@@ -380,8 +400,8 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
                 completionHandler.completionHandler(ACTCoin.Cardano.feeDefault(), "")
             }
 
-            ACTCoin.Centrality -> {
-                completionHandler.completionHandler(ACTCoin.Centrality.feeDefault(), "")
+            ACTCoin.Centrality, ACTCoin.CPAY -> {
+                completionHandler.completionHandler(network.coin.feeDefault(), "")
             }
 
             ACTCoin.TON -> {
@@ -462,7 +482,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
                 sendTonCoin(toAddressStr, amount, networkMemo, completionHandler)
             }
 
-            ACTCoin.Centrality -> {
+            ACTCoin.Centrality, ACTCoin.CPAY -> {
                 launch {
                     try {
                         val result = commonManager.sendCentrality(
@@ -472,7 +492,7 @@ class CoinsManager : ICoinsManager, ITokenManager, INFTManager,
                             completionHandler.completionHandler(result.txHash, result.success, result.error ?: "")
                         }
                     } catch (e: Exception) {
-                        logger.e(e) { "Failed to send Centrality" }
+                        logger.e(e) { "Failed to send ${coin.symbolName()}" }
                         withContext(Dispatchers.Main) {
                             completionHandler.completionHandler("", false, e.message ?: "Error")
                         }

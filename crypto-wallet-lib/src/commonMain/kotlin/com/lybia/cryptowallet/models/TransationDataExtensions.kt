@@ -4,6 +4,8 @@ import com.lybia.cryptowallet.enums.ACTCoin
 import com.lybia.cryptowallet.models.bitcoin.BTCApiModel
 import com.lybia.cryptowallet.models.cardano.CardanoTransactionInfo
 import com.lybia.cryptowallet.models.ton.TonTransaction
+import com.lybia.cryptowallet.wallets.centrality.CentralityManager
+import com.lybia.cryptowallet.wallets.centrality.model.CennzTransfer
 import kotlin.jvm.JvmName
 
 /**
@@ -16,6 +18,7 @@ import kotlin.jvm.JvmName
 private const val BTC_UNIT = 100_000_000f
 private const val ADA_UNIT = 1_000_000f
 private const val TON_UNIT = 1_000_000_000f
+private const val CENNZ_UNIT = CentralityManager.BASE_UNIT.toFloat()
 
 // ─── Bitcoin ────────────────────────────────────────────────────────
 
@@ -104,6 +107,25 @@ fun TonTransaction.toTransactionData(myAddress: String): TransationData {
     }
 
     return tran
+}
+
+// ─── Centrality (CENNZ / CPAY) ─────────────────────────────────────
+
+@JvmName("cennzToTransactionDatas")
+fun List<CennzTransfer>.toTransactionDatas(myAddress: String, coin: ACTCoin = ACTCoin.Centrality): List<TransationData> {
+    return map { it.toTransactionData(myAddress, coin) }.sortedByDescending { it.dateMillis }
+}
+
+fun CennzTransfer.toTransactionData(myAddress: String, coin: ACTCoin = ACTCoin.Centrality): TransationData {
+    val result = TransationData()
+    result.iD = hash
+    result.fromAddress = from
+    result.toAddress = to
+    result.dateMillis = blockTimestamp * 1000L
+    result.amount = amount.toFloat() / CENNZ_UNIT
+    result.coin = coin
+    result.isSend = from.equals(myAddress, ignoreCase = true)
+    return result
 }
 
 // ─── Utility ────────────────────────────────────────────────────────

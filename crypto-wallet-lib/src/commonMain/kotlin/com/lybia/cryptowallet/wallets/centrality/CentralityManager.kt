@@ -17,8 +17,7 @@ import com.lybia.cryptowallet.wallets.hdwallet.bip39.ACTBIP39
  */
 class CentralityManager(
     private val mnemonic: String,
-    private val apiService: CentralityApiService = CentralityApiService(),
-    private val assetId: Int = 1
+    private val apiService: CentralityApiService = CentralityApiService()
 ) : IWalletManager {
 
     private val logger = Logger.withTag("CentralityManager")
@@ -27,6 +26,10 @@ class CentralityManager(
     companion object {
         const val BASE_UNIT = 10000
         const val CAL_PERIOD = 128
+        /** CENNZ native token */
+        const val ASSET_CENNZ = 1
+        /** CPAY service payment token */
+        const val ASSET_CPAY = 2
     }
 
     // ─── IWalletManager Implementation ──────────────────────────────
@@ -54,6 +57,15 @@ class CentralityManager(
     }
 
     override suspend fun getBalance(address: String?, coinNetwork: CoinNetwork?): Double {
+        return getBalance(address, assetId = ASSET_CENNZ)
+    }
+
+    /**
+     * Get balance for a specific asset on the Centrality chain.
+     * @param address Centrality address (null = use cached/derived address)
+     * @param assetId Asset identifier: [ASSET_CENNZ] (1) or [ASSET_CPAY] (2)
+     */
+    suspend fun getBalance(address: String?, assetId: Int): Double {
         val addr = address ?: getAddressAsync()
         val account = apiService.scanAccount(addr)
         val asset = account.balances.find { it.assetId == assetId }
@@ -61,6 +73,15 @@ class CentralityManager(
     }
 
     override suspend fun getTransactionHistory(address: String?, coinNetwork: CoinNetwork?): Any? {
+        return getTransactionHistory(address, assetId = ASSET_CENNZ)
+    }
+
+    /**
+     * Get transaction history for a specific asset.
+     * @param address Centrality address (null = use cached/derived address)
+     * @param assetId Asset identifier: [ASSET_CENNZ] (1) or [ASSET_CPAY] (2)
+     */
+    suspend fun getTransactionHistory(address: String?, assetId: Int): List<CennzTransfer> {
         val addr = address ?: getAddressAsync()
         val result = apiService.scanTransfers(addr)
         return result.transfers.filter { it.assetId == assetId && it.success }
@@ -69,15 +90,17 @@ class CentralityManager(
     /**
      * Get transaction history with pagination support.
      * @param address Centrality address
+     * @param assetId Asset identifier: [ASSET_CENNZ] (1) or [ASSET_CPAY] (2)
      * @param row Max transactions per page
      * @param page Page number (0-based)
      * @return Filtered list of CennzTransfer for the current page
      */
     suspend fun getTransactionHistoryPaginated(
         address: String,
+        assetId: Int = ASSET_CENNZ,
         row: Int = 100,
         page: Int = 0
-    ): List<com.lybia.cryptowallet.wallets.centrality.model.CennzTransfer> {
+    ): List<CennzTransfer> {
         val result = apiService.scanTransfers(address, row, page)
         return result.transfers.filter { it.assetId == assetId && it.success }
     }

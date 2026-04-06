@@ -7,7 +7,7 @@ class ACTNetwork(val coin: ACTCoin, val isTestNet: Boolean) {
         ACTCoin.Ethereum -> 60
         ACTCoin.Cardano -> 1815
         ACTCoin.Ripple -> 144
-        ACTCoin.Centrality -> 392
+        ACTCoin.Centrality, ACTCoin.CPAY -> 392
         ACTCoin.XCoin -> 868
         ACTCoin.TON -> 607
         ACTCoin.Midnight -> 1815
@@ -44,7 +44,7 @@ class ACTNetwork(val coin: ACTCoin, val isTestNet: Boolean) {
         ACTCoin.Ethereum -> if (chain == Change.Internal) 0 else 1
         ACTCoin.Cardano -> if (chain == Change.Internal) 0 else 50
         ACTCoin.Ripple -> if (chain == Change.Internal) 0 else 1
-        ACTCoin.Centrality -> if (chain == Change.Internal) 0 else 1
+        ACTCoin.Centrality, ACTCoin.CPAY -> if (chain == Change.Internal) 0 else 1
         ACTCoin.XCoin -> if (chain == Change.Internal) 0 else 1
         ACTCoin.TON -> if (chain == Change.Internal) 0 else 1
         ACTCoin.Midnight -> if (chain == Change.Internal) 0 else 1
@@ -61,7 +61,7 @@ class ACTNetwork(val coin: ACTCoin, val isTestNet: Boolean) {
             ACTCoin.Ethereum -> "https://etherscan.io"
             ACTCoin.Cardano -> "https://cardanoexplorer.com"
             ACTCoin.Ripple -> "https://bithomp.com"
-            ACTCoin.Centrality -> "https://uncoverexplorer.com"
+            ACTCoin.Centrality, ACTCoin.CPAY -> "https://uncoverexplorer.com"
             ACTCoin.XCoin -> "Explorer XCoin"
             ACTCoin.TON -> "https://tonscan.org"
             ACTCoin.Midnight -> "https://explorer.midnight.network"
@@ -71,7 +71,7 @@ class ACTNetwork(val coin: ACTCoin, val isTestNet: Boolean) {
             ACTCoin.Ethereum -> "https://goerli.etherscan.io"
             ACTCoin.Cardano -> "https://cardanoexplorer.com"
             ACTCoin.Ripple -> "https://test.bithomp.com"
-            ACTCoin.Centrality -> "https://uncoverexplorer.com"
+            ACTCoin.Centrality, ACTCoin.CPAY -> "https://uncoverexplorer.com"
             ACTCoin.XCoin -> "Explorer XCoin"
             ACTCoin.TON -> "https://testnet.tonscan.org"
             ACTCoin.Midnight -> "https://explorer.testnet.midnight.network"
@@ -79,7 +79,7 @@ class ACTNetwork(val coin: ACTCoin, val isTestNet: Boolean) {
     }
 
     fun explorerForTX(): String = when (coin) {
-        ACTCoin.Centrality -> "https://uncoverexplorer.com/extrinsic/"
+        ACTCoin.Centrality, ACTCoin.CPAY -> "https://uncoverexplorer.com/extrinsic/"
         else -> explorer() + if (coin == ACTCoin.Ripple) "/explorer/" else "/tx/"
     }
 }
