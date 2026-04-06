@@ -1,6 +1,6 @@
 # Ripple (XRP) — Đặc tả Kỹ thuật
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Status:** ✅ Cross-platform (commonMain) | ✅ Android | ✅ iOS  
 **Scope:** `commonMain/kotlin/com/lybia/cryptowallet/wallets/ripple/`  
 **Related:** [XRP Ledger Dev Portal](https://xrpl.org/), [rippled API](https://xrpl.org/public-api-methods.html)  
@@ -26,7 +26,7 @@ Module Ripple trong `crypto-wallet-lib` hỗ trợ tạo ví XRP từ BIP-39 mne
 | Memo support | ✅ | STArray serialization (MemoType + MemoData) — fixed 2026-04-06 |
 | Balance validation trước send | ✅ | Check reserve 10 XRP + amount + fee — fixed 2026-04-06 |
 | Local Transaction ID | ✅ | SHA-512Half(TXN\0 + blob) — fixed 2026-04-06 |
-| Service fee (multi-TX) | ❌ **Thiếu** | Code cũ gửi TX thứ 2 cho service fee — xem [#BUG-5](#bug-5-thiếu-service-fee-second-transaction-low) |
+| Service fee (multi-TX) | ✅ | TX thứ 2 với sequence+1, fire-and-forget — fixed 2026-04-06 |
 | Input validation (signer) | ✅ | Validate key size, amount range, sequence — fixed 2026-04-06 |
 | Mainnet / Testnet | ✅ | Chuyển đổi qua `Config.shared` |
 
@@ -715,12 +715,12 @@ val drops = (xrp * 1_000_000).toLong()
 | BUG-2 | LastLedgerSequence offset quá nhỏ (20 vs 75) | 🟡 MEDIUM | `RippleManager.kt` | ✅ Fixed 2026-04-06 |
 | BUG-3 | Thiếu balance validation trước send | 🟠 LOW-MEDIUM | `RippleManager.kt` | ✅ Fixed 2026-04-06 |
 | BUG-4 | Thiếu local Transaction ID | 🟢 LOW | `XrpTransactionSigner.kt` | ✅ Fixed 2026-04-06 |
-| BUG-5 | Thiếu service fee (second TX) | 🟢 LOW | `RippleManager.kt` | ❌ Chưa fix |
+| BUG-5 | Thiếu service fee (second TX) | 🟢 LOW | `RippleManager.kt` | ✅ Fixed 2026-04-06 |
 | BUG-6 | Thiếu input validation trong signer | 🟡 MEDIUM | `XrpTransactionSigner.kt:92-98` | ✅ Fixed 2026-04-06 |
 | BUG-7 | Duplicate RPC call (getSequence + getLedgerIndex) | 🟢 LOW | `RippleManager.kt` | ✅ Fixed 2026-04-06 |
-| IMPROVE-1 | `e.printStackTrace()` thay vì logger | 🟢 LOW | `RippleApiService.kt` | ❌ Chưa fix |
-| IMPROVE-2 | Thiếu HTTP request timeout | 🟡 MEDIUM | `RippleApiService.kt` | ❌ Chưa fix |
-| IMPROVE-3 | Duplicate Base58 decode (signer vs Base58Ext) | 🟢 LOW | `XrpTransactionSigner.kt:351` | ❌ Chưa fix |
+| IMPROVE-1 | `e.printStackTrace()` thay vì logger | 🟢 LOW | `RippleApiService.kt` | ✅ Fixed 2026-04-06 |
+| IMPROVE-2 | Thiếu HTTP request timeout | 🟡 MEDIUM | `RippleApiService.kt` | ✅ Fixed 2026-04-06 |
+| IMPROVE-3 | Duplicate Base58 decode (signer vs Base58Ext) | 🟢 LOW | `XrpTransactionSigner.kt` | ✅ Fixed 2026-04-06 |
 
 ### Chi tiết từng vấn đề
 
@@ -911,17 +911,20 @@ install(HttpTimeout) {
 | Async pattern | Callback (Retrofit) | Coroutines (Ktor) | ✅ KMP tốt hơn |
 | Signing algorithm | SHA-512Half + secp256k1 | SHA-512Half + secp256k1 | ✅ Giống nhau |
 | Serialization order | Enum-based field codes | Computed field headers | ✅ Cả 2 đúng spec |
-| Memo serialization | ✅ STArray format | ❌ Chưa có | 🔧 Cần port |
-| Balance pre-check | ✅ Check reserve + fee | ❌ Không check | 🔧 Cần thêm |
-| Local TX ID | ✅ SHA-512Half(TXN\0 + blob) | ❌ Chỉ từ response | 🔧 Cần thêm |
+| Memo serialization | ✅ STArray format | ✅ STArray format (MemoType + MemoData) | ✅ Đã port |
+| Balance pre-check | ✅ Check reserve + fee | ✅ Check amount + fee + 10 XRP reserve | ✅ Đã thêm |
+| Local TX ID | ✅ SHA-512Half(TXN\0 + blob) | ✅ `computeTransactionId()` + fallback | ✅ Đã thêm |
 | Fee estimation | Hardcode 12 drops | ✅ Dynamic (open_ledger_fee) | ✅ KMP tốt hơn |
-| LastLedgerSequence | +75 (~5 min) | +20 (~1 min) | 🔧 KMP quá chặt |
-| Service fee | ✅ TX thứ 2, sequence+1 | ❌ Chưa có | 🔧 Cần thêm |
+| LastLedgerSequence | +75 (~5 min) | ✅ +75 (~5 min) | ✅ Đã sửa, giống code cũ |
+| Service fee | ✅ TX thứ 2, sequence+1 | ✅ TX thứ 2, sequence+1, fire-and-forget | ✅ Đã thêm |
 | Pagination | ✅ Marker-based | ✅ Marker-based | ✅ Giống nhau |
 | Error handling | Callback error string | ✅ TransferResponseModel | ✅ KMP tốt hơn |
 | Success check | `engineResultCode == 0` | `tesSUCCESS` or `terQUEUED` | ✅ KMP chính xác hơn |
 | Cross-platform | ❌ Android-only | ✅ commonMain | ✅ KMP tốt hơn |
-| Input validation | Không | Không | 🔧 Cả 2 thiếu |
+| Input validation | Không | ✅ `require()` checks (key, amount, fee, seq) | ✅ KMP tốt hơn |
+| Logging | `e.printStackTrace()` | ✅ Kermit `Logger.withTag()` | ✅ KMP tốt hơn |
+| HTTP timeout | Không (Retrofit default) | ✅ 30s request + 30s socket | ✅ KMP tốt hơn |
+| Base58 decode | Custom implementation | ✅ Dùng chung `Base58Ext` | ✅ KMP gọn hơn |
 
 ---
 
@@ -929,12 +932,12 @@ install(HttpTimeout) {
 
 ### Priority 1 — Cần cho production
 
-| Tiêu chuẩn | Mô tả | File cần sửa | Link |
-|---|---|---|---|
-| **Memo Fields (STArray)** | Serialize MemoType + MemoData trong STArray wrapper. Code cũ đã có. | `XrpTransactionSigner.kt` | https://xrpl.org/transaction-common-fields.html#memos-field |
-| **Account Reserve Validation** | Check 10 XRP base reserve + owner reserve trước send | `RippleManager.kt` | https://xrpl.org/reserves.html |
-| **Reliable TX Submission** | Retry logic + verify qua `tx` RPC sau submit | `RippleManager.kt` | https://xrpl.org/reliable-transaction-submission.html |
-| **Transaction ID (local)** | Compute TX hash = SHA-512Half(`TXN\0` + signed_blob) | `XrpTransactionSigner.kt` | https://xrpl.org/transaction-basics.html |
+| Tiêu chuẩn | Mô tả | Trạng thái |
+|---|---|---|
+| **Memo Fields (STArray)** | Serialize MemoType + MemoData trong STArray wrapper | ✅ Fixed 2026-04-06 |
+| **Account Reserve Validation** | Check 10 XRP base reserve + fee trước send | ✅ Fixed 2026-04-06 |
+| **Transaction ID (local)** | Compute TX hash = SHA-512Half(`TXN\0` + signed_blob) | ✅ Fixed 2026-04-06 |
+| **Reliable TX Submission** | Retry logic + verify qua `tx` RPC sau submit | ⏳ Chưa implement |
 
 ### Priority 2 — Nên có
 

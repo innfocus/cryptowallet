@@ -1,8 +1,7 @@
 package com.lybia.cryptowallet.wallets.ripple
 
 import com.lybia.cryptowallet.utils.ACTCrypto
-import com.lybia.cryptowallet.utils.Keccak
-import com.lybia.cryptowallet.utils.fromHexToByteArray
+import com.lybia.cryptowallet.utils.Base58Ext
 import com.lybia.cryptowallet.utils.toHexString
 import fr.acinq.secp256k1.Secp256k1
 
@@ -332,9 +331,10 @@ object XrpTransactionSigner {
     /**
      * Decode an XRP r-address to 20-byte AccountID.
      * r-address = Base58Check with version byte 0x00.
+     * Uses Base58Ext with Ripple alphabet (shared utility).
      */
     private fun decodeRAddress(rAddress: String): ByteArray {
-        val decoded = base58Decode(rAddress)
+        val decoded = Base58Ext.decode(rAddress, Base58Ext.Base58Type.Ripple)
         // decoded = [version(1)] + [payload(20)] + [checksum(4)]
         require(decoded.size == 25) { "Invalid r-address length: ${decoded.size}" }
         require(decoded[0] == 0x00.toByte()) { "Invalid r-address version byte" }
@@ -344,28 +344,6 @@ object XrpTransactionSigner {
         val computed = ACTCrypto.doubleSHA256(payload).copyOfRange(0, 4)
         require(checksum.contentEquals(computed)) { "Invalid r-address checksum" }
         return decoded.copyOfRange(1, 21)
-    }
-
-    private val BASE58_ALPHABET = "rpshnaf39wBUDNEGHJKLM4PQRST7VWXYZ2bcdeCg65jkm8oFqi1tuvAxyz"
-
-    private fun base58Decode(input: String): ByteArray {
-        var result = mutableListOf(0)
-        for (c in input) {
-            val carry = BASE58_ALPHABET.indexOf(c)
-            require(carry >= 0) { "Invalid Base58 character: $c" }
-            var j = result.size - 1
-            var v = carry
-            while (j >= 0 || v > 0) {
-                v += if (j >= 0) result[j] * 58 else 0
-                if (j >= 0) result[j] = v % 256 else result.add(0, v % 256)
-                v /= 256
-                j--
-            }
-        }
-        // Count leading 'r' characters (= leading zeros)
-        val leadingZeros = input.takeWhile { it == 'r' }.length
-        val zeros = ByteArray(leadingZeros)
-        return zeros + result.map { it.toByte() }.toByteArray()
     }
 
     // ── Hashing ─────────────────────────────────────────────────────

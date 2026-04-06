@@ -1,5 +1,6 @@
 package com.lybia.cryptowallet.services
 
+import co.touchlab.kermit.Logger
 import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.models.ripple.RippleAccountInfoResponse
@@ -10,6 +11,7 @@ import com.lybia.cryptowallet.models.ripple.RippleRpcRequest
 import com.lybia.cryptowallet.models.ripple.RippleSubmitResponse
 import com.lybia.cryptowallet.models.ripple.RippleFeeResponse
 import io.ktor.client.call.body
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -24,11 +26,16 @@ import io.ktor.http.headers
 class RippleApiService(
     private val client: io.ktor.client.HttpClient = HttpClientService.INSTANCE.client
 ) {
+    private val logger = Logger.withTag("RippleApiService")
+
     companion object {
         val INSTANCE: RippleApiService = RippleApiService()
 
         private const val MAINNET_URL = "https://s1.ripple.com:51234"
         private const val TESTNET_URL = "https://s.altnet.rippletest.net:51234"
+
+        private const val REQUEST_TIMEOUT_MS = 30_000L
+        private const val SOCKET_TIMEOUT_MS = 30_000L
     }
 
     private fun getRpcUrl(): String {
@@ -54,6 +61,10 @@ class RippleApiService(
                 )
             )
             val response = client.post(getRpcUrl()) {
+                timeout {
+                    requestTimeoutMillis = REQUEST_TIMEOUT_MS
+                    socketTimeoutMillis = SOCKET_TIMEOUT_MS
+                }
                 headers { append(HttpHeaders.Accept, "application/json") }
                 contentType(ContentType.Application.Json)
                 setBody(request)
@@ -62,7 +73,7 @@ class RippleApiService(
                 response.body<RippleAccountInfoResponse>()
             } else null
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.e(e) { "account_info RPC failed for $address" }
             null
         }
     }
@@ -109,6 +120,10 @@ class RippleApiService(
                 )
             )
             val response = client.post(getRpcUrl()) {
+                timeout {
+                    requestTimeoutMillis = REQUEST_TIMEOUT_MS
+                    socketTimeoutMillis = SOCKET_TIMEOUT_MS
+                }
                 headers { append(HttpHeaders.Accept, "application/json") }
                 contentType(ContentType.Application.Json)
                 setBody(request)
@@ -117,7 +132,7 @@ class RippleApiService(
                 response.body<RippleAccountTxResponse>()
             } else null
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.e(e) { "account_tx RPC failed" }
             null
         }
     }
@@ -134,6 +149,10 @@ class RippleApiService(
                 )
             )
             val response = client.post(getRpcUrl()) {
+                timeout {
+                    requestTimeoutMillis = REQUEST_TIMEOUT_MS
+                    socketTimeoutMillis = SOCKET_TIMEOUT_MS
+                }
                 headers { append(HttpHeaders.Accept, "application/json") }
                 contentType(ContentType.Application.Json)
                 setBody(request)
@@ -142,7 +161,7 @@ class RippleApiService(
                 response.body<RippleSubmitResponse>()
             } else null
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.e(e) { "submit RPC failed" }
             null
         }
     }
@@ -158,6 +177,10 @@ class RippleApiService(
                 params = emptyList()
             )
             val response = client.post(getRpcUrl()) {
+                timeout {
+                    requestTimeoutMillis = REQUEST_TIMEOUT_MS
+                    socketTimeoutMillis = SOCKET_TIMEOUT_MS
+                }
                 headers { append(HttpHeaders.Accept, "application/json") }
                 contentType(ContentType.Application.Json)
                 setBody(request)
@@ -166,7 +189,7 @@ class RippleApiService(
                 response.body<RippleFeeResponse>()
             } else null
         } catch (e: Exception) {
-            e.printStackTrace()
+            logger.e(e) { "fee RPC failed" }
             null
         }
     }

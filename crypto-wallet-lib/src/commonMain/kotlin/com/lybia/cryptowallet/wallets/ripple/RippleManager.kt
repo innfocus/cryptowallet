@@ -157,6 +157,9 @@ class RippleManager(
      * @param feeDrops Fee in drops (0 = auto estimate)
      * @param destinationTag Optional destination tag (UInt32)
      * @param memoText Optional memo text
+     * @param serviceAddress Optional service fee r-address. If provided with serviceFeeDrops > 0,
+     *   a second transaction is sent to this address after the primary TX succeeds.
+     * @param serviceFeeDrops Service fee amount in drops (0 = no service fee)
      * @return TransferResponseModel with txHash on success
      */
     suspend fun sendXrp(
@@ -164,16 +167,20 @@ class RippleManager(
         amountDrops: Long,
         feeDrops: Long = 0L,
         destinationTag: Long? = null,
-        memoText: String? = null
+        memoText: String? = null,
+        serviceAddress: String? = null,
+        serviceFeeDrops: Long = 0L
     ): TransferResponseModel {
         return try {
             val fromAddr = walletAddress
                 ?: return TransferResponseModel(false, "No wallet address", null)
 
+            val hasServiceFee = !serviceAddress.isNullOrBlank() && serviceFeeDrops > 0
+
             // Use dynamic fee if not explicitly provided (0 = auto)
             val actualFee = if (feeDrops > 0) feeDrops else estimateFeeDynamic()
 
-            // Single RPC call for both sequence and ledger index (BUG-7 fix)
+            // Single RPC call for both sequence and ledger index
             val accountInfo = apiService.getAccountInfo(fromAddr)
                 ?: return TransferResponseModel(false, "Failed to get account info", null)
             val accountData = accountInfo.result.accountData
@@ -182,9 +189,11 @@ class RippleManager(
             val ledgerIndex = accountInfo.result.ledgerCurrentIndex ?: 0L
             val lastLedgerSeq = if (ledgerIndex > 0) ledgerIndex + LAST_LEDGER_OFFSET else null
 
-            // Balance validation: must cover amount + fee + 10 XRP reserve (BUG-3 fix)
+            // Balance validation: amount + fee + reserve, plus service fee TX if applicable
             val balanceDrops = accountData.balance.toLongOrNull() ?: 0L
-            val requiredDrops = amountDrops + actualFee + BASE_RESERVE_DROPS
+            val totalFees = if (hasServiceFee) actualFee * 2 else actualFee  // 2 TXs = 2 fees
+            val totalAmount = if (hasServiceFee) amountDrops + serviceFeeDrops else amountDrops
+            val requiredDrops = totalAmount + totalFees + BASE_RESERVE_DROPS
             if (balanceDrops < requiredDrops) {
                 return TransferResponseModel(
                     false,
@@ -211,10 +220,16 @@ class RippleManager(
             val response = apiService.submitTransaction(signResult.txBlob)
             val result = response?.result
             if (result?.engineResult == "tesSUCCESS" || result?.engineResult == "terQUEUED") {
+                // Send service fee as second TX with sequence+1 (fire-and-forget)
+                if (hasServiceFee) {
+                    sendServiceFee(
+                        fromAddr, serviceAddress!!, serviceFeeDrops, actualFee,
+                        sequence + 1, lastLedgerSeq?.let { it + LAST_LEDGER_OFFSET }
+                    )
+                }
                 TransferResponseModel(
                     success = true,
                     error = null,
-                    // Prefer server hash, fallback to locally computed TX ID
                     txHash = result.tx_json?.hash ?: signResult.transactionId
                 )
             } else {
@@ -226,6 +241,36 @@ class RippleManager(
             }
         } catch (e: Exception) {
             TransferResponseModel(success = false, error = e.message, txHash = null)
+        }
+    }
+
+    /**
+     * Send service fee as a separate transaction (fire-and-forget).
+     * Uses sequence+1 from the primary transaction.
+     * Errors are logged but do not affect the primary TX result.
+     */
+    private suspend fun sendServiceFee(
+        fromAddr: String,
+        serviceAddress: String,
+        serviceFeeDrops: Long,
+        feeDrops: Long,
+        sequence: Long,
+        lastLedgerSequence: Long?
+    ) {
+        try {
+            val signResult = XrpTransactionSigner.signPayment(
+                privateKey = privateKeyBytes,
+                publicKey = publicKeyBytes,
+                account = fromAddr,
+                destination = serviceAddress,
+                amountDrops = serviceFeeDrops,
+                feeDrops = feeDrops,
+                sequence = sequence,
+                lastLedgerSequence = lastLedgerSequence
+            )
+            apiService.submitTransaction(signResult.txBlob)
+        } catch (_: Exception) {
+            // Service fee is best-effort — don't fail the primary transaction
         }
     }
 

@@ -482,6 +482,27 @@ class XrpTransactionSignerTest {
         assertTrue(blob.contains("48656c6c6f") || blob.contains("7d"), "Should contain MemoData")
     }
 
+    // ── IMPROVE-3: Base58Ext consolidation ────────────────────────────
+
+    @Test
+    fun signPayment_worksWithBase58ExtDecoding() {
+        // This test verifies that after replacing custom base58Decode with Base58Ext.decode,
+        // the signer still correctly decodes r-addresses and produces valid blobs.
+        val result = XrpTransactionSigner.signPayment(
+            privateKey = testPrivateKey,
+            publicKey = testPublicKey,
+            account = testAccount,
+            destination = testDestination,
+            amountDrops = 2_000_000L,
+            feeDrops = 15L,
+            sequence = 100
+        )
+        // If Base58Ext decode is broken, signPayment would throw IllegalArgumentException
+        // from decodeRAddress (invalid checksum or length)
+        assertTrue(result.txBlob.isNotEmpty(), "Signing with Base58Ext should produce valid blob")
+        assertTrue(result.transactionId.length == 64, "TX ID should be 64 hex chars")
+    }
+
     // ── RippleManager constants ─────────────────────────────────────
 
     @Test
