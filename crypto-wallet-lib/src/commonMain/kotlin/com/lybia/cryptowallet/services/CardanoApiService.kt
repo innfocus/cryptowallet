@@ -171,8 +171,30 @@ class CardanoApiService(
      */
     suspend fun getTransactionHistory(addresses: List<String>): List<CardanoTransactionInfo> {
         logger.d { "getTransactionHistory: ${addresses.size} addresses (provider=$provider)" }
+        return getTransactionHistoryPaginated(addresses, count = 20, page = 1).first
+    }
+
+    /**
+     * Get transaction history with pagination support.
+     * Blockfrost: GET /addresses/{address}/transactions?count={count}&page={page}&order=desc
+     * Koios: POST /address_txs with offset/limit
+     *
+     * @param addresses List of addresses to query
+     * @param count Number of transactions per page (max 100, default 20)
+     * @param page 1-based page number (default 1)
+     * @param order Sort order: "desc" (newest first) or "asc" (oldest first)
+     * @return Pair of (transactions, hasMore)
+     */
+    suspend fun getTransactionHistoryPaginated(
+        addresses: List<String>,
+        count: Int = 20,
+        page: Int = 1,
+        order: String = "desc"
+    ): Pair<List<CardanoTransactionInfo>, Boolean> {
+        logger.d { "getTransactionHistoryPaginated: ${addresses.size} addresses, count=$count, page=$page, order=$order (provider=$provider)" }
         return when (provider) {
             CardanoApiProvider.KOIOS -> {
+                val offset = (page - 1) * count
                 val body = buildJsonObject {
                     putJsonArray("_addresses") { addresses.forEach { add(it) } }
                 }
@@ -181,9 +203,13 @@ class CardanoApiService(
                         applyAuth()
                         contentType(ContentType.Application.Json)
                         setBody(body.toString())
+                        url {
+                            parameters.append("offset", offset.toString())
+                            parameters.append("limit", count.toString())
+                        }
                     }
                 }
-                koiosTxs.map { kt ->
+                val txs = koiosTxs.map { kt ->
                     CardanoTransactionInfo(
                         txHash = kt.txHash,
                         blockHeight = kt.blockHeight,
@@ -193,22 +219,27 @@ class CardanoApiService(
                         outputs = emptyList()
                     )
                 }
+                Pair(txs, txs.size >= count)
             }
             else -> {
                 val allTxs = mutableListOf<CardanoTransactionInfo>()
+                var totalHashes = 0
                 for (address in addresses) {
                     val txHashes = safeRequest<List<CardanoTransactionHash>> {
                         get("$baseUrl/addresses/$address/transactions") {
                             applyAuth()
+                            url {
+                                parameters.append("count", count.toString())
+                                parameters.append("page", page.toString())
+                                parameters.append("order", order)
+                            }
                         }
                     }
-
-                    val latestHashes = txHashes.takeLast(20)
-
-                    val txs = fetchTransactionsSafely(latestHashes)
+                    totalHashes += txHashes.size
+                    val txs = fetchTransactionsSafely(txHashes)
                     allTxs.addAll(txs)
                 }
-                allTxs
+                Pair(allTxs, totalHashes >= count)
             }
         }
     }

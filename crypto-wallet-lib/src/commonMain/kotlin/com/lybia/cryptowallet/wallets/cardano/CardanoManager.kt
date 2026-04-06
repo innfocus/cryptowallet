@@ -147,6 +147,25 @@ class CardanoManager(
     }
 
     /**
+     * Get transaction history with pagination support.
+     * @param address Cardano address (defaults to wallet address)
+     * @param count Number of transactions per page (max 100)
+     * @param page 1-based page number
+     * @param order Sort order: "desc" (newest first) or "asc"
+     * @return Pair of (transactions, hasMore)
+     */
+    suspend fun getTransactionHistoryPaginated(
+        address: String? = null,
+        count: Int = 20,
+        page: Int = 1,
+        order: String = "desc"
+    ): Pair<List<com.lybia.cryptowallet.models.cardano.CardanoTransactionInfo>, Boolean> {
+        val addr = address ?: getAddress()
+        logger.d { "getTransactionHistoryPaginated for $addr, count=$count, page=$page" }
+        return apiService.getTransactionHistoryPaginated(listOf(addr), count, page, order)
+    }
+
+    /**
      * Submit a signed transaction (Base64-encoded CBOR) to the network.
      */
     @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)

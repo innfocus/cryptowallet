@@ -34,7 +34,40 @@ Gửi tiền đến một địa chỉ khác.
     - `fee: Double`
 - **Output:** `suspend TransferResponseModel` (Chứa `txHash`)
 
-### 2.4. getTokenBalance
+### 2.4. getTransactionHistory
+Lấy lịch sử giao dịch (không phân trang).
+- **Input:**
+    - `coin: NetworkName`
+    - `address: String?` (Mặc định là null, sẽ lấy địa chỉ của mnemonic)
+- **Output:** `suspend Any?` (Kiểu trả về phụ thuộc vào từng chain)
+
+### 2.5. getTransactionHistoryPaginated
+Lấy lịch sử giao dịch có hỗ trợ phân trang.
+- **Input:**
+    - `coin: NetworkName`
+    - `address: String?` (Mặc định là null)
+    - `limit: Int` (Mặc định 100)
+    - `pageParam: Map<String, Any?>?` (Tham số phân trang từ lần gọi trước, null cho lần đầu)
+- **Output:** `suspend TransactionHistoryResult`
+    - `transactions: Any?` — Danh sách giao dịch
+    - `hasMore: Boolean` — Còn trang tiếp theo hay không
+    - `nextPageParam: Map<String, Any?>?` — Tham số để gọi trang tiếp theo
+    - `success: Boolean`
+    - `error: String?`
+
+**Hỗ trợ phân trang theo chain:**
+
+| Chain | Pagination | pageParam | Ghi chú |
+| :--- | :--- | :--- | :--- |
+| Ripple (XRP) | ✅ Marker-based | `{"ledger": Long, "seq": Long}` | Limit mặc định 100 |
+| Centrality | ✅ Page-based | `{"page": Int}` | Row mặc định 100 |
+| Cardano | ✅ Page-based | `{"page": Int}` (1-based) | Blockfrost `count`/`page`/`order`, max 100/page |
+| Bitcoin | ❌ | — | Trả về tất cả |
+| Ethereum | ❌ | — | Trả về tất cả |
+| TON | ❌ | — | Trả về tất cả |
+| Midnight | ❌ | — | Trả về tất cả |
+
+### 2.6. getTokenBalance
 Lấy số dư của Token (ERC-20, Jetton, Native Token).
 - **Input:**
     - `coin: NetworkName`

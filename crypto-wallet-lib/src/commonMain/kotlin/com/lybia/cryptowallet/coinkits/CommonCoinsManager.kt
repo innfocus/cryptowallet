@@ -381,7 +381,7 @@ class CommonCoinsManager(
      * Pagination behavior per chain:
      * - XRP: uses `marker` (ledger + seq) from Ripple JSON-RPC `account_tx`
      * - Centrality: uses `row` + `page` params
-     * - Cardano: Blockfrost returns all txs per address (no pagination in current impl)
+     * - Cardano: uses `page` (1-based) + `count` params via Blockfrost API
      * - Other chains: returns all available transactions (no pagination)
      *
      * @param coin Target chain
@@ -415,6 +415,20 @@ class CommonCoinsManager(
                         nextPageParam = response.second?.let {
                             mapOf("ledger" to it.ledger, "seq" to it.seq)
                         },
+                        success = true
+                    )
+                }
+
+                NetworkName.CARDANO -> {
+                    val manager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.cardano.CardanoManager
+                    val addr = address ?: manager.getAddress()
+                    val page = (pageParam?.get("page") as? Number)?.toInt() ?: 1
+                    val count = limit.coerceAtMost(100)
+                    val response = manager.getTransactionHistoryPaginated(addr, count, page)
+                    TransactionHistoryResult(
+                        transactions = response.first,
+                        hasMore = response.second,
+                        nextPageParam = if (response.second) mapOf("page" to (page + 1)) else null,
                         success = true
                     )
                 }
