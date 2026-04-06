@@ -101,14 +101,11 @@ class CardanoManager(
         ))
     }
 
-    private fun deriveByronKey(index: Int): Pair<ByteArray, ByteArray> {
-        return slip10DeriveEd25519(intArrayOf(
-            hardenedIndex(44),
-            hardenedIndex(1815),
-            hardenedIndex(0),
-            hardenedIndex(0),
-            hardenedIndex(index)
-        ))
+    // Byron key derivation uses Icarus V2 (ed25519-bip32), NOT SLIP-0010.
+    // See docs/CARDANO_BYRON_SPEC.md for the full algorithm explanation.
+    // Path: m/44'/1815'/0'/0/index — role (0) and index are SOFT (non-hardened).
+    private fun deriveByronKey(index: Int): Triple<ByteArray, ByteArray, ByteArray> {
+        return IcarusKeyDerivation.deriveByronAddressKey(mnemonicWords, index)
     }
 
     // ── Address generation (Task 6.2) ───────────────────────────────────────
@@ -140,8 +137,9 @@ class CardanoManager(
      * @return Base58-encoded Byron address
      */
     fun getByronAddress(index: Int = 0): String {
-        val (privKey, chainCode) = deriveByronKey(index)
-        val pubKey = ed25519PublicKey(privKey)
+        // IcarusKeyDerivation.deriveByronAddressKey returns (pubKey, chainCode, extKey).
+        // The public key is derived via Ed25519Icarus (pre-clamped scalar, no SHA-512).
+        val (pubKey, chainCode, _) = deriveByronKey(index)
         return CardanoAddress.createByronAddress(pubKey, chainCode)
     }
 
