@@ -12,6 +12,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.headers
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import io.ktor.http.contentType
@@ -245,6 +246,96 @@ class InfuraRpcService {
             if (response.status.value in 200..299) {
                 val rpcResponse = response.body<InfuraRpcBalanceResponse>()
                 if (rpcResponse.error == null) return rpcResponse.result
+            }
+            return null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
+
+    // ── Batch RPC ────────────────────────────────────────────────────
+
+    /**
+     * Execute multiple JSON-RPC calls in a single HTTP request.
+     * Each request is assigned an incremental ID; results are returned in the same order.
+     *
+     * @param coin Network configuration
+     * @param requests List of (method, params) pairs
+     * @return List of results (hex strings), null entries for failed calls
+     */
+    suspend fun batchCall(
+        coin: CoinNetwork,
+        requests: List<Pair<String, List<Any>>>
+    ): List<String?> {
+        try {
+            val batchBody = requests.mapIndexed { index, (method, params) ->
+                mapOf(
+                    "jsonrpc" to "2.0",
+                    "method" to method,
+                    "params" to params,
+                    "id" to (index + 1)
+                )
+            }
+            val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
+                headers { append(HttpHeaders.Accept, "application/json") }
+                contentType(ContentType.Application.Json)
+                setBody(Json.encodeToString(batchBody))
+            }
+            if (response.status.value in 200..299) {
+                val bodyText = response.body<String>()
+                val json = Json { ignoreUnknownKeys = true }
+                val jsonArray = json.parseToJsonElement(bodyText).jsonArray
+
+                // Build id→result map, then return in request order
+                val resultMap = mutableMapOf<Int, String?>()
+                for (element in jsonArray) {
+                    val obj = element.jsonObject
+                    val id = obj["id"]?.jsonPrimitive?.content?.toIntOrNull() ?: continue
+                    val error = obj["error"]
+                    val result = if (error != null && error.toString() != "null") {
+                        null
+                    } else {
+                        obj["result"]?.jsonPrimitive?.content
+                    }
+                    resultMap[id] = result
+                }
+                return requests.indices.map { resultMap[it + 1] }
+            }
+            return requests.map { null }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return requests.map { null }
+        }
+    }
+
+    /**
+     * Get transaction receipt via eth_getTransactionReceipt.
+     *
+     * @param coin Network configuration
+     * @param txHash Transaction hash
+     * @return Raw JSON result string, or null if not found/pending
+     */
+    suspend fun getTransactionReceipt(coin: CoinNetwork, txHash: String): String? {
+        try {
+            val body = mapOf(
+                "jsonrpc" to "2.0",
+                "method" to "eth_getTransactionReceipt",
+                "params" to listOf(txHash),
+                "id" to 1
+            )
+            val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
+                headers { append(HttpHeaders.Accept, "application/json") }
+                contentType(ContentType.Application.Json)
+                setBody(Json.encodeToString(body))
+            }
+            if (response.status.value in 200..299) {
+                val bodyText = response.body<String>()
+                val json = Json { ignoreUnknownKeys = true }
+                val jsonObj = json.parseToJsonElement(bodyText)
+                val result = jsonObj.jsonObject["result"]
+                if (result == null || result.toString() == "null") return null
+                return result.toString()
             }
             return null
         } catch (e: Exception) {

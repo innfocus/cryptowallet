@@ -254,6 +254,103 @@ let result = try await ccm.transferNFT(
 
 ---
 
+## 8.5. Generic Contract ABI Interaction
+
+### Read-only call (eth_call, no gas)
+
+```swift
+let coinNetwork = CoinNetwork(name: .ethereum)
+
+// Example: call totalSupply()
+let result = try await ethManager.callContract(
+    contractAddress: "0xUSDT...",
+    functionSignature: "totalSupply()",
+    params: [],
+    coinNetwork: coinNetwork
+)
+// result: hex-encoded uint256
+
+// Example: call balanceOf(address)
+let balance = try await ethManager.callContract(
+    contractAddress: "0xUSDT...",
+    functionSignature: "balanceOf(address)",
+    params: [EthTransactionSigner.AbiParamAddress(value: myAddress)],
+    coinNetwork: coinNetwork
+)
+```
+
+### Write transaction (build + sign + broadcast)
+
+```swift
+let coinNetwork = CoinNetwork(name: .ethereum)
+
+let result = try await ethManager.executeContract(
+    contractAddress: "0xContract...",
+    functionSignature: "stake(uint256)",
+    params: [
+        EthTransactionSigner.AbiParamUint256(
+            value: KotlinBigInteger.fromLong(value: 1_000_000)
+        )
+    ],
+    valueWei: KotlinBigInteger.companion.ZERO,
+    coinNetwork: coinNetwork,
+    gasLimit: nil
+)
+```
+
+> **ABI Types:** `AbiParamUint256`, `AbiParamAddress`, `AbiParamBool`, `AbiParamBytes32`, `AbiParamRaw`
+
+---
+
+## 8.6. ETH-Arbitrum Bridge
+
+```swift
+let bridge = EthereumArbitrumBridge(mnemonic: mnemonic)
+
+// L1 → L2 Deposit (~10 min)
+let result = try await bridge.bridgeAsset(
+    fromChain: .ethereum,
+    toChain: .arbitrum,
+    amount: 1_000_000_000_000_000_000  // 1 ETH
+)
+
+// L2 → L1 Withdrawal (~7 day challenge period)
+let result = try await bridge.bridgeAsset(
+    fromChain: .arbitrum,
+    toChain: .ethereum,
+    amount: 500_000_000_000_000_000  // 0.5 ETH
+)
+
+// Check status
+let status = try await bridge.getBridgeStatus(txHash: txHash)
+// "pending" | "confirming" | "completed" | "failed"
+```
+
+---
+
+## 8.7. Batch RPC Calls
+
+```swift
+let coinNetwork = CoinNetwork(name: .ethereum)
+
+// Balance + Nonce in 1 round trip
+let result = try await ethManager.getBalanceAndNonce(
+    address: myAddress,
+    coinNetwork: coinNetwork
+)
+// result: KotlinPair<Double, Long>
+
+// Multiple token balances in 1 round trip
+let balances = try await ethManager.getTokenBalancesBatch(
+    ownerAddress: myAddress,
+    contractAddresses: ["0xUSDT...", "0xUSDC...", "0xDAI..."],
+    coinNetwork: coinNetwork
+)
+// balances: [String: KotlinBigInteger]
+```
+
+---
+
 ## 9. Fee Estimation
 
 ```swift

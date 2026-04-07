@@ -765,6 +765,208 @@ class EthereumManager(
         }
     }
 
+    // ── Generic Contract ABI Interaction ───────────────────────────
+
+    /**
+     * Read-only contract call via eth_call (no gas cost, no transaction).
+     * Use for querying any contract function (balanceOf, totalSupply, etc.).
+     *
+     * @param contractAddress Contract address
+     * @param functionSignature Solidity function signature (e.g. "balanceOf(address)")
+     * @param params ABI-encoded parameters
+     * @param coinNetwork Network configuration
+     * @return Raw hex result from eth_call, or null on failure
+     */
+    suspend fun callContract(
+        contractAddress: String,
+        functionSignature: String,
+        params: List<EthTransactionSigner.AbiParam>,
+        coinNetwork: CoinNetwork
+    ): String? {
+        return try {
+            val callData = EthTransactionSigner.encodeContractCall(functionSignature, params)
+            val dataHex = "0x" + callData.toHexString()
+            InfuraRpcService.shared.ethCall(coinNetwork, contractAddress, dataHex)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Read-only contract call with pre-encoded data.
+     *
+     * @param contractAddress Contract address
+     * @param data ABI-encoded call data (as ByteArray)
+     * @param coinNetwork Network configuration
+     * @return Raw hex result from eth_call, or null on failure
+     */
+    suspend fun callContract(
+        contractAddress: String,
+        data: ByteArray,
+        coinNetwork: CoinNetwork
+    ): String? {
+        return try {
+            val dataHex = "0x" + data.toHexString()
+            InfuraRpcService.shared.ethCall(coinNetwork, contractAddress, dataHex)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Build, sign, and submit a write transaction to any smart contract.
+     * Automatically selects EIP-1559 or legacy based on network support.
+     *
+     * @param contractAddress Contract address
+     * @param functionSignature Solidity function signature (e.g. "approve(address,uint256)")
+     * @param params ABI-encoded parameters
+     * @param valueWei ETH value to send with the call (0 for most contract calls)
+     * @param coinNetwork Network configuration
+     * @param gasLimit Optional gas limit override
+     * @return TransferResponseModel with txHash on success
+     */
+    suspend fun executeContract(
+        contractAddress: String,
+        functionSignature: String,
+        params: List<EthTransactionSigner.AbiParam>,
+        valueWei: BigInteger = BigInteger.ZERO,
+        coinNetwork: CoinNetwork,
+        gasLimit: Long? = null
+    ): TransferResponseModel {
+        val privKey = privateKeyBytes
+            ?: return TransferResponseModel(false, "No private key — mnemonic not provided", null)
+        val fromAddr = walletAddress
+            ?: return TransferResponseModel(false, "No wallet address", null)
+
+        return try {
+            val nonce = getNonce(coinNetwork)
+            val chainId = getChainId(coinNetwork).toLong()
+
+            val callData = EthTransactionSigner.encodeContractCall(functionSignature, params)
+
+            val estGasLimit = gasLimit ?: run {
+                val model = TransferTokenModel(
+                    nonce = "", addressFrom = fromAddr,
+                    contractAddress = contractAddress,
+                    dataEncodeABI = "0x" + callData.toHexString(),
+                    value = if (valueWei == BigInteger.ZERO) "0x0" else "0x" + valueWei.toString(16)
+                )
+                getEstGas(model, coinNetwork).toLong()
+            }
+
+            val baseFeeHex = InfuraRpcService.shared.getBaseFee(coinNetwork)
+            val signedTxHex: String
+
+            if (baseFeeHex != null) {
+                val baseFee = hexToBigInt(baseFeeHex)
+                val rpcTip = InfuraRpcService.shared.getMaxPriorityFeePerGas(coinNetwork)
+                val priorityFee = if (rpcTip != null) hexToBigInt(rpcTip)
+                else BigInteger.fromLong(1_500_000_000)
+                val maxFee = baseFee * BigInteger.TWO + priorityFee
+
+                signedTxHex = EthTransactionSigner.signEip1559Transaction(
+                    privateKey = privKey, nonce = nonce,
+                    maxPriorityFeePerGas = priorityFee, maxFeePerGas = maxFee,
+                    gasLimit = estGasLimit, toAddress = contractAddress,
+                    valueWei = valueWei, data = callData, chainId = chainId
+                )
+            } else {
+                val hexPrice = InfuraRpcService.shared.getAllGasPrice(coinNetwork, chainId.toInt())
+                val gasPriceWei = if (hexPrice != null) hexToBigInt(hexPrice)
+                else BigInteger.fromLong(20_000_000_000L)
+
+                signedTxHex = EthTransactionSigner.signLegacyTransaction(
+                    privateKey = privKey, nonce = nonce,
+                    gasPriceWei = gasPriceWei, gasLimit = estGasLimit,
+                    toAddress = contractAddress, valueWei = valueWei,
+                    data = callData, chainId = chainId
+                )
+            }
+
+            val txHash = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, signedTxHex)
+            TransferResponseModel(success = true, error = null, txHash = txHash)
+        } catch (e: Exception) {
+            TransferResponseModel(success = false, error = e.message, txHash = null)
+        }
+    }
+
+    // ── Batch RPC ────────────────────────────────────────────────────
+
+    /**
+     * Fetch balance and nonce in a single batch RPC call.
+     * Reduces network round trips from 2 to 1.
+     *
+     * @param address Wallet address
+     * @param coinNetwork Network configuration
+     * @return Pair(balance in ETH, nonce) or null on failure
+     */
+    suspend fun getBalanceAndNonce(
+        address: String,
+        coinNetwork: CoinNetwork
+    ): Pair<Double, Long>? {
+        val results = InfuraRpcService.shared.batchCall(
+            coinNetwork,
+            listOf(
+                "eth_getBalance" to listOf(address, "latest"),
+                "eth_getTransactionCount" to listOf(address, "latest")
+            )
+        )
+        val balance = Utils.convertHexStringToDouble(results.getOrNull(0), 18)
+        val nonce = Utils.convertHexStringToDouble(results.getOrNull(1), 0).toLong()
+        return Pair(balance, nonce)
+    }
+
+    /**
+     * Fetch multiple token balances in a single batch RPC call.
+     * Each balance is queried via eth_call with balanceOf(address).
+     *
+     * @param ownerAddress Wallet address
+     * @param contractAddresses List of ERC-20 contract addresses
+     * @param coinNetwork Network configuration
+     * @return Map of contractAddress → balance as BigInteger (smallest unit)
+     */
+    suspend fun getTokenBalancesBatch(
+        ownerAddress: String,
+        contractAddresses: List<String>,
+        coinNetwork: CoinNetwork
+    ): Map<String, BigInteger> {
+        val balanceOfData = EthTransactionSigner.encodeContractCall(
+            "balanceOf(address)",
+            listOf(EthTransactionSigner.AbiParam.Address(ownerAddress))
+        )
+        val dataHex = "0x" + balanceOfData.toHexString()
+
+        val requests = contractAddresses.map { contract ->
+            "eth_call" to listOf(
+                mapOf("to" to contract, "data" to dataHex) as Any,
+                "latest" as Any
+            )
+        }
+
+        val results = InfuraRpcService.shared.batchCall(coinNetwork, requests)
+
+        return contractAddresses.mapIndexed { index, contract ->
+            val hex = results.getOrNull(index)
+            contract to (if (hex != null) hexToBigInt(hex) else BigInteger.ZERO)
+        }.toMap()
+    }
+
+    /**
+     * Execute a batch of arbitrary RPC calls.
+     *
+     * @param requests List of (method, params) pairs
+     * @param coinNetwork Network configuration
+     * @return List of hex results, null for failed calls
+     */
+    suspend fun batchRpcCall(
+        requests: List<Pair<String, List<Any>>>,
+        coinNetwork: CoinNetwork
+    ): List<String?> {
+        return InfuraRpcService.shared.batchCall(coinNetwork, requests)
+    }
+
     // ── IFeeEstimator ───────────────────────────────────────────────
 
     override suspend fun estimateFee(params: FeeEstimateParams, coinNetwork: CoinNetwork): FeeEstimate {

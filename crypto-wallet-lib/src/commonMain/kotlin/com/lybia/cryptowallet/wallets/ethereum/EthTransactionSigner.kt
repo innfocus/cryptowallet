@@ -269,6 +269,90 @@ object EthTransactionSigner {
         return selector + tokenIdBytes
     }
 
+    // ── Generic ABI encoding ──────────────────────────────────────────
+
+    /**
+     * ABI parameter types for generic contract interaction.
+     */
+    sealed class AbiParam {
+        /** uint256 — 32-byte big-endian unsigned integer */
+        data class Uint256(val value: BigInteger) : AbiParam()
+        /** address — 20-byte Ethereum address, left-padded to 32 bytes */
+        data class Address(val value: String) : AbiParam()
+        /** bool — 0 or 1, padded to 32 bytes */
+        data class Bool(val value: Boolean) : AbiParam()
+        /** bytes32 — fixed 32-byte value */
+        data class Bytes32(val value: ByteArray) : AbiParam()
+        /** Raw pre-encoded bytes (for advanced use) */
+        data class Raw(val value: ByteArray) : AbiParam()
+    }
+
+    /**
+     * Compute the 4-byte function selector from a function signature.
+     * E.g. "transfer(address,uint256)" → 0xa9059cbb
+     *
+     * @param signature Solidity function signature (e.g. "balanceOf(address)")
+     * @return 4-byte selector
+     */
+    fun functionSelector(signature: String): ByteArray {
+        return Keccak.keccak256(signature.encodeToByteArray()).copyOfRange(0, 4)
+    }
+
+    /**
+     * Encode a single ABI parameter to 32 bytes.
+     */
+    fun encodeAbiParam(param: AbiParam): ByteArray {
+        return when (param) {
+            is AbiParam.Uint256 -> bigIntToBytes32(param.value)
+            is AbiParam.Address -> {
+                val addrBytes = param.value.removePrefix("0x").fromHexToByteArray()
+                val padded = ByteArray(32)
+                addrBytes.copyInto(padded, 32 - addrBytes.size)
+                padded
+            }
+            is AbiParam.Bool -> {
+                val padded = ByteArray(32)
+                if (param.value) padded[31] = 1
+                padded
+            }
+            is AbiParam.Bytes32 -> {
+                val padded = ByteArray(32)
+                param.value.copyInto(padded, 0, 0, minOf(param.value.size, 32))
+                padded
+            }
+            is AbiParam.Raw -> param.value
+        }
+    }
+
+    /**
+     * Encode a generic contract call: selector + ABI-encoded parameters.
+     *
+     * @param signature Solidity function signature (e.g. "approve(address,uint256)")
+     * @param params Ordered list of ABI parameters
+     * @return ABI-encoded call data (4 + N*32 bytes)
+     */
+    fun encodeContractCall(signature: String, params: List<AbiParam>): ByteArray {
+        val selector = functionSelector(signature)
+        val encodedParams = params.fold(byteArrayOf()) { acc, param ->
+            acc + encodeAbiParam(param)
+        }
+        return selector + encodedParams
+    }
+
+    /**
+     * Encode a generic contract call with a pre-computed 4-byte selector.
+     *
+     * @param selector 4-byte function selector
+     * @param params Ordered list of ABI parameters
+     * @return ABI-encoded call data
+     */
+    fun encodeContractCall(selector: ByteArray, params: List<AbiParam>): ByteArray {
+        val encodedParams = params.fold(byteArrayOf()) { acc, param ->
+            acc + encodeAbiParam(param)
+        }
+        return selector + encodedParams
+    }
+
     // ── RLP encoding ────────────────────────────────────────────────
 
     internal fun rlpEncodeBytes(bytes: ByteArray): ByteArray {

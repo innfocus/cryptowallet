@@ -391,6 +391,117 @@ viewModelScope.launch {
 
 ---
 
+## 8.5. Generic Contract ABI Interaction
+
+### Read-only call (eth_call, no gas)
+
+```kotlin
+viewModelScope.launch {
+    val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+
+    // Ví dụ: gọi totalSupply() của ERC-20
+    val result = ethManager.callContract(
+        contractAddress = "0xUSDT...",
+        functionSignature = "totalSupply()",
+        params = emptyList(),
+        coinNetwork = coinNetwork
+    )
+    // result: hex-encoded uint256
+
+    // Ví dụ: gọi balanceOf(address)
+    val balance = ethManager.callContract(
+        contractAddress = "0xUSDT...",
+        functionSignature = "balanceOf(address)",
+        params = listOf(EthTransactionSigner.AbiParam.Address(myAddress)),
+        coinNetwork = coinNetwork
+    )
+}
+```
+
+### Write transaction (build + sign + broadcast)
+
+```kotlin
+viewModelScope.launch {
+    val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+
+    // Ví dụ: gọi bất kỳ contract function nào
+    val result = ethManager.executeContract(
+        contractAddress = "0xContract...",
+        functionSignature = "stake(uint256)",
+        params = listOf(
+            EthTransactionSigner.AbiParam.Uint256(BigInteger.fromLong(1_000_000))
+        ),
+        coinNetwork = coinNetwork
+    )
+
+    if (result.success) {
+        Log.d("ETH", "Contract tx: ${result.txHash}")
+    }
+}
+```
+
+> **ABI Types:** `AbiParam.Uint256`, `AbiParam.Address`, `AbiParam.Bool`, `AbiParam.Bytes32`, `AbiParam.Raw`
+> Function selector được tính tự động từ signature via `keccak256`.
+
+---
+
+## 8.6. ETH-Arbitrum Bridge
+
+```kotlin
+val bridge = EthereumArbitrumBridge(mnemonic = mnemonic)
+
+// L1 → L2 Deposit (~10 min)
+viewModelScope.launch {
+    val result = bridge.bridgeAsset(
+        fromChain = NetworkName.ETHEREUM,
+        toChain = NetworkName.ARBITRUM,
+        amount = 1_000_000_000_000_000_000L  // 1 ETH
+    )
+    Log.d("Bridge", "Deposit tx: ${result.txHash}")
+}
+
+// L2 → L1 Withdrawal (~7 day challenge period)
+viewModelScope.launch {
+    val result = bridge.bridgeAsset(
+        fromChain = NetworkName.ARBITRUM,
+        toChain = NetworkName.ETHEREUM,
+        amount = 500_000_000_000_000_000L  // 0.5 ETH
+    )
+}
+
+// Check status
+viewModelScope.launch {
+    val status = bridge.getBridgeStatus(txHash)
+    // "pending" | "confirming" | "completed" | "failed"
+}
+```
+
+---
+
+## 8.7. Batch RPC Calls
+
+```kotlin
+viewModelScope.launch {
+    val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+
+    // Balance + Nonce in 1 round trip
+    val (balance, nonce) = ethManager.getBalanceAndNonce(myAddress, coinNetwork)
+        ?: return@launch
+
+    // Multiple token balances in 1 round trip
+    val balances = ethManager.getTokenBalancesBatch(
+        ownerAddress = myAddress,
+        contractAddresses = listOf("0xUSDT...", "0xUSDC...", "0xDAI..."),
+        coinNetwork = coinNetwork
+    )
+    balances.forEach { (contract, balance) ->
+        Log.d("ETH", "$contract: $balance")
+    }
+}
+```
+
+---
+
 ## 9. Fee Estimation
 
 ### 9.1 Qua CommonCoinsManager

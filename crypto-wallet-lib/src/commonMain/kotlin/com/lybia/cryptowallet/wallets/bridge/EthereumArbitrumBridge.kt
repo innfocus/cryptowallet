@@ -1,5 +1,6 @@
 package com.lybia.cryptowallet.wallets.bridge
 
+import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.base.IBridgeManager
 import com.lybia.cryptowallet.coinkits.ChainConfig
 import com.lybia.cryptowallet.enums.NetworkName
@@ -7,17 +8,22 @@ import com.lybia.cryptowallet.errors.BridgeError
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.models.bridge.BridgeFeeEstimate
 import com.lybia.cryptowallet.models.bridge.BridgeStatus
+import com.lybia.cryptowallet.services.InfuraRpcService
+import com.lybia.cryptowallet.wallets.ethereum.EthTransactionSigner
+import com.lybia.cryptowallet.wallets.ethereum.EthereumManager
+import com.ionspin.kotlin.bignum.integer.BigInteger
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 /**
  * Bridge implementation for Ethereum ↔ Arbitrum (ETH).
  *
  * Flow:
- * - ETH → Arbitrum: Deposit via Arbitrum bridge contract on Ethereum
- * - Arbitrum → ETH: Withdrawal via Arbitrum bridge contract on Arbitrum
- *
- * Since Arbitrum bridge contract is not available for real integration,
- * bridge logic uses proper structure with simulated responses where
- * actual API calls would go.
+ * - ETH → Arbitrum: Deposit ETH to Arbitrum Delayed Inbox contract on Ethereum L1.
+ *   The inbox contract auto-mints equivalent ETH on Arbitrum L2 (~10 min).
+ * - Arbitrum → ETH: Withdraw via ArbSys precompile on Arbitrum L2.
+ *   Withdrawal has a ~7-day challenge period before funds can be claimed on L1.
  */
 class EthereumArbitrumBridge(
     private val mnemonic: String,
@@ -25,8 +31,8 @@ class EthereumArbitrumBridge(
 ) : IBridgeManager {
 
     companion object {
-        /** Minimum bridge amount in wei (0.001 ETH = 1_000_000_000_000_000 wei, simplified to 10_000) */
-        internal const val MIN_BRIDGE_AMOUNT = 10_000L
+        /** Minimum bridge amount in wei (0.001 ETH) */
+        internal const val MIN_BRIDGE_AMOUNT = 1_000_000_000_000_000L
 
         /** Fixed bridge protocol fee rate (0.05%) */
         internal const val BRIDGE_FEE_RATE = 0.0005
@@ -37,11 +43,28 @@ class EthereumArbitrumBridge(
         /** Fixed destination chain gas fee in ETH */
         internal const val DESTINATION_GAS_FEE_ETH = 0.001
 
+        /**
+         * Arbitrum Delayed Inbox contract on Ethereum L1.
+         * depositEth() — send ETH value to this contract to bridge to Arbitrum.
+         * Mainnet: 0x4Dbd4fc535Ac27206064B68FfCf827b0A60BAB3f
+         * Sepolia: 0xaAe29B0366299461418F5324a79Afc425BE5ae21
+         */
+        internal const val INBOX_MAINNET = "0x4Dbd4fc535Ac27206064B68FfCf827b0A60BAB3f"
+        internal const val INBOX_SEPOLIA = "0xaAe29B0366299461418F5324a79Afc425BE5ae21"
+
+        /**
+         * ArbSys precompile on Arbitrum L2.
+         * withdrawEth(address destination) — initiate L2→L1 withdrawal.
+         */
+        internal const val ARBSYS_ADDRESS = "0x0000000000000000000000000000000000000064"
+
         private val SUPPORTED_PAIRS = setOf(
             NetworkName.ETHEREUM to NetworkName.ARBITRUM,
             NetworkName.ARBITRUM to NetworkName.ETHEREUM
         )
     }
+
+    private val ethManager by lazy { EthereumManager(mnemonic) }
 
     /**
      * Bridge asset between Ethereum and Arbitrum.
@@ -142,21 +165,34 @@ class EthereumArbitrumBridge(
     // ── Private helpers ─────────────────────────────────────────────
 
     /**
-     * Deposit ETH to Arbitrum via bridge contract on Ethereum.
+     * Deposit ETH to Arbitrum via Delayed Inbox contract on Ethereum L1.
+     * Sends ETH directly to the inbox contract with depositEth() call data.
      */
     private suspend fun bridgeEthToArbitrum(
         amount: Long,
         feeEstimate: BridgeFeeEstimate
     ): TransferResponseModel {
         return try {
-            // Step 1: Submit deposit tx to Arbitrum bridge contract on Ethereum
-            val depositTxHash = simulateDepositTransaction(NetworkName.ETHEREUM, amount)
+            val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+            val inboxAddress = getInboxAddress()
 
-            TransferResponseModel(
-                success = true,
-                error = null,
-                txHash = depositTxHash
+            // depositEth() has no parameters — just send ETH to inbox with selector
+            val result = ethManager.executeContract(
+                contractAddress = inboxAddress,
+                functionSignature = "depositEth()",
+                params = emptyList(),
+                valueWei = BigInteger.fromLong(amount),
+                coinNetwork = coinNetwork
             )
+
+            if (!result.success) {
+                throw BridgeError.BridgeTransactionFailed(
+                    result.txHash ?: "",
+                    result.error ?: "Deposit transaction failed"
+                )
+            }
+
+            result
         } catch (e: Exception) {
             if (e is BridgeError) throw e
             TransferResponseModel(
@@ -168,21 +204,35 @@ class EthereumArbitrumBridge(
     }
 
     /**
-     * Withdraw ETH from Arbitrum via bridge contract on Arbitrum.
+     * Withdraw ETH from Arbitrum via ArbSys precompile on Arbitrum L2.
+     * Calls withdrawEth(address destination) on the ArbSys precompile.
+     * Note: Withdrawal has a ~7-day challenge period before L1 claim.
      */
     private suspend fun bridgeArbitrumToEth(
         amount: Long,
         feeEstimate: BridgeFeeEstimate
     ): TransferResponseModel {
         return try {
-            // Step 1: Submit withdrawal tx to Arbitrum bridge contract on Arbitrum
-            val withdrawalTxHash = simulateWithdrawalTransaction(NetworkName.ARBITRUM, amount)
+            val coinNetwork = CoinNetwork(NetworkName.ARBITRUM)
+            val destination = ethManager.getAddress()
 
-            TransferResponseModel(
-                success = true,
-                error = null,
-                txHash = withdrawalTxHash
+            // withdrawEth(address destination) — send ETH value with recipient
+            val result = ethManager.executeContract(
+                contractAddress = ARBSYS_ADDRESS,
+                functionSignature = "withdrawEth(address)",
+                params = listOf(EthTransactionSigner.AbiParam.Address(destination)),
+                valueWei = BigInteger.fromLong(amount),
+                coinNetwork = coinNetwork
             )
+
+            if (!result.success) {
+                throw BridgeError.BridgeTransactionFailed(
+                    result.txHash ?: "",
+                    result.error ?: "Withdrawal transaction failed"
+                )
+            }
+
+            result
         } catch (e: Exception) {
             if (e is BridgeError) throw e
             TransferResponseModel(
@@ -194,71 +244,42 @@ class EthereumArbitrumBridge(
     }
 
     /**
-     * Simulate a deposit transaction on Ethereum to the Arbitrum bridge contract.
-     * In production, this would build and send a signed transaction via InfuraRpcService.
-     *
-     * TODO(BRIDGE-G5): Replace with real InfuraRpcService.sendSignedTransaction(depositTx).
-     *   - Build an Ethereum transaction calling the Arbitrum Inbox contract's depositEth().
-     *   - Sign with the user's Ethereum private key derived from mnemonic.
-     *   - Submit via InfuraRpcService.sendSignedTransaction(coinNetwork, signedTxHex).
-     *   - Return the actual on-chain transaction hash from the RPC response.
-     *   - Handle network errors with BridgeError.BridgeServiceUnavailable.
-     *   - Blocked by: Arbitrum bridge contract ABI integration.
-     */
-    private fun simulateDepositTransaction(chain: NetworkName, amount: Long): String {
-        return "bridge_deposit_${chain.name.lowercase()}_${amount}_${generateSimulatedTxId()}"
-    }
-
-    /**
-     * Simulate a withdrawal transaction on Arbitrum.
-     * In production, this would build and send a signed transaction via InfuraRpcService.
-     *
-     * TODO(BRIDGE-G5): Replace with real InfuraRpcService.sendSignedTransaction(withdrawalTx).
-     *   - Build an Arbitrum transaction calling the ArbSys precompile's withdrawEth().
-     *   - Sign with the user's Ethereum private key derived from mnemonic.
-     *   - Submit via InfuraRpcService.sendSignedTransaction(coinNetwork, signedTxHex).
-     *   - Return the actual on-chain transaction hash from the RPC response.
-     *   - Note: Arbitrum → ETH withdrawals have a ~7-day challenge period.
-     *   - Blocked by: Arbitrum bridge contract ABI integration.
-     */
-    private fun simulateWithdrawalTransaction(chain: NetworkName, amount: Long): String {
-        return "bridge_withdrawal_${chain.name.lowercase()}_${amount}_${generateSimulatedTxId()}"
-    }
-
-    /**
      * Query transaction receipt status from the RPC service.
-     * In production, this would call InfuraRpcService.getTransactionReceipt().
-     *
-     * TODO(BRIDGE-G5): Replace with real InfuraRpcService.getTransactionReceipt(txHash).
-     *   - Call eth_getTransactionReceipt via InfuraRpcService for the given txHash.
-     *   - Map receipt status field: 0x1 → COMPLETED, 0x0 → FAILED, null → PENDING.
-     *   - For Arbitrum → ETH withdrawals, also check L2-to-L1 message status.
-     *   - Throw BridgeError.BridgeTransactionFailed if receipt indicates failure.
-     *   - Blocked by: Arbitrum bridge contract ABI integration.
+     * Maps receipt status: 0x1 → COMPLETED, 0x0 → FAILED, null → PENDING.
      */
-    private fun queryTransactionReceiptStatus(txHash: String): String {
-        // In production, would query the Ethereum/Arbitrum RPC for transaction receipt
-        // Return PENDING as default for simulated responses
+    private suspend fun queryTransactionReceiptStatus(txHash: String): String {
+        // Try both L1 and L2 networks
+        val networks = listOf(
+            CoinNetwork(NetworkName.ETHEREUM),
+            CoinNetwork(NetworkName.ARBITRUM)
+        )
+
+        for (network in networks) {
+            val receiptJson = InfuraRpcService.shared.getTransactionReceipt(network, txHash)
+                ?: continue
+
+            val json = Json { ignoreUnknownKeys = true }
+            val receiptObj = json.parseToJsonElement(receiptJson).jsonObject
+            val status = receiptObj["status"]?.jsonPrimitive?.content
+
+            return when (status) {
+                "0x1" -> BridgeStatus.COMPLETED.value
+                "0x0" -> BridgeStatus.FAILED.value
+                else -> BridgeStatus.CONFIRMING.value
+            }
+        }
+
+        // Receipt not found on either chain — still pending
         return BridgeStatus.PENDING.value
     }
 
     /**
-     * Generate a simulated transaction ID.
-     * In production, this would come from the actual blockchain transaction.
+     * Get the Inbox contract address based on current network (mainnet/testnet).
      */
-    private fun generateSimulatedTxId(): String {
-        return "sim_${nextTxCounter()}"
-    }
-
-    /**
-     * Counter for generating unique simulated transaction IDs.
-     */
-    private var txCounter: Long = 0L
-
-    /**
-     * Generate a unique counter value for simulated tx IDs.
-     */
-    internal fun nextTxCounter(): Long {
-        return ++txCounter
+    private fun getInboxAddress(): String {
+        return when (com.lybia.cryptowallet.Config.shared.getNetwork()) {
+            com.lybia.cryptowallet.enums.Network.MAINNET -> INBOX_MAINNET
+            com.lybia.cryptowallet.enums.Network.TESTNET -> INBOX_SEPOLIA
+        }
     }
 }

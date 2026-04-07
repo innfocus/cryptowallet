@@ -244,6 +244,129 @@ Result: uint256 (32 bytes) — parsed via eth_call (read-only)
 
 ---
 
+## 7.6. Generic Contract ABI Interaction
+
+### ABI Parameter Types
+```kotlin
+sealed class AbiParam {
+    data class Uint256(val value: BigInteger)    // uint256
+    data class Address(val value: String)         // address (20 bytes, left-padded)
+    data class Bool(val value: Boolean)           // bool
+    data class Bytes32(val value: ByteArray)      // bytes32
+    data class Raw(val value: ByteArray)          // pre-encoded bytes
+}
+```
+
+### Function Selector
+```kotlin
+// Compute 4-byte selector from Solidity signature
+EthTransactionSigner.functionSelector("transfer(address,uint256)")
+// → 0xa9059cbb
+```
+
+### Read-only Call (eth_call, no gas)
+```kotlin
+suspend fun callContract(
+    contractAddress: String,
+    functionSignature: String,     // e.g. "balanceOf(address)"
+    params: List<AbiParam>,
+    coinNetwork: CoinNetwork
+): String?                         // Raw hex result
+```
+
+### Write Transaction (build + sign + broadcast)
+```kotlin
+suspend fun executeContract(
+    contractAddress: String,
+    functionSignature: String,     // e.g. "approve(address,uint256)"
+    params: List<AbiParam>,
+    valueWei: BigInteger = BigInteger.ZERO,  // ETH to send with call
+    coinNetwork: CoinNetwork,
+    gasLimit: Long? = null
+): TransferResponseModel
+```
+
+### Generic Encoding
+```kotlin
+// Encode any contract call: selector + params
+EthTransactionSigner.encodeContractCall(
+    signature = "transfer(address,uint256)",
+    params = listOf(
+        AbiParam.Address("0xRecipient..."),
+        AbiParam.Uint256(BigInteger.fromLong(1000000))
+    )
+)
+// → 68-byte ABI-encoded call data
+```
+
+---
+
+## 7.7. ETH-Arbitrum Bridge
+
+### L1 → L2 (Deposit): ~10 min
+```kotlin
+// Sends ETH to Arbitrum Delayed Inbox contract on Ethereum L1
+// Inbox: 0x4Dbd4fc535Ac27206064B68FfCf827b0A60BAB3f (mainnet)
+//        0xaAe29B0366299461418F5324a79Afc425BE5ae21 (sepolia)
+val result = bridge.bridgeAsset(
+    fromChain = NetworkName.ETHEREUM,
+    toChain = NetworkName.ARBITRUM,
+    amount = 1_000_000_000_000_000_000L  // 1 ETH in wei
+)
+```
+
+### L2 → L1 (Withdrawal): ~7 day challenge period
+```kotlin
+// Calls ArbSys precompile (0x...0064) withdrawEth(address) on Arbitrum L2
+val result = bridge.bridgeAsset(
+    fromChain = NetworkName.ARBITRUM,
+    toChain = NetworkName.ETHEREUM,
+    amount = 500_000_000_000_000_000L  // 0.5 ETH
+)
+```
+
+### Status Query
+```kotlin
+val status = bridge.getBridgeStatus(txHash)
+// "pending" | "confirming" | "completed" | "failed"
+// Queries eth_getTransactionReceipt on both L1 and L2
+```
+
+---
+
+## 7.8. Batch RPC Calls
+
+### Raw batch call
+```kotlin
+val results = ethManager.batchRpcCall(
+    requests = listOf(
+        "eth_getBalance" to listOf(address, "latest"),
+        "eth_getTransactionCount" to listOf(address, "latest"),
+        "eth_gasPrice" to emptyList()
+    ),
+    coinNetwork = coinNetwork
+)
+// results: List<String?> — hex values, null for failed calls
+```
+
+### Balance + Nonce (1 round trip thay vì 2)
+```kotlin
+val (balance, nonce) = ethManager.getBalanceAndNonce(address, coinNetwork)
+    ?: throw Exception("Batch RPC failed")
+```
+
+### Multi-token balances (1 round trip thay vì N)
+```kotlin
+val balances = ethManager.getTokenBalancesBatch(
+    ownerAddress = myAddress,
+    contractAddresses = listOf("0xUSDT...", "0xUSDC...", "0xDAI..."),
+    coinNetwork = coinNetwork
+)
+// balances: Map<contractAddress, BigInteger>
+```
+
+---
+
 ## 8. Gas/Fee Estimation
 
 ### Gas Price Sources
@@ -355,10 +478,10 @@ Config.shared.apiKeyOwlRacle    // OwlRacle API key
 | ERC-1155 multi-token | ERC-1155 | COULD: Chua ho tro |
 | ~~NFT metadata fetch~~ | ~~--~~ | ✅ Da implement (`getNFTMetadata` via `tokenURI` + JSON fetch) |
 | ~~NFT transfer (ERC-721)~~ | ~~ERC-721~~ | ✅ Da implement (`safeTransferFrom` ABI encoding) |
-| Contract ABI interaction | -- | COULD: Chi ho tro ERC-20 transfer |
+| ~~Contract ABI interaction~~ | ~~--~~ | ✅ Da implement (`callContract` + `executeContract` + generic ABI encoding) |
 | Account Abstraction | ERC-4337 | COULD: Chua ho tro |
 | Permit / Gasless approval | EIP-2612 | COULD: Chua ho tro |
-| ETH-Arbitrum Bridge | -- | SHOULD: Hien tai simulated, chua thuc su hoat dong |
-| Batch RPC calls | -- | COULD: Moi request rieng le |
+| ~~ETH-Arbitrum Bridge~~ | ~~--~~ | ✅ Da implement (Delayed Inbox deposit + ArbSys withdrawal) |
+| ~~Batch RPC calls~~ | ~~--~~ | ✅ Da implement (`batchCall` + `getBalanceAndNonce` + `getTokenBalancesBatch`) |
 | ~~Token approval (approve)~~ | ~~ERC-20~~ | ✅ Da implement (`approveErc20Token`) |
 | ~~Token allowance check~~ | ~~ERC-20~~ | ✅ Da implement (`getAllowanceErc20Token` via `eth_call`) |
