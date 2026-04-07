@@ -196,11 +196,11 @@ class TonManager(
 
     private fun buildW5DataCell(walletId: Int): Cell =
         CellBuilder.createCell {
-            storeBit(true)                           // is_signature_allowed = true
+            storeBoolean(true)                           // is_signature_allowed = true
             storeUInt(0, 32)                         // initial seqno = 0
             storeUInt(walletId, 32)                  // wallet_id (uint32)
             storeBytes(publicKey.key.toByteArray())  // 256-bit public key
-            storeBit(false)                          // empty extensions dict
+            storeBoolean(false)                          // empty extensions dict
         }
 
     private fun buildW5StateInit(isTestnet: Boolean): StateInit =
@@ -233,9 +233,9 @@ class TonManager(
     private fun buildW5InnerRequest(transfer: WalletTransfer, sendMode: Int = 3): Cell {
         val outListCell = buildW5OutListCell(transfer, sendMode)
         return CellBuilder.createCell {
-            storeBit(true)          // has out_list ref (Maybe = present)
+            storeBoolean(true)          // has out_list ref (Maybe = present)
             storeRef(outListCell)
-            storeBit(false)         // has_other_actions = false
+            storeBoolean(false)         // has_other_actions = false
         }
     }
 
@@ -260,9 +260,9 @@ class TonManager(
     private fun buildW5InnerRequestMulti(transfers: List<WalletTransfer>, sendMode: Int = 3): Cell {
         val outListCell = buildW5OutListCellMulti(transfers, sendMode)
         return CellBuilder.createCell {
-            storeBit(true)    // has out_list
+            storeBoolean(true)    // has out_list
             storeRef(outListCell)
-            storeBit(false)   // has_other_actions = false
+            storeBoolean(false)   // has_other_actions = false
         }
     }
 
