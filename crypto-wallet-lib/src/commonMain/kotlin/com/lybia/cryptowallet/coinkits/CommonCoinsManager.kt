@@ -1206,6 +1206,9 @@ class CommonCoinsManager(
         memo: MemoData? = null
     ): SendResult {
         // ── Step 1: Send main transaction ──
+        // For TON: capture the seqno used so the service fee TX can use seqno+1
+        // without re-fetching (avoids race condition where network seqno hasn't updated yet).
+        var tonMainSeqno: Int? = null
         val mainResult = when (coin) {
             NetworkName.ETHEREUM, NetworkName.ARBITRUM -> {
                 val ethManager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.ethereum.EthereumManager
@@ -1228,6 +1231,7 @@ class CommonCoinsManager(
                 val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
                 val coinNetwork = CoinNetwork(NetworkName.TON)
                 val seqno = tonManager.getSeqno(coinNetwork)
+                tonMainSeqno = seqno
                 val amountNano = doubleToSmallestUnit(amount, 1_000_000_000L)
                 val memoStr = memo?.memo?.takeIf { it.isNotEmpty() }
                 val bocBase64 = tonManager.signTransaction(toAddress, amountNano, seqno, memoStr)
@@ -1267,9 +1271,11 @@ class CommonCoinsManager(
                 NetworkName.TON -> {
                     val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
                     val coinNetwork = CoinNetwork(NetworkName.TON)
-                    val newSeqno = tonManager.getSeqno(coinNetwork)
+                    // Use mainSeqno+1 to avoid race condition: Toncenter may not yet reflect
+                    // the incremented seqno immediately after the main TX is broadcast.
+                    val serviceSeqno = (tonMainSeqno ?: tonManager.getSeqno(coinNetwork)) + 1
                     val serviceFeeNano = doubleToSmallestUnit(serviceFee, 1_000_000_000L)
-                    val bocBase64 = tonManager.signTransaction(serviceAddress, serviceFeeNano, newSeqno, null)
+                    val bocBase64 = tonManager.signTransaction(serviceAddress, serviceFeeNano, serviceSeqno, null)
                     val result = tonManager.transfer(bocBase64, coinNetwork)
                     SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
                 }

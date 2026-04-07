@@ -698,6 +698,12 @@ class TonManager(
     /** Transaction expiry: current time + 60 seconds. Prevents stale signed messages. */
     private fun defaultValidUntil(): Int = (currentEpochSeconds() + 60).toInt()
 
+    /**
+     * Extended expiry for new wallet deployment (seqno == 0).
+     * 5 minutes to allow time for stateInit to be included and processed.
+     */
+    private fun deployValidUntil(): Int = (currentEpochSeconds() + 300).toInt()
+
     // ─── Private signing helpers ──────────────────────────────────────────────
 
     private fun signTransferV4(transfer: WalletTransfer, seqno: Int): String {
@@ -711,7 +717,7 @@ class TonManager(
             stateInit = stateInit,
             privateKey = privateKey,
             walletId = walletId,
-            validUntil = if (seqno == 0) Int.MAX_VALUE else defaultValidUntil(),
+            validUntil = if (seqno == 0) deployValidUntil() else defaultValidUntil(),
             seqno = seqno,
             transfer
         )
