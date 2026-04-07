@@ -11,6 +11,7 @@ import com.lybia.cryptowallet.utils.suffix
 import com.lybia.cryptowallet.utils.toHexString
 import com.lybia.cryptowallet.wallets.cardano.CardanoAddress
 import com.lybia.cryptowallet.wallets.hdwallet.bip32.ACTPublicKey
+import org.ton.block.AddrStd
 
 class ACTAddress {
     private var publicKey: ACTPublicKey? = null
@@ -66,6 +67,12 @@ class ACTAddress {
                         fr.acinq.bitcoin.Base58.decode(addressStr!!)
                     } catch (_: Exception) { null }
                 }
+                ACTCoin.TON -> {
+                    return try {
+                        val addr = AddrStd.parse(addressStr!!)
+                        addr.address.toByteArray()
+                    } catch (_: Exception) { null }
+                }
                 else -> {}
             }
         }
@@ -93,6 +100,12 @@ class ACTAddress {
                 } else {
                     fr.acinq.bitcoin.Base58.encode(r)
                 }
+            }
+            ACTCoin.TON -> {
+                // r is the 32-byte account hash; rebuild a non-bounceable mainnet address
+                val isTestnet = network.isTestNet
+                val addr = AddrStd(0, org.ton.bitstring.BitString(r))
+                addr.toString(userFriendly = true, bounceable = false, testOnly = isTestnet)
             }
             else -> fr.acinq.bitcoin.Base58.encode(r)
         }
