@@ -47,9 +47,10 @@ fi
 
 TAG="v${VERSION}"
 FRAMEWORK_NAME="crypto-wallet-lib"
+XCFRAMEWORK_OUTPUT_NAME="crypto_wallet_lib"
 XCFRAMEWORK_DIR="crypto-wallet-lib/build/XCFrameworks/release"
-XCFRAMEWORK_PATH="${XCFRAMEWORK_DIR}/${FRAMEWORK_NAME}.xcframework"
-ZIP_NAME="${FRAMEWORK_NAME}.xcframework.zip"
+XCFRAMEWORK_PATH="${XCFRAMEWORK_DIR}/${XCFRAMEWORK_OUTPUT_NAME}.xcframework"
+ZIP_NAME="${XCFRAMEWORK_OUTPUT_NAME}.xcframework.zip"
 ZIP_PATH="${REPO_ROOT}/${ZIP_NAME}"
 GITHUB_REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null || echo "")
 
@@ -82,7 +83,7 @@ echo "   -> Build thanh cong!"
 echo "[2/6] Zipping XCFramework..."
 rm -f "$ZIP_PATH"
 cd "$XCFRAMEWORK_DIR"
-zip -r -q "$ZIP_PATH" "${FRAMEWORK_NAME}.xcframework"
+zip -r -q "$ZIP_PATH" "${XCFRAMEWORK_OUTPUT_NAME}.xcframework"
 cd "$REPO_ROOT"
 
 ZIP_SIZE=$(du -h "$ZIP_PATH" | cut -f1)
