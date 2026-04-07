@@ -288,6 +288,52 @@ viewModelScope.launch {
 > **ABI:** Dùng selector `0xa9059cbb` (`transfer(address,uint256)`)
 > **Gas:** ERC-20 transfer thường cần ~65,000 gas (vs 21,000 cho ETH transfer)
 
+### 7.4 Approve ERC-20
+
+Cho phép một address (vd: DEX contract) chi tiêu token thay bạn.
+
+```kotlin
+viewModelScope.launch {
+    val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+
+    // Approve spender chi tiêu 100 USDT (6 decimals)
+    val result = ethManager.approveErc20Token(
+        contractAddress = "0xUSDT...",
+        spenderAddress = "0xDexRouter...",
+        amount = BigInteger.fromLong(100_000_000),  // 100 USDT
+        coinNetwork = coinNetwork
+    )
+
+    if (result.success) {
+        Log.d("ETH", "Approve tx: ${result.txHash}")
+    }
+}
+```
+
+> **ABI:** Dùng selector `0x095ea7b3` (`approve(address,uint256)`)
+> **Gas:** ERC-20 approve thường cần ~46,000 gas
+
+### 7.5 Check Allowance
+
+Kiểm tra số lượng token đã approve cho spender (read-only, không tốn gas).
+
+```kotlin
+viewModelScope.launch {
+    val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+
+    val allowance = ethManager.getAllowanceErc20Token(
+        contractAddress = "0xUSDT...",
+        ownerAddress = myAddress,
+        spenderAddress = "0xDexRouter...",
+        coinNetwork = coinNetwork
+    )
+
+    Log.d("ETH", "Allowance: $allowance")  // BigInteger in smallest unit
+}
+```
+
+> **ABI:** Dùng selector `0xdd62ed3e` (`allowance(address,address)`) via `eth_call`
+
 ---
 
 ## 8. NFT (ERC-721)

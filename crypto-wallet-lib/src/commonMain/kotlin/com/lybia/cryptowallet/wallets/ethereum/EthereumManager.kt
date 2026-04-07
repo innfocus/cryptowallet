@@ -374,6 +374,111 @@ class EthereumManager(
         }
     }
 
+    // ── ERC-20 Approval ──────────────────────────────────────────────
+
+    /**
+     * Approve a spender to spend ERC-20 tokens on behalf of the wallet owner.
+     * Calls the ERC-20 approve(address, uint256) function.
+     *
+     * @param contractAddress ERC-20 token contract address
+     * @param spenderAddress Address authorized to spend tokens
+     * @param amount Approved amount in smallest unit (BigInteger). Use BigInteger.MAX for unlimited.
+     * @param coinNetwork Network configuration
+     * @param gasLimit Optional gas limit override
+     * @return TransferResponseModel with txHash on success
+     */
+    suspend fun approveErc20Token(
+        contractAddress: String,
+        spenderAddress: String,
+        amount: BigInteger,
+        coinNetwork: CoinNetwork,
+        gasLimit: Long? = null
+    ): TransferResponseModel {
+        val privKey = privateKeyBytes
+            ?: return TransferResponseModel(false, "No private key — mnemonic not provided", null)
+        val fromAddr = walletAddress
+            ?: return TransferResponseModel(false, "No wallet address", null)
+
+        return try {
+            val nonce = getNonce(coinNetwork)
+            val chainId = getChainId(coinNetwork).toLong()
+
+            val approveData = EthTransactionSigner.encodeErc20Approve(spenderAddress, amount)
+
+            val estGasLimit = gasLimit ?: run {
+                val model = TransferTokenModel(
+                    nonce = "", addressFrom = fromAddr,
+                    contractAddress = contractAddress,
+                    dataEncodeABI = "0x" + approveData.toHexString(),
+                    value = "0x0"
+                )
+                getEstGas(model, coinNetwork).toLong()
+            }
+
+            val baseFeeHex = InfuraRpcService.shared.getBaseFee(coinNetwork)
+            val signedTxHex: String
+
+            if (baseFeeHex != null) {
+                val baseFee = hexToBigInt(baseFeeHex)
+                val GWEI = BigInteger.fromLong(1_000_000_000)
+                val rpcTip = InfuraRpcService.shared.getMaxPriorityFeePerGas(coinNetwork)
+                val priorityFee = if (rpcTip != null) hexToBigInt(rpcTip)
+                else BigInteger.fromLong(1_500_000_000)
+                val maxFee = baseFee * BigInteger.TWO + priorityFee
+
+                signedTxHex = EthTransactionSigner.signEip1559Transaction(
+                    privateKey = privKey, nonce = nonce,
+                    maxPriorityFeePerGas = priorityFee, maxFeePerGas = maxFee,
+                    gasLimit = estGasLimit, toAddress = contractAddress,
+                    valueWei = BigInteger.ZERO, data = approveData, chainId = chainId
+                )
+            } else {
+                val hexPrice = InfuraRpcService.shared.getAllGasPrice(coinNetwork, chainId.toInt())
+                val gasPriceWei = if (hexPrice != null) hexToBigInt(hexPrice)
+                else BigInteger.fromLong(20_000_000_000L)
+
+                signedTxHex = EthTransactionSigner.signLegacyTransaction(
+                    privateKey = privKey, nonce = nonce,
+                    gasPriceWei = gasPriceWei, gasLimit = estGasLimit,
+                    toAddress = contractAddress, valueWei = BigInteger.ZERO,
+                    data = approveData, chainId = chainId
+                )
+            }
+
+            val txHash = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, signedTxHex)
+            TransferResponseModel(success = true, error = null, txHash = txHash)
+        } catch (e: Exception) {
+            TransferResponseModel(success = false, error = e.message, txHash = null)
+        }
+    }
+
+    /**
+     * Query the current ERC-20 allowance for a spender.
+     * Read-only call (no gas cost, no transaction).
+     *
+     * @param contractAddress ERC-20 token contract address
+     * @param ownerAddress Token owner address
+     * @param spenderAddress Spender address to check
+     * @param coinNetwork Network configuration
+     * @return Allowance amount as BigInteger (in smallest token unit), or null on failure
+     */
+    suspend fun getAllowanceErc20Token(
+        contractAddress: String,
+        ownerAddress: String,
+        spenderAddress: String,
+        coinNetwork: CoinNetwork
+    ): BigInteger? {
+        return try {
+            val callData = EthTransactionSigner.encodeErc20Allowance(ownerAddress, spenderAddress)
+            val dataHex = "0x" + callData.toHexString()
+            val result = InfuraRpcService.shared.ethCall(coinNetwork, contractAddress, dataHex)
+            if (result != null) hexToBigInt(result) else null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
     /**
      * Backward-compatible sendErc20Token with Long amount.
      */

@@ -174,6 +174,46 @@ override suspend fun transferNFT(nftAddress: String, toAddress: String, memo: St
 
 ---
 
+## 7.5. ERC-20 Token Approval (approve / allowance)
+
+### Approve
+```kotlin
+suspend fun approveErc20Token(
+    contractAddress: String,      // ERC-20 token contract
+    spenderAddress: String,       // Address duoc phep chi tieu
+    amount: BigInteger,           // So luong approve (smallest unit)
+    coinNetwork: CoinNetwork,
+    gasLimit: Long? = null
+): TransferResponseModel
+```
+
+**ABI Encoding:**
+```
+Function selector: 0x095ea7b3  (approve(address,uint256))
+Params: padded_spender(32 bytes) + padded_amount(32 bytes)
+Data: selector(4) + spender(32) + amount(32) = 68 bytes
+```
+
+### Allowance (read-only, no gas)
+```kotlin
+suspend fun getAllowanceErc20Token(
+    contractAddress: String,      // ERC-20 token contract
+    ownerAddress: String,         // Token owner
+    spenderAddress: String,       // Spender can kiem tra
+    coinNetwork: CoinNetwork
+): BigInteger?                    // Allowance amount (smallest unit)
+```
+
+**ABI Encoding:**
+```
+Function selector: 0xdd62ed3e  (allowance(address,address))
+Params: padded_owner(32 bytes) + padded_spender(32 bytes)
+Data: selector(4) + owner(32) + spender(32) = 68 bytes
+Result: uint256 (32 bytes) — parsed via eth_call (read-only)
+```
+
+---
+
 ## 8. Gas/Fee Estimation
 
 ### Gas Price Sources
@@ -290,5 +330,5 @@ Config.shared.apiKeyOwlRacle    // OwlRacle API key
 | Permit / Gasless approval | EIP-2612 | COULD: Chua ho tro |
 | ETH-Arbitrum Bridge | -- | SHOULD: Hien tai simulated, chua thuc su hoat dong |
 | Batch RPC calls | -- | COULD: Moi request rieng le |
-| Token approval (approve) | ERC-20 | SHOULD: Chua co `approve()` method |
-| Token allowance check | ERC-20 | SHOULD: Chua co `allowance()` method |
+| ~~Token approval (approve)~~ | ~~ERC-20~~ | ✅ Da implement (`approveErc20Token`) |
+| ~~Token allowance check~~ | ~~ERC-20~~ | ✅ Da implement (`getAllowanceErc20Token` via `eth_call`) |

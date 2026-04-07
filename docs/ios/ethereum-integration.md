@@ -181,6 +181,35 @@ let result = try await ethManager.sendErc20TokenBigInt(
 )
 ```
 
+### 7.4 Approve ERC-20
+
+```swift
+let coinNetwork = CoinNetwork(name: .ethereum)
+
+// Approve spender to spend 100 USDT (6 decimals)
+let result = try await ethManager.approveErc20Token(
+    contractAddress: "0xUSDT...",
+    spenderAddress: "0xDexRouter...",
+    amount: KotlinBigInteger.fromLong(value: 100_000_000),  // 100 USDT
+    coinNetwork: coinNetwork,
+    gasLimit: nil
+)
+```
+
+### 7.5 Check Allowance
+
+```swift
+let coinNetwork = CoinNetwork(name: .ethereum)
+
+let allowance = try await ethManager.getAllowanceErc20Token(
+    contractAddress: "0xUSDT...",
+    ownerAddress: myAddress,
+    spenderAddress: "0xDexRouter...",
+    coinNetwork: coinNetwork
+)
+// allowance: KotlinBigInteger? — in smallest token unit
+```
+
 ---
 
 ## 8. NFT (ERC-721)

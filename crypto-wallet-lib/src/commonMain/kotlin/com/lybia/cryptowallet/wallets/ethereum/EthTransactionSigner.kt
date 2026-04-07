@@ -197,6 +197,42 @@ object EthTransactionSigner {
         return encodeErc20TransferBigInt(toAddress, BigInteger.fromLong(amount))
     }
 
+    /**
+     * Encode ERC-20 approve(address, uint256) call data.
+     * Function selector: 0x095ea7b3 = keccak256("approve(address,uint256)")
+     *
+     * @param spenderAddress The address authorized to spend tokens
+     * @param amount The approved amount in smallest unit (BigInteger)
+     * @return 68-byte ABI-encoded call data
+     */
+    fun encodeErc20Approve(spenderAddress: String, amount: BigInteger): ByteArray {
+        val selector = "095ea7b3".fromHexToByteArray()
+        val addrBytes = spenderAddress.removePrefix("0x").fromHexToByteArray()
+        val paddedAddr = ByteArray(32)
+        addrBytes.copyInto(paddedAddr, 32 - addrBytes.size)
+        val amountBytes = bigIntToBytes32(amount)
+        return selector + paddedAddr + amountBytes
+    }
+
+    /**
+     * Encode ERC-20 allowance(address, address) call data for eth_call.
+     * Function selector: 0xdd62ed3e = keccak256("allowance(address,address)")
+     *
+     * @param ownerAddress The token owner address
+     * @param spenderAddress The spender address
+     * @return 68-byte ABI-encoded call data
+     */
+    fun encodeErc20Allowance(ownerAddress: String, spenderAddress: String): ByteArray {
+        val selector = "dd62ed3e".fromHexToByteArray()
+        val ownerBytes = ownerAddress.removePrefix("0x").fromHexToByteArray()
+        val paddedOwner = ByteArray(32)
+        ownerBytes.copyInto(paddedOwner, 32 - ownerBytes.size)
+        val spenderBytes = spenderAddress.removePrefix("0x").fromHexToByteArray()
+        val paddedSpender = ByteArray(32)
+        spenderBytes.copyInto(paddedSpender, 32 - spenderBytes.size)
+        return selector + paddedOwner + paddedSpender
+    }
+
     // ── RLP encoding ────────────────────────────────────────────────
 
     internal fun rlpEncodeBytes(bytes: ByteArray): ByteArray {

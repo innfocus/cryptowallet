@@ -220,6 +220,40 @@ class InfuraRpcService {
     }
 
     /**
+     * Execute a read-only call via eth_call (no transaction broadcast).
+     * Used for querying contract state (e.g. ERC-20 allowance, balanceOf).
+     *
+     * @param coin Network configuration
+     * @param to Contract address
+     * @param data ABI-encoded call data (0x-prefixed hex)
+     * @return Hex-encoded result string, or null on failure
+     */
+    suspend fun ethCall(coin: CoinNetwork, to: String, data: String): String? {
+        try {
+            val callObject = mapOf("to" to to, "data" to data)
+            val body = mapOf(
+                "jsonrpc" to "2.0",
+                "method" to "eth_call",
+                "params" to listOf(callObject, "latest"),
+                "id" to 1
+            )
+            val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
+                headers { append(HttpHeaders.Accept, "application/json") }
+                contentType(ContentType.Application.Json)
+                setBody(Json.encodeToString(body))
+            }
+            if (response.status.value in 200..299) {
+                val rpcResponse = response.body<InfuraRpcBalanceResponse>()
+                if (rpcResponse.error == null) return rpcResponse.result
+            }
+            return null
+        } catch (e: Exception) {
+            e.printStackTrace()
+            return null
+        }
+    }
+
+    /**
      * Get the base fee of the latest block via eth_getBlockByNumber.
      * @return Hex-encoded baseFeePerGas string, or null
      */
