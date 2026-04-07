@@ -275,7 +275,7 @@ class CardanoManager(
         val toAddressBytes = addressToBytes(toAddress)
         val dummyTokenOutput = CardanoTransactionOutput(
             addressBytes = toAddressBytes,
-            lovelace = 0L,
+            lovelace = 2_000_000L, // Use realistic lovelace value for accurate CBOR size estimation
             multiAssets = mapOf(policyIdBytes to mapOf(assetNameBytes to amount))
         )
         val minAda = CardanoMinUtxo.calculateMinAda(dummyTokenOutput, COINS_PER_UTXO_BYTE)
