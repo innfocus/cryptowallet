@@ -21,20 +21,23 @@ Chào mừng bạn đến với hệ thống tài liệu kỹ thuật của dự
 ## 2. Bản đồ Tài liệu (Documentation Map)
 
 ### 🏗️ Kiến trúc & Tổng quan
-- [Tổng quan Kiến trúc 5 tầng](architecture/overview.md) - **Nên đọc đầu tiên.**
-- [Hướng dẫn cho Developer (KMP)](DEVELOPER_GUIDE.md)
+- [Hướng dẫn cho Developer (KMP)](DEVELOPER_GUIDE.md) - **Nên đọc đầu tiên.**
+- [Contributing Guide & Code Quality](CONTRIBUTING.md) - **Quy tắc đóng góp, review checklist, design patterns**
+- [PR Template](../.github/PULL_REQUEST_TEMPLATE.md) - Checklist khi tạo Pull Request
 - [Phân tích Migration (Android -> KMP)](architecture/migration-analysis.md)
 - [Thiết lập môi trường Local](architecture/local-development.md)
 
 ### 📱 Hướng dẫn theo Nền tảng
 - [**Dành cho Android:** Cách dùng CoinsManager](android/usage-guide.md)
+- [**Dành cho Android:** Tích hợp Bitcoin (BTC)](android/bitcoin-integration.md)
+- [**Dành cho Android:** Tích hợp Ripple (XRP)](android/ripple-integration.md)
+- [**Dành cho Android:** Tích hợp TON](android/ton-integration.md)
 - [**Dành cho Android:** Tích hợp Cardano (Byron + Shelley)](android/cardano-integration.md)
 - [**Dành cho iOS:** Cách dùng Swift async/await](ios/swift-integration.md)
-- [**Dành cho iOS:** Tích hợp Cardano (Byron + Shelley)](ios/cardano-integration.md)
-- [**Dành cho Android:** Tích hợp Bitcoin (BTC)](android/bitcoin-integration.md)
 - [**Dành cho iOS:** Tích hợp Bitcoin (BTC)](ios/bitcoin-integration.md)
-- [**Dành cho Android:** Tích hợp Ripple (XRP)](android/ripple-integration.md)
 - [**Dành cho iOS:** Tích hợp Ripple (XRP)](ios/ripple-integration.md)
+- [**Dành cho iOS:** Tích hợp TON](ios/ton-integration.md)
+- [**Dành cho iOS:** Tích hợp Cardano (Byron + Shelley)](ios/cardano-integration.md)
 - [Hướng dẫn cho User cuối](architecture/user-guide.md)
 
 ### 🔌 API Reference

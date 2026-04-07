@@ -1,89 +1,173 @@
 # Developer Guide: CryptoWallet
 
-This guide provides technical instructions for developers contributing to the CryptoWallet library.
+Hướng dẫn kỹ thuật cho developer đóng góp vào CryptoWallet KMP library.
+
+> **Tài liệu quan trọng khác:**
+> - [Contributing Guide](CONTRIBUTING.md) — Quy tắc code quality, review checklist, design patterns
+> - [CommonCoinsManager API](api/common-coins-manager.md) — API reference + Design Patterns (Section 11)
+> - [PR Template](../.github/PULL_REQUEST_TEMPLATE.md) — Checklist khi tạo Pull Request
+
+---
 
 ## 1. Project Structure
 
-- `commonMain`: Shared code for all platforms (KMP).
-- `androidMain`: Android-specific implementations.
-- `iosMain`: iOS-specific implementations.
-- `commonTest`: Unit tests for shared logic.
-
-## 2. Running Tests
-
-Testing is the primary way to ensure correctness across platforms.
-
-### Running All Common Tests
-Run this command to execute tests in the `commonTest` source set using the JVM.
-
-```bash
-./gradlew :crypto-wallet-lib:allTests
+```
+crypto-wallet-lib/src/
+├── commonMain/    # Shared code cho tất cả platforms (KMP)
+│   ├── base/      # Interfaces: IWalletManager, ITokenManager, INFTManager, IStakingManager
+│   ├── coinkits/  # CommonCoinsManager (unified facade), ChainManagerFactory
+│   ├── wallets/   # Chain managers: TonManager, BitcoinManager, EthereumManager, ...
+│   ├── services/  # API clients: TonApiService, InfuraRpcService, ...
+│   ├── models/    # Data models, response types
+│   └── errors/    # WalletError hierarchy
+├── androidMain/   # Android-specific: CoinsManager, TonService (callback bridge)
+├── iosMain/       # iOS: Ktor Darwin client config, XCFramework export
+├── jvmMain/       # JVM actuals (incomplete — do not target)
+└── commonTest/    # Unit tests
 ```
 
-### Running Specific Module Tests
-- **Android Unit Tests**:
-  ```bash
-  ./gradlew :crypto-wallet-lib:testDebugUnitTest
-  ```
-- **iOS Unit Tests (Simulator)**:
-  ```bash
-  ./gradlew :crypto-wallet-lib:iosX64Test
-  ```
-- **JVM Tests (Fastest)**:
-  ```bash
-  ./gradlew :crypto-wallet-lib:jvmTest
-  ```
+## 2. Build & Test
 
-### Running a Specific Test Class
-You can target a specific test file by using the `--tests` flag (for JVM/Android):
+### Build Commands (Active targets: Android only)
 
 ```bash
+# Primary: compile & verify (nhanh nhất)
+./gradlew :crypto-wallet-lib:compileAndroidMain
+
+# Full Android build (AAR)
+./gradlew :crypto-wallet-lib:assembleAndroidMain
+
+# Publish locally
+./gradlew publishToMavenLocal
+```
+
+> **KHÔNG chạy:** `jvmTest`, `allTests`, `build` — JVM/iOS missing actual declarations, sẽ fail.
+
+### Test Commands
+
+```bash
+# Specific test class
 ./gradlew :crypto-wallet-lib:jvmTest --tests "com.lybia.cryptowallet.wallets.ton.TonManagerTest"
+
+# iOS simulator test
+./gradlew :crypto-wallet-lib:iosSimulatorArm64Test
 ```
 
-## 3. Best Practices for TON Integration
+### Test Guidelines
+- Mock HTTP calls với Ktor `MockEngine` — **KHÔNG** gọi live API trong unit test
+- TON tests dùng 24-word mnemonic (TON format, không phải BIP-39)
+- Mỗi chain mới **phải** có test cho address derivation
 
-- **Mnemonic**: Standard TON mnemonics are 24 words. Ensure the phrase is split correctly.
-- **Address Formats**:
-    - **User-friendly**: Non-bounceable is generally preferred for wallet displays to prevent accidental coins bounce.
-    - **Testnet**: Always check `Config.shared.getNetwork()` before formatting the address string.
-- **SDK**: We use `ton-kotlin:0.5.0`. Refer to `gradle/libs.versions.toml` for version management.
+## 3. Thêm Chain mới — Checklist
 
-## 4. Integrating New Coins with CoinsManager
+Khi thêm blockchain mới, phải hoàn thành **tất cả** bước sau:
 
-When adding a new blockchain, you must integrate it into `CoinsManager` to maintain the unified API for Android.
+### 3.1 Code Implementation
 
-### Steps to Integrate:
-1. **Define the Coin**: Add the new coin to the `ACTCoin` enum (usually in `hdwallet/bip32/ACTCoin.kt`).
-2. **Update Supported Coins**: In `CoinsManager.kt`, add the new coin to the `coinsSupported` list and `networkManager` map.
-3. **Implement Core Logic**: Extend `CoinsManager` methods for the new coin:
-    - `addresses()`: Define how to derive addresses.
-    - `getBalance()`: Add a case for the new coin and call its networking helper.
-    - `getTransactions()`: Add a case to fetch history.
-    - `sendCoin()`: Handle signing and broadcasting.
-    - `estimateFee()`: Calculate transaction fees.
+- [ ] **Chain Manager**: Tạo `{Chain}Manager` trong `commonMain/wallets/{chain}/`
+  - Extend `BaseCoinManager()`
+  - Implement `ITokenManager` nếu hỗ trợ token
+  - Implement `INFTManager` nếu hỗ trợ NFT
+  - Implement `IStakingManager` nếu hỗ trợ staking
+  - Implement `IFeeEstimator` nếu hỗ trợ dynamic fee
+- [ ] **API Service**: Tạo `{Chain}ApiService` trong `commonMain/services/`
+- [ ] **Models**: Tạo response models trong `commonMain/models/{chain}/`
+- [ ] **Errors**: Thêm chain-specific errors nếu cần (`errors/WalletError.kt`)
+- [ ] **Enums**: Thêm `NetworkName.{CHAIN}` + `ACTCoin.{Chain}`
+- [ ] **CoinNetwork**: Cấu hình endpoints trong `CoinNetwork.kt`
+- [ ] **ChainManagerFactory**: Đăng ký trong `createWalletManager()`
 
-### Example: Adding a new coin logic
+### 3.2 CommonCoinsManager Integration
+
+- [ ] **Routing**: Thêm `when` branch cho `sendCoin()`, `sendCoinExact()`
+- [ ] **Pagination**: Thêm `when` branch cho `getTransactionHistoryPaginated()` nếu hỗ trợ
+- [ ] **Fee**: Thêm `when` branch cho `estimateFee()`
+- [ ] **Capability**: Cập nhật `supportsTokens()`, `supportsNFTs()`, `supportsStaking()`
+- [ ] **ACCOUNT_CHAINS** hoặc **UTXO_CHAINS**: Thêm vào set tương ứng
+
+### 3.3 Android Integration (nếu cần callback API)
+
+- [ ] **CoinsManager**: Thêm routing trong `addresses()`, `getBalance()`, `sendCoin()`, etc.
+- [ ] **Service Bridge**: Tạo `{Chain}Service` nếu cần callback pattern (giống `TonService`)
+
+### 3.4 Testing
+
+- [ ] Unit test cho address derivation
+- [ ] Integration test cho API calls (MockEngine)
+- [ ] Build passes: `./gradlew :crypto-wallet-lib:compileAndroidMain`
+
+### 3.5 Documentation
+
+- [ ] `docs/chains/{chain}.md` — Kỹ thuật chi tiết
+- [ ] `docs/android/{chain}-integration.md` — Hướng dẫn Android
+- [ ] `docs/ios/{chain}-integration.md` — Hướng dẫn iOS
+- [ ] `docs/api/common-coins-manager.md` — Cập nhật bảng pagination, capability
+- [ ] `docs/README.md` — Thêm links
+
+## 4. Design Patterns (Phải tuân thủ)
+
+### 4.1 Result Wrapper
+CommonCoinsManager **KHÔNG** throw exception ra ngoài:
 ```kotlin
-// In CoinsManager.kt -> getBalance()
-when (coin) {
-    ACTCoin.NewCoin -> {
-        // Call NewCoin specific logic
-        getNewCoinBalance(adds.first(), completionHandler)
+suspend fun operation(): SomeResult {
+    return try {
+        SomeResult(data = ..., success = true)
+    } catch (e: Exception) {
+        logger.e(e) { "Failed" }
+        SomeResult(success = false, error = e.message)
     }
 }
 ```
 
+### 4.2 Config Singleton
+```kotlin
+// ĐÚNG: đọc network at runtime
+val isTestnet = Config.shared.getNetwork() == Network.TESTNET
+
+// SAI: truyền network ở constructor
+class BadManager(val network: Network)  // KHÔNG làm như này
+```
+
+### 4.3 Coroutine Convention
+```kotlin
+// CommonCoinsManager: suspend fun
+suspend fun getBalance(coin: NetworkName): BalanceResult
+
+// Android bridge: launch + callback trên Main
+scope.launch {
+    val result = manager.getBalance(addr, coinNetwork)
+    withContext(Dispatchers.Main) { callback(result) }
+}
+
+// KHÔNG dùng GlobalScope
+```
+
+### 4.4 Transaction Signing
+```kotlin
+// ĐÚNG: validUntil có expiry
+validUntil = if (seqno == 0) Int.MAX_VALUE else defaultValidUntil()
+
+// ĐÚNG: seqno error propagated
+val seqno = apiService.getSeqno(coin, address)
+    ?: throw WalletError.NetworkError("Failed to retrieve seqno")
+
+// SAI: seqno default 0 khi API fail
+val seqno = apiService.getSeqno(coin, address) ?: 0  // NGUY HIỂM
+```
+
 ## 5. Dependency Management
 
-All project dependencies and their versions MUST be managed using **Gradle Version Catalogs** (`gradle/libs.versions.toml`).
+- **Tất cả** versions trong `gradle/libs.versions.toml`
+- **KHÔNG** hardcode version trong `build.gradle.kts`
+- Dùng `version.ref` trong `[libraries]`
+- Tên: `camelCase` cho versions, `kebab-case` cho library aliases
 
-- **No Hardcoded Versions**: Versions must not be hardcoded in `build.gradle.kts` files.
-- **Centralized Versions**: All version numbers must be defined in the `[versions]` section of `libs.versions.toml`.
-- **Reference by ref**: In the `[libraries]` section, always use `version.ref` to point to the version defined in `[versions]`.
-- **Module Names**: Use camelCase for version names and kebab-case for library aliases.
+## 6. Troubleshooting
 
-## 5. Troubleshooting
-
-- **Dependency issues**: If `ton-kotlin` is not found, ensure you have refreshed Gradle and that `mavenCentral()` is available in your root `settings.gradle.kts` or `build.gradle.kts`.
-- **Address Mismatch**: Different wallet versions (V3R1, V3R2, V4R2) produce different addresses for the same mnemonic. V4R2 is the default in this library.
+| Vấn đề | Nguyên nhân | Cách fix |
+|--------|-------------|----------|
+| `ton-kotlin` not found | Gradle chưa refresh | Refresh Gradle, kiểm tra `mavenCentral()` |
+| Address khác nhau | Wallet version khác | V4R2 (legacy) vs V5R1 (default) tạo address khác nhau |
+| JVM test fail | Missing actual declarations | Không chạy `jvmTest` — dùng `compileAndroidMain` |
+| ClassCastException token | Thiếu `ITokenManager` | Chain manager phải implement cả `ITokenManager` lẫn `ITokenAndNFT` |
+| Unstake TON fail | Thiếu poolAddress | TON unstake **bắt buộc** truyền `poolAddress` |

@@ -1,5 +1,6 @@
 package com.lybia.cryptowallet.wallets.ton
 
+import kotlin.math.pow
 import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.Config
 import com.lybia.cryptowallet.base.BaseCoinManager
@@ -343,7 +344,7 @@ class TonManager(
                 0L
             }
 
-            val divisor = Math.pow(10.0, decimals.toDouble())
+            val divisor = 10.0.pow(decimals.toDouble())
             val balance = balanceNano.toDouble() / divisor
             logger.i { "Jetton balance for $address: $balance (decimals=$decimals)" }
             return balance

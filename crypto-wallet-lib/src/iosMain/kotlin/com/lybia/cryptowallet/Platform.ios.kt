@@ -9,4 +9,4 @@ class IOSPlatform: Platform {
 actual fun getPlatform(): Platform = IOSPlatform()
 
 actual fun currentEpochSeconds(): Long =
-    platform.Foundation.NSDate().timeIntervalSince1970.toLong()
+    platform.Foundation.NSDate.date().timeIntervalSince1970.toLong()

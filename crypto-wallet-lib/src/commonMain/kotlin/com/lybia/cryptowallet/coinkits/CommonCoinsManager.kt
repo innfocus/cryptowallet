@@ -1,5 +1,6 @@
 package com.lybia.cryptowallet.coinkits
 
+import kotlin.math.pow
 import co.touchlab.kermit.Logger
 import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.base.IBridgeManager
@@ -928,7 +929,7 @@ class CommonCoinsManager(
             val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
             val coinNetwork = CoinNetwork(NetworkName.TON)
             val seqno = tonManager.getSeqno(coinNetwork)
-            val amountNano = doubleToSmallestUnit(amount, Math.pow(10.0, decimals.toDouble()).toLong())
+            val amountNano = doubleToSmallestUnit(amount, 10.0.pow(decimals.toDouble()).toLong())
             val boc = tonManager.signJettonTransaction(
                 jettonMasterAddress = jettonMasterAddress,
                 toAddress = toAddress,
