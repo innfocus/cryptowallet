@@ -201,13 +201,13 @@ class CardanoSignedTransaction(
         val metadataCbor: CborValue = if (metadata != null) {
             decoder.decode(metadata)
         } else {
-            CborValue.CborSimple.NULL
+            CborValue.CborSimple.CBOR_NULL
         }
 
         return encoder.encodeCanonical(CborValue.CborArray(listOf(
             bodyCbor,
             witnessCbor,
-            CborValue.CborSimple.TRUE,  // is_valid: always true for non-Plutus transactions
+            CborValue.CborSimple.CBOR_TRUE,  // is_valid: always true for non-Plutus transactions
             metadataCbor
         )))
     }

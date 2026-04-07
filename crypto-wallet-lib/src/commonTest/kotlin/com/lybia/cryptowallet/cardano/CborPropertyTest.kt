@@ -50,10 +50,10 @@ class CborPropertyTest {
 
     private fun arbCborSimple(): Arb<CborValue> =
         Arb.of(
-            CborValue.CborSimple.FALSE,
-            CborValue.CborSimple.TRUE,
-            CborValue.CborSimple.NULL,
-            CborValue.CborSimple.UNDEFINED
+            CborValue.CborSimple.CBOR_FALSE,
+            CborValue.CborSimple.CBOR_TRUE,
+            CborValue.CborSimple.CBOR_NULL,
+            CborValue.CborSimple.CBOR_UNDEFINED
         )
 
     private fun arbCborArray(maxDepth: Int): Arb<CborValue> =

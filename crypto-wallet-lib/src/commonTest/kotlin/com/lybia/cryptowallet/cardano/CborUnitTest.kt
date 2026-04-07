@@ -195,10 +195,10 @@ class CborUnitTest {
     @Test
     fun encodeDecodeSimpleValues() {
         for (simple in listOf(
-            CborValue.CborSimple.FALSE,
-            CborValue.CborSimple.TRUE,
-            CborValue.CborSimple.NULL,
-            CborValue.CborSimple.UNDEFINED
+            CborValue.CborSimple.CBOR_FALSE,
+            CborValue.CborSimple.CBOR_TRUE,
+            CborValue.CborSimple.CBOR_NULL,
+            CborValue.CborSimple.CBOR_UNDEFINED
         )) {
             val encoded = encoder.encode(simple)
             val decoded = decoder.decode(encoded)

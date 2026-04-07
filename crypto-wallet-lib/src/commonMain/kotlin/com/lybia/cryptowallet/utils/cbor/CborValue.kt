@@ -52,10 +52,10 @@ sealed class CborValue {
     /** Major type 7: Simple values (false=20, true=21, null=22, undefined=23) */
     data class CborSimple(val value: Int) : CborValue() {
         companion object {
-            val FALSE = CborSimple(20)
-            val TRUE = CborSimple(21)
-            val NULL = CborSimple(22)
-            val UNDEFINED = CborSimple(23)
+            val CBOR_FALSE = CborSimple(20)
+            val CBOR_TRUE = CborSimple(21)
+            val CBOR_NULL = CborSimple(22)
+            val CBOR_UNDEFINED = CborSimple(23)
         }
     }
 }
