@@ -338,18 +338,38 @@ viewModelScope.launch {
 
 ## 8. NFT (ERC-721)
 
-### 8.1 Lấy danh sách
+### 8.1 Lấy danh sách (with metadata)
 
 ```kotlin
 viewModelScope.launch {
     val nfts = ccm.getNFTs(NetworkName.ETHEREUM, myAddress)
     nfts?.forEach { nft ->
-        Log.d("ETH", "NFT: ${nft.name} #${nft.index} @ ${nft.address}")
+        Log.d("ETH", "NFT: ${nft.name} #${nft.index}")
+        Log.d("ETH", "  Description: ${nft.description}")
+        Log.d("ETH", "  Image: ${nft.imageUrl}")
     }
 }
 ```
 
-### 8.2 Transfer
+> `getNFTs` tự động fetch metadata (name, description, imageUrl) qua `tokenURI` cho mỗi NFT.
+
+### 8.2 Fetch metadata cho 1 NFT
+
+```kotlin
+viewModelScope.launch {
+    val coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+    val metadata = ethManager.getNFTMetadata(
+        contractAddress = "0xNftContract...",
+        tokenId = BigInteger.fromLong(1234),
+        coinNetwork = coinNetwork
+    )
+    Log.d("ETH", "Name: ${metadata?.name}, Image: ${metadata?.imageUrl}")
+}
+```
+
+> Hỗ trợ: HTTP URLs, IPFS (`ipfs://` → `https://ipfs.io/ipfs/`), on-chain data URIs.
+
+### 8.3 Transfer (safeTransferFrom)
 
 ```kotlin
 viewModelScope.launch {
@@ -357,12 +377,17 @@ viewModelScope.launch {
         coin = NetworkName.ETHEREUM,
         nftAddress = "0xNftContract...",
         toAddress = "0xRecipient...",
-        memo = null
+        memo = "1234"   // Token ID (bắt buộc)
     )
+    if (result.success) {
+        Log.d("ETH", "NFT transfer tx: ${result.txHash}")
+    }
 }
 ```
 
-> **Lưu ý:** NFT transfer trên Ethereum hiện chưa hoàn chỉnh. Chi hỗ trợ ERC-721, chưa có ERC-1155.
+> **ABI:** Dùng `safeTransferFrom(address,address,uint256)` selector `0x42842e0e`.
+> **memo** chứa token ID — bắt buộc cho ERC-721 transfer.
+> Chỉ hỗ trợ ERC-721, chưa có ERC-1155.
 
 ---
 

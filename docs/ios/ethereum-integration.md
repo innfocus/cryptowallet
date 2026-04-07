@@ -214,17 +214,43 @@ let allowance = try await ethManager.getAllowanceErc20Token(
 
 ## 8. NFT (ERC-721)
 
-```swift
-// List
-let nfts = try await ccm.getNFTs(coin: .ethereum, address: address)
+### 8.1 List (with metadata)
 
-// Transfer
+```swift
+// getNFTs auto-fetches metadata (name, description, imageUrl) via tokenURI
+let nfts = try await ccm.getNFTs(coin: .ethereum, address: address)
+nfts?.forEach { nft in
+    print("NFT: \(nft.name ?? "") #\(nft.index)")
+    print("  Description: \(nft.description ?? "")")
+    print("  Image: \(nft.imageUrl ?? "")")
+}
+```
+
+### 8.2 Fetch metadata for a single NFT
+
+```swift
+let coinNetwork = CoinNetwork(name: .ethereum)
+let metadata = try await ethManager.getNFTMetadata(
+    contractAddress: "0xNftContract...",
+    tokenId: KotlinBigInteger.fromLong(value: 1234),
+    coinNetwork: coinNetwork
+)
+// metadata?.imageUrl — supports HTTP, IPFS, on-chain data URIs
+```
+
+### 8.3 Transfer (safeTransferFrom)
+
+```swift
 let result = try await ccm.transferNFT(
     coin: .ethereum,
     nftAddress: "0xNftContract...",
-    toAddress: "0xRecipient..."
+    toAddress: "0xRecipient...",
+    memo: "1234"   // Token ID (required)
 )
 ```
+
+> **memo** contains the token ID — required for ERC-721 transfer.
+> Uses `safeTransferFrom(address,address,uint256)` ABI.
 
 ---
 

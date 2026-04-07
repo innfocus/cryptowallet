@@ -233,6 +233,42 @@ object EthTransactionSigner {
         return selector + paddedOwner + paddedSpender
     }
 
+    // ── ERC-721 encoding ──────────────────────────────────────────────
+
+    /**
+     * Encode ERC-721 safeTransferFrom(address, address, uint256) call data.
+     * Function selector: 0x42842e0e = keccak256("safeTransferFrom(address,address,uint256)")
+     *
+     * @param fromAddress Current NFT owner address
+     * @param toAddress Recipient address
+     * @param tokenId NFT token ID
+     * @return 100-byte ABI-encoded call data (4 + 32 + 32 + 32)
+     */
+    fun encodeErc721SafeTransferFrom(fromAddress: String, toAddress: String, tokenId: BigInteger): ByteArray {
+        val selector = "42842e0e".fromHexToByteArray()
+        val fromBytes = fromAddress.removePrefix("0x").fromHexToByteArray()
+        val paddedFrom = ByteArray(32)
+        fromBytes.copyInto(paddedFrom, 32 - fromBytes.size)
+        val toBytes = toAddress.removePrefix("0x").fromHexToByteArray()
+        val paddedTo = ByteArray(32)
+        toBytes.copyInto(paddedTo, 32 - toBytes.size)
+        val tokenIdBytes = bigIntToBytes32(tokenId)
+        return selector + paddedFrom + paddedTo + tokenIdBytes
+    }
+
+    /**
+     * Encode ERC-721 tokenURI(uint256) call data for eth_call.
+     * Function selector: 0xc87b56dd = keccak256("tokenURI(uint256)")
+     *
+     * @param tokenId NFT token ID
+     * @return 36-byte ABI-encoded call data (4 + 32)
+     */
+    fun encodeErc721TokenURI(tokenId: BigInteger): ByteArray {
+        val selector = "c87b56dd".fromHexToByteArray()
+        val tokenIdBytes = bigIntToBytes32(tokenId)
+        return selector + tokenIdBytes
+    }
+
     // ── RLP encoding ────────────────────────────────────────────────
 
     internal fun rlpEncodeBytes(bytes: ByteArray): ByteArray {

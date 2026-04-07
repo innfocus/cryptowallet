@@ -20,11 +20,18 @@ import com.lybia.cryptowallet.models.TransactionToken
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.models.TransferTokenModel
 import com.lybia.cryptowallet.services.ExplorerRpcService
+import com.lybia.cryptowallet.services.HttpClientService
 import com.lybia.cryptowallet.services.InfuraRpcService
 import com.lybia.cryptowallet.services.OwlRacleService
 import com.lybia.cryptowallet.utils.Utils
+import com.lybia.cryptowallet.utils.fromHexToByteArray
 import com.lybia.cryptowallet.utils.toHexString
 import com.ionspin.kotlin.bignum.integer.BigInteger
+import io.ktor.client.call.body
+import io.ktor.client.request.get
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 
 
 class EthereumManager(
@@ -165,6 +172,23 @@ class EthereumManager(
         val clean = hex.removePrefix("0x").removePrefix("0X")
         if (clean.isEmpty()) return BigInteger.ZERO
         return BigInteger.parseString(clean, 16)
+    }
+
+    /**
+     * Decode an ABI-encoded dynamic string from eth_call result.
+     * Layout: offset(32) + length(32) + data(ceil(length/32)*32)
+     */
+    private fun decodeAbiString(hex: String?): String? {
+        if (hex.isNullOrEmpty()) return null
+        val clean = hex.removePrefix("0x").removePrefix("0X")
+        if (clean.length < 128) return null // offset(64) + length(64) minimum
+        // bytes 32..63 = string length
+        val lengthHex = clean.substring(64, 128)
+        val length = lengthHex.trimStart('0').ifEmpty { "0" }.toLong(16).toInt()
+        if (length == 0) return null
+        // bytes 64.. = string data
+        val dataHex = clean.substring(128, minOf(128 + length * 2, clean.length))
+        return dataHex.fromHexToByteArray().decodeToString()
     }
 
     /**
@@ -574,20 +598,89 @@ class EthereumManager(
 
     // ── INFTManager ─────────────────────────────────────────────────
 
+    /**
+     * Fetch ERC-721 NFT metadata (name, description, image) via tokenURI.
+     * Calls tokenURI(tokenId) on the contract, then fetches the JSON metadata.
+     *
+     * @param contractAddress NFT contract address
+     * @param tokenId Token ID
+     * @param coinNetwork Network configuration
+     * @return NFTItem with metadata populated, or null on failure
+     */
+    suspend fun getNFTMetadata(
+        contractAddress: String,
+        tokenId: BigInteger,
+        coinNetwork: CoinNetwork
+    ): NFTItem? {
+        return try {
+            val callData = EthTransactionSigner.encodeErc721TokenURI(tokenId)
+            val dataHex = "0x" + callData.toHexString()
+            val result = InfuraRpcService.shared.ethCall(coinNetwork, contractAddress, dataHex)
+                ?: return null
+
+            val tokenUri = decodeAbiString(result) ?: return null
+
+            val jsonParser = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            val metadataJson: String = if (tokenUri.startsWith("data:application/json;base64,")) {
+                // On-chain metadata (base64 data URI)
+                val base64Part = tokenUri.substringAfter("data:application/json;base64,")
+                kotlin.io.encoding.Base64.decode(base64Part).decodeToString()
+            } else if (tokenUri.startsWith("data:application/json")) {
+                // On-chain metadata (raw JSON data URI)
+                tokenUri.substringAfter(",")
+            } else {
+                // Off-chain metadata (HTTP/IPFS URL)
+                val fetchUrl = if (tokenUri.startsWith("ipfs://")) {
+                    "https://ipfs.io/ipfs/" + tokenUri.removePrefix("ipfs://")
+                } else {
+                    tokenUri
+                }
+                val response = HttpClientService.INSTANCE.client.get(fetchUrl)
+                if (response.status.value in 200..299) response.body<String>() else return null
+            }
+
+            val metaObj = jsonParser.parseToJsonElement(metadataJson).jsonObject
+            val name = metaObj["name"]?.jsonPrimitive?.contentOrNull
+            val description = metaObj["description"]?.jsonPrimitive?.contentOrNull
+            var imageUrl = metaObj["image"]?.jsonPrimitive?.contentOrNull
+            if (imageUrl?.startsWith("ipfs://") == true) {
+                imageUrl = "https://ipfs.io/ipfs/" + imageUrl.removePrefix("ipfs://")
+            }
+
+            NFTItem(
+                coin = ACTCoin.Ethereum,
+                address = contractAddress,
+                collectionAddress = contractAddress,
+                index = tokenId.longValue(),
+                name = name,
+                description = description,
+                imageUrl = imageUrl
+            )
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
     override suspend fun getNFTs(address: String, coinNetwork: CoinNetwork): List<NFTItem>? {
         return try {
             ExplorerRpcService.INSTANCE.getNFTTransactions(coinNetwork, address)
                 ?.result
                 ?.distinctBy { it.contractAddress + it.tokenID }
                 ?.map { nft ->
+                    val tokenId = nft.tokenID.toLongOrNull() ?: 0L
+                    val metadata = try {
+                        getNFTMetadata(nft.contractAddress, BigInteger.fromLong(tokenId), coinNetwork)
+                    } catch (_: Exception) { null }
+
                     NFTItem(
                         coin = ACTCoin.Ethereum,
                         address = nft.contractAddress,
                         collectionAddress = nft.contractAddress,
-                        index = nft.tokenID.toLongOrNull() ?: 0L,
-                        name = nft.tokenName,
-                        description = null,
-                        imageUrl = null
+                        index = tokenId,
+                        name = metadata?.name ?: nft.tokenName,
+                        description = metadata?.description,
+                        imageUrl = metadata?.imageUrl
                     )
                 }
         } catch (e: Exception) {
@@ -596,26 +689,79 @@ class EthereumManager(
         }
     }
 
+    /**
+     * Build, sign, and submit an ERC-721 safeTransferFrom transaction.
+     *
+     * @param nftAddress NFT contract address
+     * @param toAddress Recipient address
+     * @param memo Token ID as string (required for ERC-721)
+     * @param coinNetwork Network configuration
+     * @return TransferResponseModel with txHash on success
+     */
     override suspend fun transferNFT(
         nftAddress: String,
         toAddress: String,
         memo: String?,
         coinNetwork: CoinNetwork
     ): TransferResponseModel {
+        val privKey = privateKeyBytes
+            ?: return TransferResponseModel(false, "No private key — mnemonic not provided", null)
+        val fromAddr = walletAddress
+            ?: return TransferResponseModel(false, "No wallet address", null)
+
+        val tokenId = memo?.let {
+            try { BigInteger.parseString(it) } catch (_: Exception) { null }
+        } ?: return TransferResponseModel(false, "Token ID (memo) is required for ERC-721 transfer", null)
+
         return try {
-            val txHash = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, nftAddress)
-            TransferResponseModel(
-                success = true,
-                error = null,
-                txHash = txHash
-            )
+            val nonce = getNonce(coinNetwork)
+            val chainId = getChainId(coinNetwork).toLong()
+
+            val safeTransferData = EthTransactionSigner.encodeErc721SafeTransferFrom(fromAddr, toAddress, tokenId)
+
+            val estGasLimit = run {
+                val model = TransferTokenModel(
+                    nonce = "", addressFrom = fromAddr,
+                    contractAddress = nftAddress,
+                    dataEncodeABI = "0x" + safeTransferData.toHexString(),
+                    value = "0x0"
+                )
+                getEstGas(model, coinNetwork).toLong()
+            }
+
+            val baseFeeHex = InfuraRpcService.shared.getBaseFee(coinNetwork)
+            val signedTxHex: String
+
+            if (baseFeeHex != null) {
+                val baseFee = hexToBigInt(baseFeeHex)
+                val rpcTip = InfuraRpcService.shared.getMaxPriorityFeePerGas(coinNetwork)
+                val priorityFee = if (rpcTip != null) hexToBigInt(rpcTip)
+                else BigInteger.fromLong(1_500_000_000)
+                val maxFee = baseFee * BigInteger.TWO + priorityFee
+
+                signedTxHex = EthTransactionSigner.signEip1559Transaction(
+                    privateKey = privKey, nonce = nonce,
+                    maxPriorityFeePerGas = priorityFee, maxFeePerGas = maxFee,
+                    gasLimit = estGasLimit, toAddress = nftAddress,
+                    valueWei = BigInteger.ZERO, data = safeTransferData, chainId = chainId
+                )
+            } else {
+                val hexPrice = InfuraRpcService.shared.getAllGasPrice(coinNetwork, chainId.toInt())
+                val gasPriceWei = if (hexPrice != null) hexToBigInt(hexPrice)
+                else BigInteger.fromLong(20_000_000_000L)
+
+                signedTxHex = EthTransactionSigner.signLegacyTransaction(
+                    privateKey = privKey, nonce = nonce,
+                    gasPriceWei = gasPriceWei, gasLimit = estGasLimit,
+                    toAddress = nftAddress, valueWei = BigInteger.ZERO,
+                    data = safeTransferData, chainId = chainId
+                )
+            }
+
+            val txHash = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, signedTxHex)
+            TransferResponseModel(success = true, error = null, txHash = txHash)
         } catch (e: Exception) {
-            e.printStackTrace()
-            TransferResponseModel(
-                success = false,
-                error = e.message,
-                txHash = null
-            )
+            TransferResponseModel(success = false, error = e.message, txHash = null)
         }
     }
 

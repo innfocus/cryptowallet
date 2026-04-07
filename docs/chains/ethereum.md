@@ -155,22 +155,52 @@ suspend fun getTokenTransactionHistory(address: String, contractAddress: String,
 
 ## 7. NFT Support (ERC-721)
 
-### Listing
+### Listing (with metadata)
 ```kotlin
 override suspend fun getNFTs(address: String, coinNetwork: CoinNetwork): List<NFTItem>?
 // Via ExplorerRpcService → tokennfttx
 // Deduplicates by contractAddress + tokenID
+// Fetches metadata (name, description, imageUrl) via tokenURI for each NFT
 ```
 
-### Transfer
+### Metadata Fetch
 ```kotlin
-override suspend fun transferNFT(nftAddress: String, toAddress: String, memo: String?, coinNetwork: CoinNetwork): TransferResponseModel
+suspend fun getNFTMetadata(
+    contractAddress: String,
+    tokenId: BigInteger,
+    coinNetwork: CoinNetwork
+): NFTItem?
+// Calls tokenURI(uint256) via eth_call → fetches JSON metadata
+// Supports: HTTP URLs, IPFS (ipfs:// → https://ipfs.io/ipfs/), on-chain data URIs
+```
+
+**ABI Encoding:**
+```
+tokenURI selector: 0xc87b56dd  (tokenURI(uint256))
+Data: selector(4) + tokenId(32) = 36 bytes
+Result: ABI-encoded string (offset + length + data)
+```
+
+### Transfer (safeTransferFrom)
+```kotlin
+override suspend fun transferNFT(
+    nftAddress: String,       // NFT contract address
+    toAddress: String,        // Recipient
+    memo: String?,            // Token ID (required)
+    coinNetwork: CoinNetwork
+): TransferResponseModel
+```
+
+**ABI Encoding:**
+```
+Function selector: 0x42842e0e  (safeTransferFrom(address,address,uint256))
+Params: padded_from(32) + padded_to(32) + padded_tokenId(32)
+Data: selector(4) + from(32) + to(32) + tokenId(32) = 100 bytes
 ```
 
 ### Limitations
 - Chi ho tro ERC-721 (khong co ERC-1155)
-- NFT metadata (image, description) chua duoc fetch tu contract
-- Transfer implementation chua hoan chinh
+- IPFS metadata fetch dung public gateway (https://ipfs.io/ipfs/)
 
 ---
 
@@ -310,7 +340,7 @@ Config.shared.apiKeyOwlRacle    // OwlRacle API key
 |---------|----------|-----------|
 | ETH transfer | EIP-155, EIP-1559 | ✅ Full |
 | ERC-20 token | ERC-20 | ✅ Full (balance, transfer, history) |
-| ERC-721 NFT | ERC-721 | ⚠️ Partial (listing OK, transfer incomplete) |
+| ERC-721 NFT | ERC-721 | ✅ Full (listing + metadata + safeTransferFrom) |
 | Fee estimation | EIP-1559 | ✅ Full (baseFee + priorityFee) |
 | Gas price | Legacy + EIP-1559 | ✅ Full (3 tiers: Safe/Propose/Fast) |
 | Address | EIP-55 | ✅ Checksummed |
@@ -323,8 +353,8 @@ Config.shared.apiKeyOwlRacle    // OwlRacle API key
 |---------|----------|--------|
 | Transaction pagination | Etherscan page/offset | ✅ Da implement (page-based, 1-based) |
 | ERC-1155 multi-token | ERC-1155 | COULD: Chua ho tro |
-| NFT metadata fetch | -- | SHOULD: Image/description chua duoc lay tu contract |
-| NFT transfer (ERC-721) | ERC-721 | SHOULD: `safeTransferFrom` ABI chua implement |
+| ~~NFT metadata fetch~~ | ~~--~~ | ✅ Da implement (`getNFTMetadata` via `tokenURI` + JSON fetch) |
+| ~~NFT transfer (ERC-721)~~ | ~~ERC-721~~ | ✅ Da implement (`safeTransferFrom` ABI encoding) |
 | Contract ABI interaction | -- | COULD: Chi ho tro ERC-20 transfer |
 | Account Abstraction | ERC-4337 | COULD: Chua ho tro |
 | Permit / Gasless approval | EIP-2612 | COULD: Chua ho tro |
