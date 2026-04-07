@@ -25,7 +25,7 @@ class ACTNetworkPropertyTest {
         ACTCoin.Ethereum -> 60
         ACTCoin.Cardano -> 1815
         ACTCoin.Ripple -> 144
-        ACTCoin.Centrality -> 392
+        ACTCoin.Centrality, ACTCoin.CPAY -> 392
         ACTCoin.XCoin -> 868
         ACTCoin.TON -> 607
         ACTCoin.Midnight -> 1815
@@ -56,7 +56,7 @@ class ACTNetworkPropertyTest {
             ACTCoin.Ethereum -> "https://etherscan.io"
             ACTCoin.Cardano -> "https://cardanoexplorer.com"
             ACTCoin.Ripple -> "https://bithomp.com"
-            ACTCoin.Centrality -> "https://uncoverexplorer.com"
+            ACTCoin.Centrality, ACTCoin.CPAY -> "https://uncoverexplorer.com"
             ACTCoin.XCoin -> "Explorer XCoin"
             ACTCoin.TON -> "https://tonscan.org"
             ACTCoin.Midnight -> "https://explorer.midnight.network"
@@ -66,7 +66,7 @@ class ACTNetworkPropertyTest {
             ACTCoin.Ethereum -> "https://goerli.etherscan.io"
             ACTCoin.Cardano -> "https://cardanoexplorer.com"
             ACTCoin.Ripple -> "https://test.bithomp.com"
-            ACTCoin.Centrality -> "https://uncoverexplorer.com"
+            ACTCoin.Centrality, ACTCoin.CPAY -> "https://uncoverexplorer.com"
             ACTCoin.XCoin -> "Explorer XCoin"
             ACTCoin.TON -> "https://testnet.tonscan.org"
             ACTCoin.Midnight -> "https://explorer.testnet.midnight.network"
@@ -74,14 +74,14 @@ class ACTNetworkPropertyTest {
     }
 
     private fun expectedExplorerForTX(coin: ACTCoin, isTestNet: Boolean): String = when (coin) {
-        ACTCoin.Centrality -> "https://uncoverexplorer.com/extrinsic/"
+        ACTCoin.Centrality, ACTCoin.CPAY -> "https://uncoverexplorer.com/extrinsic/"
         else -> expectedExplorer(coin, isTestNet) + if (coin == ACTCoin.Ripple) "/explorer/" else "/tx/"
     }
 
     private fun expectedDerivateIdxMax(coin: ACTCoin, chain: Change): Int = when (coin) {
         ACTCoin.Bitcoin -> if (chain == Change.Internal) 10 else 100
         ACTCoin.Cardano -> if (chain == Change.Internal) 0 else 50
-        else -> if (chain == Change.Internal) 0 else 1
+        else -> if (chain == Change.Internal) 0 else 1 // Includes CPAY, Centrality, etc.
     }
 
     @Test

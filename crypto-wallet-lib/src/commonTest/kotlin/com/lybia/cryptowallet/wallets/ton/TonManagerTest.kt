@@ -170,6 +170,94 @@ class TonManagerTest {
         println("W4 Testnet: $w4Address")
     }
 
+    // ─── Live Network Tests (manual only) ─────────────────────────────────
+
+    /**
+     * Diagnostic: print W4 vs W5 addresses and check balance on each.
+     * Run manually to determine which wallet version holds funds.
+     *
+     * Command:
+     *   ./gradlew :crypto-wallet-lib:testDebugUnitTest --tests "*.TonManagerTest.testDiagnosticWalletVersion" -Pignore.skip=true
+     */
+    @Test
+    @Ignore // Live network — run manually
+    fun testDiagnosticWalletVersion() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val coinNetwork = CoinNetwork(NetworkName.TON)
+
+        val w4 = TonManager(testMnemonic, WalletVersion.W4)
+        val w5 = TonManager(testMnemonic, WalletVersion.W5)
+
+        val w4Addr = w4.getAddress()
+        val w5Addr = w5.getAddress()
+        println("W4 Address: $w4Addr")
+        println("W5 Address: $w5Addr")
+
+        val w4Balance = w4.getBalance(w4Addr, coinNetwork)
+        val w5Balance = w5.getBalance(w5Addr, coinNetwork)
+        println("W4 Balance: $w4Balance TON")
+        println("W5 Balance: $w5Balance TON")
+
+        // Check seqno to verify which wallet is deployed
+        val w4Seqno = try { w4.getSeqno(coinNetwork) } catch (e: Exception) { -1 }
+        val w5Seqno = try { w5.getSeqno(coinNetwork) } catch (e: Exception) { -1 }
+        println("W4 Seqno: $w4Seqno (deployed: ${w4Seqno >= 0})")
+        println("W5 Seqno: $w5Seqno (deployed: ${w5Seqno >= 0})")
+
+        // At least one should have balance
+        assertTrue(w4Balance > 0 || w5Balance > 0, "At least one wallet version should have funds")
+    }
+
+    /**
+     * Send 1 TON on mainnet. Uses W5 (default).
+     * If W5 has no funds, switch to W4 by changing walletVersion below.
+     *
+     * ⚠️ REAL TRANSACTION — costs actual TON. Only run when intentionally testing.
+     *
+     * Command:
+     *   ./gradlew :crypto-wallet-lib:testDebugUnitTest --tests "*.TonManagerTest.testSendTonMainnet" -Pignore.skip=true
+     */
+    @Test
+    @Ignore // Live network — REAL TRANSACTION, run manually only
+    fun testSendTonMainnet() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val coinNetwork = CoinNetwork(NetworkName.TON)
+        val toAddress = "UQDYtgK7Yiqn14Ii0TjVykIZdeA8MUGZ8ueUEfi-KG0UOh-o"
+        val amountNano = 1_000_000_000L // 1 TON
+
+        // ── Step 0: detect which wallet version has funds ──
+        val w4 = TonManager(testMnemonic, WalletVersion.W4)
+        val w5 = TonManager(testMnemonic, WalletVersion.W5)
+
+        val w4Balance = w4.getBalance(w4.getAddress(), coinNetwork)
+        val w5Balance = w5.getBalance(w5.getAddress(), coinNetwork)
+        println("W4 [${w4.getAddress()}] balance: $w4Balance TON")
+        println("W5 [${w5.getAddress()}] balance: $w5Balance TON")
+
+        // Pick the version that has enough funds
+        val tonManager = when {
+            w5Balance >= 1.1 -> w5.also { println("Using W5") }
+            w4Balance >= 1.1 -> w4.also { println("Using W4 (W5 has insufficient funds)") }
+            else -> throw IllegalStateException(
+                "Neither W4 nor W5 has enough balance (need ≥1.1 TON). W4=$w4Balance, W5=$w5Balance"
+            )
+        }
+
+        // ── Step 1: get seqno ──
+        val seqno = tonManager.getSeqno(coinNetwork)
+        println("Seqno: $seqno")
+
+        // ── Step 2: sign transaction ──
+        val bocBase64 = tonManager.signTransaction(toAddress, amountNano, seqno)
+        println("Signed BOC length: ${bocBase64.length}")
+        assertTrue(bocBase64.isNotEmpty(), "BOC should not be empty")
+
+        // ── Step 3: broadcast ──
+        val result = tonManager.transfer(bocBase64, coinNetwork)
+        println("Transfer result: success=${result.success}, txHash=${result.txHash}, error=${result.error}")
+        assertTrue(result.success, "Transfer should succeed, error: ${result.error}")
+    }
+
     @Test
     fun testW5MainnetAndTestnetAddressesDiffer() {
         // Create both managers (they precompute addresses for both networks at construction)

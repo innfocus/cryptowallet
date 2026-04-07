@@ -486,6 +486,32 @@ let nfts = try await manager.getNFTs(address: address, coinNetwork: coinNetwork)
 | T9.2 Liquid Staking (Tonstakers/Bemo) | ✅ |
 | T9.3 Staking Balance & Rewards | ✅ |
 
+### Live Network Tests (Manual)
+
+File: `commonTest/.../wallets/ton/TonManagerTest.kt`
+
+| Test | Mô tả |
+|------|--------|
+| `testDiagnosticWalletVersion` | In W4/W5 address + balance + seqno — dùng để xác định wallet version nào đang giữ funds |
+| `testSendTonMainnet` | Gửi 1 TON trên mainnet — tự detect W4/W5, chọn version có funds |
+
+**Lệnh chạy:**
+```bash
+# Diagnostic: xem wallet version nào có funds
+./gradlew :crypto-wallet-lib:jvmTest --tests "*.TonManagerTest.testDiagnosticWalletVersion"
+
+# Gửi 1 TON thực (⚠️ tốn TON thật!)
+./gradlew :crypto-wallet-lib:jvmTest --tests "*.TonManagerTest.testSendTonMainnet"
+```
+
+> **Lưu ý:**
+> - Cả hai test đều có `@Ignore` — cần bỏ `@Ignore` trước khi chạy, hoặc thêm flag skip ignore.
+> - `jvmTest` hiện có pre-existing compile errors ở các test file khác. Nếu gặp lỗi compile, chạy với iOS simulator target:
+>   ```bash
+>   ./gradlew :crypto-wallet-lib:iosSimulatorArm64Test --tests "*.TonManagerTest.testSendTonMainnet"
+>   ```
+> - Nếu cả hai target đều lỗi compile, cần fix pre-existing errors trước hoặc tạm comment `@Ignore` và chạy riêng file test này.
+
 ### Phase 10: Audit Fixes (v2)
 | Task | Status |
 |------|--------|
