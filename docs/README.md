@@ -35,7 +35,7 @@ Chào mừng bạn đến với hệ thống tài liệu kỹ thuật của dự
 - [**Dành cho Android:** Tích hợp TON](android/ton-integration.md)
 - [**Dành cho Android:** Tích hợp Centrality (CENNZ/CPAY)](android/centrality-integration.md)
 - [**Dành cho Android:** Tích hợp Cardano (Byron + Shelley)](android/cardano-integration.md)
-- [**Dành cho iOS:** Cách dùng Swift async/await](ios/swift-integration.md)
+- [**Dành cho iOS:** Hướng dẫn tích hợp đầy đủ (Setup, Config, CommonCoinsManager)](ios/swift-integration.md)
 - [**Dành cho iOS:** Tích hợp Bitcoin (BTC)](ios/bitcoin-integration.md)
 - [**Dành cho iOS:** Tích hợp Ethereum & Arbitrum (ETH)](ios/ethereum-integration.md)
 - [**Dành cho iOS:** Tích hợp Ripple (XRP)](ios/ripple-integration.md)
