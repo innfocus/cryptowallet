@@ -44,6 +44,10 @@ import com.lybia.cryptowallet.wallets.cardano.CardanoManager
 
 val mnemonic = "your mnemonic words ..."
 val cardanoManager = CardanoManager(mnemonic)
+
+// Key derivation được cache tự động — PBKDF2-4096 chỉ chạy 1 lần.
+// Gọi clearCachedKeys() khi wallet bị lock hoặc không còn cần:
+cardanoManager.clearCachedKeys()
 ```
 
 ---
@@ -320,6 +324,9 @@ viewModelScope.launch {
     // Update UI trực tiếp (đã ở Main thread nếu dùng viewModelScope)
 }
 ```
+
+- **Key cache:** `CardanoManager` cache master key, account key, và derived key tự động. Lần gọi đầu tiên tốn ~2s (PBKDF2-4096), các lần sau <1ms. Thread-safe via `@Synchronized`.
+- **Lifecycle:** Gọi `cardanoManager.clearCachedKeys()` khi wallet bị lock hoặc user logout — zero-fill tất cả cached key material.
 
 ---
 

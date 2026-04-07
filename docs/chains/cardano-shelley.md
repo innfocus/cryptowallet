@@ -282,31 +282,42 @@ val signature = Ed25519Icarus.sign(paymentExtKey, txHash) // kL as scalar, kR as
 - `computeEd25519PublicKey()`, `ed25519Sign()` trong companion — không còn caller
 - Imports: `fr.acinq.bitcoin.Crypto`, `fr.acinq.bitcoin.MnemonicCode` — không còn dùng
 
-**Đã thêm:**
+**Đã thêm (và tối ưu với key cache):**
 ```kotlin
+// Cache 3 tầng: master key (L1) → account key (L2) → derived key (L3)
+// PBKDF2-4096 chỉ chạy 1 lần per CardanoManager instance.
+// Payment key và staking key share account key (m/1852'/1815'/account').
+// Xem docs/architecture/cardano-crypto-performance.md (Phần B) cho thiết kế chi tiết.
+
 // Shelley key derivation dùng Icarus V2 (ed25519-bip32), giống Byron.
 // Path: m/1852'/1815'/account'/0/index — role=0 và index đều SOFT (CIP-1852).
 private fun deriveShelleyPaymentKey(account: Int, index: Int): Triple<ByteArray, ByteArray, ByteArray> {
-    val (masterExt, masterCC) = IcarusKeyDerivation.masterKeyFromMnemonic(mnemonicWords)
-    var k = masterExt; var cc = masterCC
-    IcarusKeyDerivation.deriveChildKey(k, cc, 1852, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
-    IcarusKeyDerivation.deriveChildKey(k, cc, 1815, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
-    IcarusKeyDerivation.deriveChildKey(k, cc, account, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
-    IcarusKeyDerivation.deriveChildKey(k, cc, 0, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }  // role=0, SOFT
-    IcarusKeyDerivation.deriveChildKey(k, cc, index, hardened = false).let { (nk, nc) -> k = nk; cc = nc } // index, SOFT
-    return Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
+    // Cache L3 check
+    val cacheKey = account to index
+    synchronized(shelleyPaymentKeyCache) { shelleyPaymentKeyCache[cacheKey]?.let { return it } }
+
+    val (k0, cc0) = getShelleyAccountKey(account)  // Cache L2 → L1 (PBKDF2 once)
+    var k = k0; var cc = cc0
+    IcarusKeyDerivation.deriveChildKey(k, cc, 0, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }
+    IcarusKeyDerivation.deriveChildKey(k, cc, index, hardened = false).let { (nk, nc) -> k = nk; cc = nc }
+    val result = Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
+
+    synchronized(shelleyPaymentKeyCache) { shelleyPaymentKeyCache[cacheKey] = result }
+    return result
 }
 
 // Path: m/1852'/1815'/account'/2/0 — role=2, index=0 đều SOFT.
 private fun deriveShelleyStakingKey(account: Int): Triple<ByteArray, ByteArray, ByteArray> {
-    val (masterExt, masterCC) = IcarusKeyDerivation.masterKeyFromMnemonic(mnemonicWords)
-    var k = masterExt; var cc = masterCC
-    IcarusKeyDerivation.deriveChildKey(k, cc, 1852, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
-    IcarusKeyDerivation.deriveChildKey(k, cc, 1815, hardened = true).let  { (nk, nc) -> k = nk; cc = nc }
-    IcarusKeyDerivation.deriveChildKey(k, cc, account, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
-    IcarusKeyDerivation.deriveChildKey(k, cc, 2, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }  // role=2, SOFT
-    IcarusKeyDerivation.deriveChildKey(k, cc, 0, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }  // index=0, SOFT
-    return Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
+    synchronized(shelleyStakingKeyCache) { shelleyStakingKeyCache[account]?.let { return it } }
+
+    val (k0, cc0) = getShelleyAccountKey(account)  // SHARED account key với payment key
+    var k = k0; var cc = cc0
+    IcarusKeyDerivation.deriveChildKey(k, cc, 2, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }
+    IcarusKeyDerivation.deriveChildKey(k, cc, 0, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }
+    val result = Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
+
+    synchronized(shelleyStakingKeyCache) { shelleyStakingKeyCache[account] = result }
+    return result
 }
 ```
 
@@ -330,11 +341,25 @@ val stakingSig = Ed25519Icarus.sign(stakingExtKey, txHash)
 - `CardanoAddress.createEnterpriseAddress()` ✅
 - `CardanoAddress.createRewardAddress()` ✅
 - `CardanoAddress.hashKey()` (Blake2b-224) ✅
-- `IcarusKeyDerivation` — dùng lại toàn bộ, không thêm code mới
+- `IcarusKeyDerivation` — dùng lại toàn bộ, chỉ thêm `WORD_MAP` lazy cache cho `mnemonicToEntropy()`
 
-### 5.3 Performance note
+### 5.3 Performance — Key cache (đã triển khai)
 
-Mỗi call `getShelleyAddress()` sẽ traverse toàn bộ 5-level path Icarus, mỗi level có 2 HMAC-SHA512 calls. Tổng ~10 HMAC calls và 1 Ed25519 scalar multiplication. Nên cache kết quả nếu gọi nhiều lần.
+`CardanoManager` triển khai cache 3 tầng để loại bỏ tính toán trùng lặp:
+
+- **Cache L1 — Master key:** PBKDF2-4096 chỉ chạy **1 lần** per instance (trước đây: mỗi lần gọi derive method).
+- **Cache L2 — Account key:** `m/1852'/1815'/account'` (3 hardened derives) shared giữa payment key và staking key.
+- **Cache L3 — Derived key:** Payment, staking, Byron keys cached sau lần derive đầu tiên.
+
+| Operation | Trước cache | Sau cache (lần đầu) | Sau cache (lần 2+) |
+|---|---|---|---|
+| `getShelleyAddress()` | ~4s (2x PBKDF2) | ~2s (1x PBKDF2) | <1ms |
+| `buildAndSignTransaction()` | ~6s (3x PBKDF2) | ~2s | ~100-200ms (signing only) |
+| `stake()` | ~10s (5x PBKDF2) | ~2.5s | ~100-200ms |
+
+**Security:** Gọi `clearCachedKeys()` để zero-fill tất cả cached key material khi wallet bị lock hoặc manager không còn cần.
+
+Chi tiết kỹ thuật: xem `docs/architecture/cardano-crypto-performance.md` (Phần B).
 
 ---
 

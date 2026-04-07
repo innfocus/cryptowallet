@@ -51,6 +51,10 @@ let manager = CommonCoinsManager(mnemonic: mnemonic)
 
 ```swift
 let cardanoManager = CardanoManager(mnemonicPhrase: "your mnemonic words ...")
+
+// Key derivation được cache tự động — PBKDF2-4096 chỉ chạy 1 lần.
+// Gọi clearCachedKeys() khi wallet bị lock:
+// cardanoManager.clearCachedKeys()
 ```
 
 ---

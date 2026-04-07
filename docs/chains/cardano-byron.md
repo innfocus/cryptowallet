@@ -191,9 +191,10 @@ Witness set CBOR map:
 #### 2.6.3 Full Byron transaction flow
 
 ```
-1. Derive Byron key: (extKey64, chainCode32) = IcarusKeyDerivation.deriveByronAddressKey(mnemonic, index)
-2. Derive public key: pubKey32 = IcarusKeyDerivation.publicKeyFromExtended(extKey64)
-3. Build tx body (CBOR map: inputs, outputs, fee, ttl)
+1. Derive Byron key: CardanoManager.deriveByronKey(index) — cached internally
+   (Internally: master key (L1) → account key m/44'/1815'/0' (L2) → soft derives → pubkey)
+   Trả về: (pubKey32, chainCode32, extKey64)
+2. Build tx body (CBOR map: inputs, outputs, fee, ttl)
 4. TxID = Blake2b-256(CBOR_encode(tx_body_map))  → 32 bytes (raw, not hex)
 5. Sign:   sig64 = Ed25519Icarus.sign(extKey64, txID_bytes)
 6. Build witness: BootstrapWitness(pubKey32, sig64, chainCode32, 0xa0)

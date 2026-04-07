@@ -46,6 +46,11 @@ internal object IcarusKeyDerivation {
         return masterKeyFromEntropy(entropy)
     }
 
+    // Lazy-initialized wordlist lookup — avoids re-creating a 2048-entry HashMap on every call
+    private val WORD_MAP: Map<String, Int> by lazy {
+        MnemonicCode.englishWordlist.mapIndexed { i, w -> w to i }.toMap()
+    }
+
     /**
      * BIP-39 mnemonic → raw entropy bytes.
      *
@@ -53,13 +58,12 @@ internal object IcarusKeyDerivation {
      * using the english wordlist that is already bundled in MnemonicCode.
      */
     private fun mnemonicToEntropy(words: List<String>): ByteArray {
-        val wordMap = MnemonicCode.englishWordlist.mapIndexed { i, w -> w to i }.toMap()
-        require(words.all { it in wordMap }) { "Mnemonic contains unknown words" }
+        require(words.all { it in WORD_MAP }) { "Mnemonic contains unknown words" }
         require(words.size % 3 == 0) { "Mnemonic word count (${words.size}) must be a multiple of 3" }
 
         // Each word encodes 11 bits
         val allBits = words.flatMap { word ->
-            val idx = wordMap.getValue(word)
+            val idx = WORD_MAP.getValue(word)
             (10 downTo 0).map { bit -> (idx shr bit) and 1 != 0 }
         }
 
