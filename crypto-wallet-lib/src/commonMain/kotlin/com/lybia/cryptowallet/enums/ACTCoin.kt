@@ -39,7 +39,8 @@ enum class ACTCoin(val assetId: Int = 0) {
         override fun allowNewAddress() = false
     },
     Cardano {
-        override fun feeDefault() = 0.0
+        // Typical Cardano fee: minFeeA(44) * ~400 bytes + minFeeB(155381) ≈ 0.173 ADA, rounded up for safety
+        override fun feeDefault() = 0.2
         override fun minimumAmount() = 0.0
         override fun supportMemo() = false
         override fun nameCoin() = "Cardano"

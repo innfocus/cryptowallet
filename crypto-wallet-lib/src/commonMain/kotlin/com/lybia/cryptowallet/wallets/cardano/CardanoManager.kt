@@ -268,8 +268,17 @@ class CardanoManager(
             )
         }
 
-        // Min ADA for token output (estimate)
-        val minAda = 2_000_000L
+        // Calculate minimum ADA for the native token output using protocol parameters.
+        // CardanoMinUtxo.calculateMinAda() uses: max(1 ADA, (160 + outputSize) * coinsPerUtxoByte)
+        val policyIdBytes = hexToBytes(policyId)
+        val assetNameBytes = hexToBytes(assetName)
+        val toAddressBytes = addressToBytes(toAddress)
+        val dummyTokenOutput = CardanoTransactionOutput(
+            addressBytes = toAddressBytes,
+            lovelace = 0L,
+            multiAssets = mapOf(policyIdBytes to mapOf(assetNameBytes to amount))
+        )
+        val minAda = CardanoMinUtxo.calculateMinAda(dummyTokenOutput, COINS_PER_UTXO_BYTE)
         val requiredAda = fee + minAda
 
         val selectedUtxos = CardanoUtxoSelector.selectUtxos(
@@ -286,9 +295,6 @@ class CardanoManager(
         }
 
         // Token output to recipient
-        val policyIdBytes = hexToBytes(policyId)
-        val assetNameBytes = hexToBytes(assetName)
-        val toAddressBytes = addressToBytes(toAddress)
         builder.addMultiAssetOutput(
             toAddressBytes,
             minAda,
@@ -609,8 +615,8 @@ class CardanoManager(
                 )
             }
 
-            val fee = 200_000L // estimated fee
-            val deposit = 2_000_000L // stake key registration deposit
+            val fee = STAKING_TX_FEE_LOVELACE
+            val deposit = STAKE_KEY_DEPOSIT_LOVELACE
             val requiredTotal = fee + deposit
             val totalAvailable = utxos.sumOf { it.lovelace }
 
@@ -721,7 +727,7 @@ class CardanoManager(
                 )
             }
 
-            val fee = 200_000L
+            val fee = STAKING_TX_FEE_LOVELACE
             val sorted = utxos.sortedByDescending { it.lovelace }
             val selected = mutableListOf<CardanoUtxo>()
             var collected = 0L
@@ -742,7 +748,7 @@ class CardanoManager(
             }
 
             // Change output (collected - fee + 2 ADA deposit refund)
-            val depositRefund = 2_000_000L
+            val depositRefund = STAKE_KEY_DEPOSIT_LOVELACE
             val change = collected - fee + depositRefund
             if (change > 0) {
                 val fromAddressBytes = addressToBytes(fromAddress)
@@ -822,6 +828,25 @@ class CardanoManager(
     // ── Ed25519 helpers ─────────────────────────────────────────────────────
 
     companion object {
+        /**
+         * Protocol parameter: lovelace per UTXO byte (Babbage era mainnet/testnet = 4310).
+         * Used to calculate minimum ADA for multi-asset outputs.
+         * Formula: max(1 ADA, (160 + outputSize) * COINS_PER_UTXO_BYTE)
+         */
+        internal const val COINS_PER_UTXO_BYTE = 4310L
+
+        /**
+         * Estimated fee for staking transactions (~400-byte tx).
+         * Formula: minFeeA(44) * 400 + minFeeB(155381) = 172,981 → rounded up to 200,000.
+         */
+        internal const val STAKING_TX_FEE_LOVELACE = 200_000L
+
+        /**
+         * Stake key registration deposit — current Cardano protocol constant (2 ADA).
+         * Refunded upon stake key deregistration.
+         */
+        internal const val STAKE_KEY_DEPOSIT_LOVELACE = 2_000_000L
+
         /**
          * Convert a Cardano address string to raw bytes for transaction outputs.
          * Handles both Shelley (Bech32) and Byron (Base58) addresses.
