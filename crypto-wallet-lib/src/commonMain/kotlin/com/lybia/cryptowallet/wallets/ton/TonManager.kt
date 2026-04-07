@@ -293,7 +293,7 @@ class TonManager(
             storeUInt(walletId, 32)             // wallet_id
             storeUInt(validUntilBits, 32)       // valid_until
             storeUInt(seqno, 32)                // seqno
-            storeBits(innerRequest.bits)         // inner request bits
+            storeBitString(innerRequest.bits)         // inner request bits
             storeRefs(innerRequest.refs)         // inner request refs
         }
 
@@ -302,9 +302,9 @@ class TonManager(
         // W5R1 uses get_last_bits(512) / remove_last_bits(512) — signature at TAIL.
         // Body layout: [signing body bits] [signing body refs] [signature 512 bits]
         return CellBuilder.createCell {
-            storeBits(signingBody.bits)
+            storeBitString(signingBody.bits)
             storeRefs(signingBody.refs)
-            storeBits(signature)
+            storeBitString(signature)
         }
     }
 
@@ -1059,7 +1059,7 @@ class TonManager(
                         val fullSlice = currentSubdomainCell.beginParse()
                         fullSlice.skipBits(resolvedBits)
                         currentSubdomainCell = CellBuilder.createCell {
-                            storeBits(fullSlice.loadBitString(remainingBits))
+                            storeBitString(fullSlice.loadBitString(remainingBits))
                         }
                         bitsToResolve = remainingBits
                     } else return null
