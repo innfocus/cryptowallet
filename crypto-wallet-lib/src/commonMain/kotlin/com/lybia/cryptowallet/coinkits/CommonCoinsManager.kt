@@ -1072,8 +1072,10 @@ class CommonCoinsManager(
         serviceAddress: String? = null,
         memo: MemoData? = null
     ): SendResult {
+        logger.i { "sendCoin: coin=$coin, to=$toAddress, amount=$amount, networkFee=$networkFee, serviceFee=$serviceFee, serviceAddress=$serviceAddress, memo=${memo?.memo}" }
         return try {
             val shouldSendServiceFee = hasServiceFee(serviceAddress, serviceFee)
+            logger.i { "sendCoin: shouldSendServiceFee=$shouldSendServiceFee, isUtxo=${isUtxoChain(coin)}, isAccount=${coin in ACCOUNT_CHAINS}" }
 
             // Account chains with service fee: two-transaction flow
             if (shouldSendServiceFee && !isUtxoChain(coin) && coin in ACCOUNT_CHAINS) {
@@ -1089,7 +1091,7 @@ class CommonCoinsManager(
                 )
             }
         } catch (e: Exception) {
-            logger.e(e) { "Failed to sendCoin for $coin" }
+            logger.e(e) { "Failed to sendCoin for $coin: ${e.message}" }
             SendResult(txHash = "", success = false, error = e.message)
         }
     }
@@ -1108,21 +1110,25 @@ class CommonCoinsManager(
         serviceAddress: String? = null,
         serviceFee: Double = 0.0
     ): SendResult {
-        return when (coin) {
+        logger.i { "sendCoinMain: coin=$coin, to=$toAddress, amount=$amount, networkFee=$networkFee, memo=${memo?.memo}, serviceAddress=$serviceAddress, serviceFee=$serviceFee" }
+        val result = when (coin) {
             NetworkName.CARDANO -> {
                 val amountLovelace = doubleToSmallestUnit(amount, 1_000_000L)
                 val feeLovelace = doubleToSmallestUnit(networkFee, 1_000_000L)
                 val serviceFeeLovelace = doubleToSmallestUnit(serviceFee, 1_000_000L)
+                logger.i { "CARDANO sendCoin: amountLovelace=$amountLovelace, feeLovelace=$feeLovelace, serviceFeeLovelace=$serviceFeeLovelace" }
                 sendCardano(toAddress, amountLovelace, feeLovelace, serviceAddress, serviceFeeLovelace)
             }
 
             NetworkName.MIDNIGHT -> {
                 val amountUnits = doubleToSmallestUnit(amount, 1_000_000L)
+                logger.i { "MIDNIGHT sendCoin: amountUnits=$amountUnits" }
                 sendMidnight(toAddress, amountUnits)
             }
 
             NetworkName.CENTRALITY -> {
                 val fromAddress = getAddress(NetworkName.CENTRALITY)
+                logger.i { "CENTRALITY sendCoin: from=$fromAddress, amount=$amount" }
                 sendCentrality(fromAddress, toAddress, amount)
             }
 
@@ -1130,14 +1136,17 @@ class CommonCoinsManager(
                 val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
                 val coinNetwork = CoinNetwork(NetworkName.TON)
                 val seqno = tonManager.getSeqno(coinNetwork)
+                logger.i { "TON sendCoin: seqno=$seqno" }
                 val amountNano = doubleToSmallestUnit(amount, 1_000_000_000L)
+                logger.i { "TON sendCoin: amountNano=$amountNano" }
                 val memoStr = memo?.memo?.takeIf { it.isNotEmpty() }
                 val bocBase64 = tonManager.signTransaction(toAddress, amountNano, seqno, memoStr)
-                val result = tonManager.transfer(bocBase64, coinNetwork)
+                logger.i { "TON sendCoin: signed BOC length=${bocBase64.length}" }
+                val transferResult = tonManager.transfer(bocBase64, coinNetwork)
                 SendResult(
-                    txHash = result.txHash ?: "",
-                    success = result.success,
-                    error = result.error
+                    txHash = transferResult.txHash ?: "",
+                    success = transferResult.success,
+                    error = transferResult.error
                 )
             }
 
@@ -1145,15 +1154,16 @@ class CommonCoinsManager(
                 val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
                 val amountSatoshi = doubleToSmallestUnit(amount, 100_000_000L)
                 val serviceFeeSatoshi = doubleToSmallestUnit(serviceFee, 100_000_000L)
-                val result = btcManager.sendBtc(
+                logger.i { "BTC sendCoin: amountSatoshi=$amountSatoshi, serviceFeeSatoshi=$serviceFeeSatoshi, serviceAddress=$serviceAddress" }
+                val btcResult = btcManager.sendBtc(
                     toAddress, amountSatoshi,
                     serviceAddress = serviceAddress,
                     serviceFeeAmount = serviceFeeSatoshi
                 )
                 SendResult(
-                    txHash = result.txHash ?: "",
-                    success = result.success,
-                    error = result.error
+                    txHash = btcResult.txHash ?: "",
+                    success = btcResult.success,
+                    error = btcResult.error
                 )
             }
 
@@ -1161,11 +1171,12 @@ class CommonCoinsManager(
                 val ethManager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.ethereum.EthereumManager
                 val coinNetwork = CoinNetwork(coin)
                 val amountWei = ethManager.ethToWei(amount)
-                val result = ethManager.sendEthBigInt(toAddress, amountWei, coinNetwork)
+                logger.i { "$coin sendCoin: amountWei=$amountWei" }
+                val ethResult = ethManager.sendEthBigInt(toAddress, amountWei, coinNetwork)
                 SendResult(
-                    txHash = result.txHash ?: "",
-                    success = result.success,
-                    error = result.error
+                    txHash = ethResult.txHash ?: "",
+                    success = ethResult.success,
+                    error = ethResult.error
                 )
             }
 
@@ -1174,11 +1185,12 @@ class CommonCoinsManager(
                 val amountDrops = doubleToSmallestUnit(amount, 1_000_000L)
                 val feeDrops = if (networkFee > 0) doubleToSmallestUnit(networkFee, 1_000_000L) else 12L
                 val destTag = memo?.destinationTag?.toLong()
-                val result = rippleManager.sendXrp(toAddress, amountDrops, feeDrops, destTag)
+                logger.i { "XRP sendCoin: amountDrops=$amountDrops, feeDrops=$feeDrops, destTag=$destTag" }
+                val xrpResult = rippleManager.sendXrp(toAddress, amountDrops, feeDrops, destTag)
                 SendResult(
-                    txHash = result.txHash ?: "",
-                    success = result.success,
-                    error = result.error
+                    txHash = xrpResult.txHash ?: "",
+                    success = xrpResult.success,
+                    error = xrpResult.error
                 )
             }
 
@@ -1186,6 +1198,8 @@ class CommonCoinsManager(
                 SendResult(txHash = "", success = false, error = "sendCoin not supported for $coin")
             }
         }
+        logger.i { "sendCoinMain: coin=$coin, success=${result.success}, txHash=${result.txHash}, error=${result.error}" }
+        return result
     }
 
     /**
@@ -1205,6 +1219,8 @@ class CommonCoinsManager(
         serviceAddress: String,
         memo: MemoData? = null
     ): SendResult {
+        logger.i { "sendCoinWithServiceFee: coin=$coin, to=$toAddress, amount=$amount, networkFee=$networkFee, serviceFee=$serviceFee, serviceAddress=$serviceAddress" }
+
         // ── Step 1: Send main transaction ──
         // For TON: capture the seqno used so the service fee TX can use seqno+1
         // without re-fetching (avoids race condition where network seqno hasn't updated yet).
@@ -1214,6 +1230,7 @@ class CommonCoinsManager(
                 val ethManager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.ethereum.EthereumManager
                 val coinNetwork = CoinNetwork(coin)
                 val amountWei = ethManager.ethToWei(amount)
+                logger.i { "$coin [main TX]: amountWei=$amountWei" }
                 val result = ethManager.sendEthBigInt(toAddress, amountWei, coinNetwork)
                 SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
             }
@@ -1223,6 +1240,7 @@ class CommonCoinsManager(
                 val amountDrops = doubleToSmallestUnit(amount, 1_000_000L)
                 val halfFeeDrops = if (networkFee > 0) doubleToSmallestUnit(networkFee / 2.0, 1_000_000L) else 12L
                 val destTag = memo?.destinationTag?.toLong()
+                logger.i { "XRP [main TX]: amountDrops=$amountDrops, halfFeeDrops=$halfFeeDrops, destTag=$destTag" }
                 val result = rippleManager.sendXrp(toAddress, amountDrops, halfFeeDrops, destTag)
                 SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
             }
@@ -1234,7 +1252,9 @@ class CommonCoinsManager(
                 tonMainSeqno = seqno
                 val amountNano = doubleToSmallestUnit(amount, 1_000_000_000L)
                 val memoStr = memo?.memo?.takeIf { it.isNotEmpty() }
+                logger.i { "TON [main TX]: seqno=$seqno, amountNano=$amountNano, memo=$memoStr" }
                 val bocBase64 = tonManager.signTransaction(toAddress, amountNano, seqno, memoStr)
+                logger.i { "TON [main TX]: signed BOC length=${bocBase64.length}" }
                 val result = tonManager.transfer(bocBase64, coinNetwork)
                 SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
             }
@@ -1243,19 +1263,23 @@ class CommonCoinsManager(
                 SendResult(txHash = "", success = false, error = "Service fee not supported for $coin")
             }
         }
+        logger.i { "$coin [main TX] result: success=${mainResult.success}, txHash=${mainResult.txHash}, error=${mainResult.error}" }
 
         // ── Step 2: If main TX failed, return immediately — do NOT send service fee ──
         if (!mainResult.success) {
+            logger.e { "$coin [main TX] failed — skipping service fee TX" }
             return mainResult
         }
 
         // ── Step 3: Send service fee transaction ──
+        logger.i { "$coin [service fee TX]: sending $serviceFee to $serviceAddress" }
         val serviceResult = try {
             when (coin) {
                 NetworkName.ETHEREUM, NetworkName.ARBITRUM -> {
                     val ethManager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.ethereum.EthereumManager
                     val coinNetwork = CoinNetwork(coin)
                     val serviceFeeWei = ethManager.ethToWei(serviceFee)
+                    logger.i { "$coin [service fee TX]: serviceFeeWei=$serviceFeeWei" }
                     val result = ethManager.sendEthBigInt(serviceAddress, serviceFeeWei, coinNetwork)
                     SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
                 }
@@ -1264,6 +1288,7 @@ class CommonCoinsManager(
                     val rippleManager = getOrCreateManager(NetworkName.XRP) as com.lybia.cryptowallet.wallets.ripple.RippleManager
                     val serviceFeeDrops = doubleToSmallestUnit(serviceFee, 1_000_000L)
                     val halfFeeDrops = if (networkFee > 0) doubleToSmallestUnit(networkFee / 2.0, 1_000_000L) else 12L
+                    logger.i { "XRP [service fee TX]: serviceFeeDrops=$serviceFeeDrops, halfFeeDrops=$halfFeeDrops" }
                     val result = rippleManager.sendXrp(serviceAddress, serviceFeeDrops, halfFeeDrops, null)
                     SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
                 }
@@ -1275,7 +1300,9 @@ class CommonCoinsManager(
                     // the incremented seqno immediately after the main TX is broadcast.
                     val serviceSeqno = (tonMainSeqno ?: tonManager.getSeqno(coinNetwork)) + 1
                     val serviceFeeNano = doubleToSmallestUnit(serviceFee, 1_000_000_000L)
+                    logger.i { "TON [service fee TX]: serviceSeqno=$serviceSeqno, serviceFeeNano=$serviceFeeNano" }
                     val bocBase64 = tonManager.signTransaction(serviceAddress, serviceFeeNano, serviceSeqno, null)
+                    logger.i { "TON [service fee TX]: signed BOC length=${bocBase64.length}" }
                     val result = tonManager.transfer(bocBase64, coinNetwork)
                     SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
                 }
@@ -1285,9 +1312,10 @@ class CommonCoinsManager(
                 }
             }
         } catch (e: Exception) {
-            logger.w { "Service fee transaction failed for $coin: ${e.message}" }
+            logger.w { "$coin [service fee TX] exception: ${e.message}" }
             SendResult(txHash = "", success = false, error = e.message)
         }
+        logger.i { "$coin [service fee TX] result: success=${serviceResult.success}, txHash=${serviceResult.txHash}, error=${serviceResult.error}" }
 
         // ── Step 4: Return result — main TX hash is always used ──
         return if (serviceResult.success) {
@@ -1325,30 +1353,41 @@ class CommonCoinsManager(
         feeSmallestUnit: Long = 0L,
         memo: MemoData? = null
     ): SendResult {
+        logger.i { "sendCoinExact: coin=$coin, to=$toAddress, amount=$amountSmallestUnit, fee=$feeSmallestUnit, memo=${memo?.memo}" }
         return try {
-            when (coin) {
-                NetworkName.CARDANO -> sendCardano(toAddress, amountSmallestUnit, feeSmallestUnit)
-                NetworkName.MIDNIGHT -> sendMidnight(toAddress, amountSmallestUnit)
+            val result = when (coin) {
+                NetworkName.CARDANO -> {
+                    logger.i { "CARDANO sendCoinExact: amountLovelace=$amountSmallestUnit, feeLovelace=$feeSmallestUnit" }
+                    sendCardano(toAddress, amountSmallestUnit, feeSmallestUnit)
+                }
+                NetworkName.MIDNIGHT -> {
+                    logger.i { "MIDNIGHT sendCoinExact: amountUnits=$amountSmallestUnit" }
+                    sendMidnight(toAddress, amountSmallestUnit)
+                }
                 NetworkName.BTC -> {
                     val btcManager = getOrCreateManager(NetworkName.BTC) as BitcoinManager
-                    val result = btcManager.sendBtc(toAddress, amountSmallestUnit)
-                    SendResult(result.txHash ?: "", result.success, result.error)
+                    logger.i { "BTC sendCoinExact: amountSatoshi=$amountSmallestUnit" }
+                    val btcResult = btcManager.sendBtc(toAddress, amountSmallestUnit)
+                    SendResult(btcResult.txHash ?: "", btcResult.success, btcResult.error)
                 }
                 NetworkName.TON -> {
                     val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
                     val coinNetwork = CoinNetwork(NetworkName.TON)
                     val seqno = tonManager.getSeqno(coinNetwork)
                     val memoStr = memo?.memo?.takeIf { it.isNotEmpty() }
+                    logger.i { "TON sendCoinExact: seqno=$seqno, amountNano=$amountSmallestUnit, memo=$memoStr" }
                     val boc = tonManager.signTransaction(toAddress, amountSmallestUnit, seqno, memoStr)
-                    val result = tonManager.transfer(boc, coinNetwork)
-                    SendResult(result.txHash ?: "", result.success, result.error)
+                    logger.i { "TON sendCoinExact: signed BOC length=${boc.length}" }
+                    val tonResult = tonManager.transfer(boc, coinNetwork)
+                    SendResult(tonResult.txHash ?: "", tonResult.success, tonResult.error)
                 }
                 NetworkName.XRP -> {
                     val rippleManager = getOrCreateManager(NetworkName.XRP) as com.lybia.cryptowallet.wallets.ripple.RippleManager
                     val fee = if (feeSmallestUnit > 0) feeSmallestUnit else 12L
                     val destTag = memo?.destinationTag?.toLong()
-                    val result = rippleManager.sendXrp(toAddress, amountSmallestUnit, fee, destTag)
-                    SendResult(result.txHash ?: "", result.success, result.error)
+                    logger.i { "XRP sendCoinExact: amountDrops=$amountSmallestUnit, fee=$fee, destTag=$destTag" }
+                    val xrpResult = rippleManager.sendXrp(toAddress, amountSmallestUnit, fee, destTag)
+                    SendResult(xrpResult.txHash ?: "", xrpResult.success, xrpResult.error)
                 }
                 NetworkName.ETHEREUM, NetworkName.ARBITRUM -> {
                     SendResult("", false, "ETH uses BigInteger — use sendEth() instead")
@@ -1358,6 +1397,8 @@ class CommonCoinsManager(
                 }
                 else -> SendResult("", false, "sendCoinExact not supported for $coin")
             }
+            logger.i { "sendCoinExact: coin=$coin, success=${result.success}, txHash=${result.txHash}, error=${result.error}" }
+            result
         } catch (e: Exception) {
             logger.e(e) { "Failed to sendCoinExact for $coin" }
             SendResult("", false, e.message)

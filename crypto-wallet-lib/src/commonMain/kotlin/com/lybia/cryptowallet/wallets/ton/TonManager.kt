@@ -773,12 +773,14 @@ class TonManager(
         dataSigned: String,
         coinNetwork: CoinNetwork
     ): TransferResponseModel {
-        logger.i { "Broadcasting TON transaction" }
+        logger.i { "Broadcasting TON transaction | network: ${Config.shared.getNetwork()} | BOC length: ${dataSigned.length}" }
         val result = TonApiService.INSTANCE.sendBoc(coinNetwork, dataSigned)
         logger.i { "Broadcast result: $result" }
         return if (result == "success") {
+            logger.i { "TON transfer broadcast successful" }
             TransferResponseModel(success = true, error = null, txHash = "pending")
         } else {
+            logger.e { "TON transfer broadcast failed: $result" }
             TransferResponseModel(
                 success = false,
                 error = result ?: "Failed to broadcast transaction",

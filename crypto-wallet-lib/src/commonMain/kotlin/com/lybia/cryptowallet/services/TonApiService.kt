@@ -10,6 +10,7 @@ import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import kotlinx.serialization.json.JsonArray
@@ -237,9 +238,11 @@ class TonApiService {
     }
 
     suspend fun sendBoc(coin: CoinNetwork, bocBase64: String): String? {
-        logger.d { "sendBoc called" }
+        val url = coin.getInfuraRpcUrl()
+        logger.d { "sendBoc → POST $url" }
+        logger.d { "sendBoc → BOC length: ${bocBase64.length}" }
         return try {
-            val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
+            val response = HttpClientService.INSTANCE.client.post(url) {
                 contentType(ContentType.Application.Json)
                 Config.shared.apiKeyToncenter?.let { header("X-API-Key", it) }
                 setBody(
@@ -252,21 +255,24 @@ class TonApiService {
                 )
             }
 
+            val rawBody = response.bodyAsText()
+            logger.d { "sendBoc ← HTTP ${response.status.value} | body: $rawBody" }
+
             if (response.status.value in 200..299) {
                 val body = response.body<TonGenericResponse>()
                 if (body.ok) {
-                    logger.i { "sendBoc success" }
+                    logger.i { "sendBoc ✓ broadcast successful" }
                     return "success"
                 } else {
-                    logger.e { "sendBoc failed: ${body.error ?: "Unknown error"}" }
+                    logger.e { "sendBoc ✗ API error: code=${body.code}, error=${body.error}" }
                     return body.error
                 }
             } else {
-                logger.e { "sendBoc HTTP error: ${response.status}" }
+                logger.e { "sendBoc ✗ HTTP error: ${response.status}" }
             }
             null
         } catch (e: Exception) {
-            logger.e(e) { "Error in sendBoc" }
+            logger.e(e) { "sendBoc ✗ exception: ${e.message}" }
             null
         }
     }
