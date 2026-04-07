@@ -25,6 +25,8 @@ Chào mừng bạn đến với hệ thống tài liệu kỹ thuật của dự
 - [Contributing Guide & Code Quality](CONTRIBUTING.md) - **Quy tắc đóng góp, review checklist, design patterns**
 - [PR Template](../.github/PULL_REQUEST_TEMPLATE.md) - Checklist khi tạo Pull Request
 - [Phân tích Migration (Android -> KMP)](architecture/migration-analysis.md)
+- [Đánh giá Rust Crypto Libraries](architecture/rust-crypto-evaluation.md) — Phân tích hiệu suất, khả thi, rủi ro khi dùng Rust crypto trong KMP
+- [Phân tích hiệu suất Cardano](architecture/cardano-crypto-performance.md) — Bottleneck mã hóa, Ed25519Icarus, PBKDF2, giải pháp tối ưu
 - [Thiết lập môi trường Local](architecture/local-development.md)
 
 ### 📱 Hướng dẫn theo Nền tảng
