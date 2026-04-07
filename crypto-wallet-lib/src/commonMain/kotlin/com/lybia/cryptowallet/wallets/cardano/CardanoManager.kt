@@ -269,10 +269,11 @@ class CardanoManager(
         }
 
         // Calculate minimum ADA for the native token output using protocol parameters.
-        // CardanoMinUtxo.calculateMinAda() uses: max(1 ADA, (160 + outputSize) * coinsPerUtxoByte)
+        // Formula: max(1 ADA, (160 + outputSize) * coinsPerUtxoByte)
         val policyIdBytes = hexToBytes(policyId)
         val assetNameBytes = hexToBytes(assetName)
         val toAddressBytes = addressToBytes(toAddress)
+        val fromAddressBytes = addressToBytes(fromAddress)
         val dummyTokenOutput = CardanoTransactionOutput(
             addressBytes = toAddressBytes,
             lovelace = 2_000_000L, // Use realistic lovelace value for accurate CBOR size estimation
@@ -280,21 +281,73 @@ class CardanoManager(
         )
         val minAda = CardanoMinUtxo.calculateMinAda(dummyTokenOutput, COINS_PER_UTXO_BYTE)
 
-        // Estimate minAda for change output (worst case: has token change + other tokens)
-        val fromAddressBytes = addressToBytes(fromAddress)
+        // Phase 1: Initial UTXO selection with conservative estimate (target token change only)
         val dummyChangeOutput = CardanoTransactionOutput(
             addressBytes = fromAddressBytes,
             lovelace = 2_000_000L,
             multiAssets = mapOf(policyIdBytes to mapOf(assetNameBytes to 1L))
         )
-        val estimatedMinAdaForChange = CardanoMinUtxo.calculateMinAda(dummyChangeOutput, COINS_PER_UTXO_BYTE)
-        val requiredAda = fee + minAda + estimatedMinAdaForChange
+        val initialEstMinAdaForChange = CardanoMinUtxo.calculateMinAda(dummyChangeOutput, COINS_PER_UTXO_BYTE)
+        var requiredAda = fee + minAda + initialEstMinAdaForChange
 
-        val selectedUtxos = CardanoUtxoSelector.selectUtxos(
+        var selectedUtxos = CardanoUtxoSelector.selectUtxos(
             utxos, policyId, assetName, amount, requiredAda
         )
 
-        // Build transaction
+        // Phase 2: Compute actual change tokens from selected UTXOs, recalculate if needed.
+        // Uses String keys to avoid ByteArray reference equality issues.
+        fun buildChangeTokensMap(selected: List<CardanoUtxo>): MutableMap<String, MutableMap<String, Long>> {
+            val map = mutableMapOf<String, MutableMap<String, Long>>()
+            for (utxo in selected) {
+                for (token in utxo.nativeTokens) {
+                    val assetMap = map.getOrPut(token.policyId) { mutableMapOf() }
+                    assetMap[token.assetName] = (assetMap[token.assetName] ?: 0L) + token.amount
+                }
+            }
+            // Subtract the tokens being sent to the recipient
+            val targetAssetMap = map[policyId]
+            if (targetAssetMap != null) {
+                val remaining = (targetAssetMap[assetName] ?: 0L) - amount
+                if (remaining > 0) {
+                    targetAssetMap[assetName] = remaining
+                } else {
+                    targetAssetMap.remove(assetName)
+                    if (targetAssetMap.isEmpty()) map.remove(policyId)
+                }
+            }
+            return map
+        }
+
+        fun changeMapToBytes(map: Map<String, Map<String, Long>>): Map<ByteArray, Map<ByteArray, Long>> =
+            map.map { (pid, assets) ->
+                hexToBytes(pid) to assets.map { (name, amt) -> hexToBytes(name) to amt }.toMap()
+            }.toMap()
+
+        var changeTokensMap = buildChangeTokensMap(selectedUtxos)
+
+        // If the actual change has more tokens than estimated, the change output is larger
+        // and needs more minAda. Re-select UTXOs with corrected requirement.
+        if (changeTokensMap.isNotEmpty()) {
+            val actualChangeAssets = changeMapToBytes(changeTokensMap)
+            val actualChangeOutput = CardanoTransactionOutput(
+                addressBytes = fromAddressBytes,
+                lovelace = 2_000_000L,
+                multiAssets = actualChangeAssets
+            )
+            val actualMinAdaForChange = CardanoMinUtxo.calculateMinAda(actualChangeOutput, COINS_PER_UTXO_BYTE)
+            val correctedRequiredAda = fee + minAda + actualMinAdaForChange
+
+            if (correctedRequiredAda > requiredAda) {
+                // Need more ADA — re-select UTXOs
+                requiredAda = correctedRequiredAda
+                selectedUtxos = CardanoUtxoSelector.selectUtxos(
+                    utxos, policyId, assetName, amount, requiredAda
+                )
+                changeTokensMap = buildChangeTokensMap(selectedUtxos)
+            }
+        }
+
+        // Phase 3: Build transaction
         val currentBlock = apiService.getCurrentBlock()
         val ttl = currentBlock.slot + 7200 // ~2 hours
 
@@ -310,36 +363,13 @@ class CardanoManager(
             mapOf(policyIdBytes to mapOf(assetNameBytes to amount))
         )
 
-        // Collect all native tokens from selected UTXOs for the change output
+        // Change output
         val totalInputLovelace = selectedUtxos.sumOf { it.lovelace }
-        val totalInputTokens = selectedUtxos.sumOf { it.tokenAmount(policyId, assetName) }
         val changeLovelace = totalInputLovelace - fee - minAda
-        val changeTokens = totalInputTokens - amount
+        val hasChangeTokens = changeTokensMap.isNotEmpty()
 
-        // Gather other native tokens from selected UTXOs that must be returned via change
-        val otherTokensMap = mutableMapOf<String, MutableMap<String, Long>>()
-        for (utxo in selectedUtxos) {
-            for (token in utxo.nativeTokens) {
-                if (token.policyId == policyId && token.assetName == assetName) continue
-                val assetMap = otherTokensMap.getOrPut(token.policyId) { mutableMapOf() }
-                assetMap[token.assetName] = (assetMap[token.assetName] ?: 0L) + token.amount
-            }
-        }
-        val hasOtherTokens = otherTokensMap.isNotEmpty()
-
-        if (changeTokens > 0 || hasOtherTokens) {
-            // Build multi-asset map for change: target token change + other tokens
-            val changeAssets = mutableMapOf<ByteArray, Map<ByteArray, Long>>()
-            if (changeTokens > 0) {
-                changeAssets[policyIdBytes] = mapOf(assetNameBytes to changeTokens)
-            }
-            for ((otherPolicyId, assetMap) in otherTokensMap) {
-                val otherPolicyBytes = hexToBytes(otherPolicyId)
-                changeAssets[otherPolicyBytes] = assetMap.map { (name, amt) ->
-                    hexToBytes(name) to amt
-                }.toMap()
-            }
-
+        if (hasChangeTokens) {
+            val changeAssets = changeMapToBytes(changeTokensMap)
             val changeOutput = CardanoTransactionOutput(
                 addressBytes = fromAddressBytes,
                 lovelace = changeLovelace,
@@ -360,6 +390,14 @@ class CardanoManager(
 
         builder.setFee(fee)
         builder.setTtl(ttl)
+
+        // Cardano ledger rule: sum(inputs.lovelace) = sum(outputs.lovelace) + fee
+        val totalOutputLovelace = minAda +
+            (if (hasChangeTokens || changeLovelace >= CardanoTransactionBuilder.MIN_UTXO_LOVELACE) changeLovelace else 0L)
+        val consumed = totalOutputLovelace + fee
+        check(totalInputLovelace >= consumed) {
+            "Value not conserved: inputs=$totalInputLovelace, outputs+fee=$consumed"
+        }
 
         val body = builder.build()
 

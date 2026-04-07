@@ -120,7 +120,7 @@ object CardanoMinUtxo {
                 amountCbor
             )
         )
-        return encoder.encode(outputCbor).size.toLong()
+        return encoder.encodeCanonical(outputCbor).size.toLong()
     }
 }
 

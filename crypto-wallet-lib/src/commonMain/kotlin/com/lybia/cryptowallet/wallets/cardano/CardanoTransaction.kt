@@ -119,7 +119,9 @@ class CardanoTransactionBody(
             entries.add(CborValue.CborUInt(7u) to CborValue.CborByteString(metadataHash))
         }
 
-        return encoder.encode(CborValue.CborMap(entries))
+        // Cardano requires deterministic CBOR encoding (RFC 7049 §3.9) for transaction bodies.
+        // Multi-asset map keys (policyId, assetName) must be canonically sorted.
+        return encoder.encodeCanonical(CborValue.CborMap(entries))
     }
 
     /**
@@ -281,8 +283,20 @@ class CardanoTransactionBuilder {
         require(outputs.isNotEmpty()) { "Transaction must have at least one output" }
         require(fee >= 0) { "Fee must be non-negative" }
         require(ttl > 0) { "TTL must be positive" }
+
+        // Cardano CDDL: inputs are a set — must be canonically sorted by (txHash, index)
+        val sortedInputs = inputs.sortedWith(Comparator { a, b ->
+            // Compare txHash bytes lexicographically
+            for (i in a.txHash.indices) {
+                val cmp = (a.txHash[i].toInt() and 0xFF) - (b.txHash[i].toInt() and 0xFF)
+                if (cmp != 0) return@Comparator cmp
+            }
+            // Same txHash: compare index
+            a.index - b.index
+        })
+
         return CardanoTransactionBody(
-            inputs = inputs.toList(),
+            inputs = sortedInputs,
             outputs = outputs.toList(),
             fee = fee,
             ttl = ttl,

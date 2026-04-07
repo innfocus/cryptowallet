@@ -99,7 +99,7 @@ class CardanoWitnessSet(
             entries.add(CborValue.CborUInt(2u) to CborValue.CborArray(bootstrapCbor))
         }
 
-        return encoder.encode(CborValue.CborMap(entries))
+        return encoder.encodeCanonical(CborValue.CborMap(entries))
     }
 
     companion object {
@@ -189,7 +189,8 @@ class CardanoSignedTransaction(
 
     /**
      * Serialize the full signed transaction to CBOR bytes.
-     * CBOR array: [body_map, witness_set_map, metadata_or_null]
+     * Conway era CDDL: [transaction_body, transaction_witness_set, is_valid, auxiliary_data / null]
+     * is_valid = true for non-script transactions.
      */
     fun serialize(): ByteArray {
         val decoder = CborDecoder()
@@ -203,7 +204,12 @@ class CardanoSignedTransaction(
             CborValue.CborSimple.NULL
         }
 
-        return encoder.encode(CborValue.CborArray(listOf(bodyCbor, witnessCbor, metadataCbor)))
+        return encoder.encodeCanonical(CborValue.CborArray(listOf(
+            bodyCbor,
+            witnessCbor,
+            CborValue.CborSimple.TRUE,  // is_valid: always true for non-Plutus transactions
+            metadataCbor
+        )))
     }
 
     /**
