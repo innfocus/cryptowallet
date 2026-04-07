@@ -10,6 +10,8 @@ import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.errors.StakingError
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.CardanoApiService
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 
 /**
  * Main Cardano wallet manager.
@@ -35,8 +37,10 @@ class CardanoManager(
 
     private data class AccountCacheKey(val purpose: Int, val account: Int)
 
+    private val lock = SynchronizedObject()
+
     // Cache L1: Master key (PBKDF2-4096 result) — lazily computed, at most once per instance
-    @Volatile private var masterKeyCache: Pair<ByteArray, ByteArray>? = null
+    @kotlin.concurrent.Volatile private var masterKeyCache: Pair<ByteArray, ByteArray>? = null
 
     // Cache L2: Account-level keys at m/purpose'/1815'/account'
     private val accountKeyCache = mutableMapOf<AccountCacheKey, Pair<ByteArray, ByteArray>>()
@@ -46,16 +50,14 @@ class CardanoManager(
     private val shelleyStakingKeyCache = mutableMapOf<Int, Triple<ByteArray, ByteArray, ByteArray>>()
     private val byronKeyCache = mutableMapOf<Int, Triple<ByteArray, ByteArray, ByteArray>>()
 
-    @Synchronized
-    private fun getMasterKey(): Pair<ByteArray, ByteArray> {
-        return masterKeyCache ?: IcarusKeyDerivation.masterKeyFromMnemonic(mnemonicWords)
+    private fun getMasterKey(): Pair<ByteArray, ByteArray> = synchronized(lock) {
+        masterKeyCache ?: IcarusKeyDerivation.masterKeyFromMnemonic(mnemonicWords)
             .also { masterKeyCache = it }
     }
 
-    @Synchronized
-    private fun getShelleyAccountKey(account: Int): Pair<ByteArray, ByteArray> {
+    private fun getShelleyAccountKey(account: Int): Pair<ByteArray, ByteArray> = synchronized(lock) {
         val cacheKey = AccountCacheKey(purpose = 1852, account = account)
-        accountKeyCache[cacheKey]?.let { return it }
+        accountKeyCache[cacheKey]?.let { return@synchronized it }
 
         val (masterExt, masterCC) = getMasterKey()
         var k = masterExt; var cc = masterCC
@@ -63,13 +65,12 @@ class CardanoManager(
         IcarusKeyDerivation.deriveChildKey(k, cc, 1815, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
         IcarusKeyDerivation.deriveChildKey(k, cc, account, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
 
-        return (k to cc).also { accountKeyCache[cacheKey] = it }
+        (k to cc).also { accountKeyCache[cacheKey] = it }
     }
 
-    @Synchronized
-    private fun getByronAccountKey(): Pair<ByteArray, ByteArray> {
+    private fun getByronAccountKey(): Pair<ByteArray, ByteArray> = synchronized(lock) {
         val cacheKey = AccountCacheKey(purpose = 44, account = 0)
-        accountKeyCache[cacheKey]?.let { return it }
+        accountKeyCache[cacheKey]?.let { return@synchronized it }
 
         val (masterExt, masterCC) = getMasterKey()
         var k = masterExt; var cc = masterCC
@@ -77,7 +78,7 @@ class CardanoManager(
         IcarusKeyDerivation.deriveChildKey(k, cc, 1815, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
         IcarusKeyDerivation.deriveChildKey(k, cc, 0, hardened = true).let { (nk, nc) -> k = nk; cc = nc }
 
-        return (k to cc).also { accountKeyCache[cacheKey] = it }
+        (k to cc).also { accountKeyCache[cacheKey] = it }
     }
 
     /**
@@ -85,8 +86,7 @@ class CardanoManager(
      * Call when the wallet is locked or the manager is no longer needed.
      * After calling, subsequent key derivations will recompute from scratch.
      */
-    @Synchronized
-    fun clearCachedKeys() {
+    fun clearCachedKeys() = synchronized(lock) {
         masterKeyCache?.let { (ext, cc) -> ext.fill(0); cc.fill(0) }
         masterKeyCache = null
 
@@ -110,8 +110,8 @@ class CardanoManager(
     // Returns Triple(pubKey32, chainCode32, extKey64)
     private fun deriveShelleyPaymentKey(account: Int, index: Int): Triple<ByteArray, ByteArray, ByteArray> {
         val cacheKey = account to index
-        synchronized(shelleyPaymentKeyCache) {
-            shelleyPaymentKeyCache[cacheKey]?.let { return it }
+        synchronized(lock) {
+            shelleyPaymentKeyCache[cacheKey]?.let { return@deriveShelleyPaymentKey it }
         }
 
         val (k0, cc0) = getShelleyAccountKey(account)
@@ -120,7 +120,7 @@ class CardanoManager(
         IcarusKeyDerivation.deriveChildKey(k, cc, index, hardened = false).let { (nk, nc) -> k = nk; cc = nc }
         val result = Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
 
-        synchronized(shelleyPaymentKeyCache) {
+        synchronized(lock) {
             shelleyPaymentKeyCache[cacheKey] = result
         }
         return result
@@ -129,8 +129,8 @@ class CardanoManager(
     // Shelley staking key: m/1852'/1815'/account'/2/0
     // Returns Triple(pubKey32, chainCode32, extKey64)
     private fun deriveShelleyStakingKey(account: Int): Triple<ByteArray, ByteArray, ByteArray> {
-        synchronized(shelleyStakingKeyCache) {
-            shelleyStakingKeyCache[account]?.let { return it }
+        synchronized(lock) {
+            shelleyStakingKeyCache[account]?.let { return@deriveShelleyStakingKey it }
         }
 
         val (k0, cc0) = getShelleyAccountKey(account)
@@ -139,7 +139,7 @@ class CardanoManager(
         IcarusKeyDerivation.deriveChildKey(k, cc, 0, hardened = false).let    { (nk, nc) -> k = nk; cc = nc }
         val result = Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
 
-        synchronized(shelleyStakingKeyCache) {
+        synchronized(lock) {
             shelleyStakingKeyCache[account] = result
         }
         return result
@@ -147,8 +147,8 @@ class CardanoManager(
 
     // Byron payment key: m/44'/1815'/0'/0/index
     private fun deriveByronKey(index: Int): Triple<ByteArray, ByteArray, ByteArray> {
-        synchronized(byronKeyCache) {
-            byronKeyCache[index]?.let { return it }
+        synchronized(lock) {
+            byronKeyCache[index]?.let { return@deriveByronKey it }
         }
 
         val (k0, cc0) = getByronAccountKey()
@@ -157,7 +157,7 @@ class CardanoManager(
         IcarusKeyDerivation.deriveChildKey(k, cc, index, hardened = false).let { (nk, nc) -> k = nk; cc = nc }
         val result = Triple(IcarusKeyDerivation.publicKeyFromExtended(k), cc, k)
 
-        synchronized(byronKeyCache) {
+        synchronized(lock) {
             byronKeyCache[index] = result
         }
         return result
