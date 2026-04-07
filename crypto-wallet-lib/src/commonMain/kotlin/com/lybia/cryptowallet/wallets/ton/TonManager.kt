@@ -43,6 +43,15 @@ enum class WalletVersion {
     W5
 }
 
+/** Destination for multi-transfer (bulk send). */
+data class TonDestination(
+    val address: String,
+    val amountNano: Long,
+    val memo: String? = null,
+    val bounceable: Boolean = false,
+    val sendMode: Int = 3
+)
+
 /** TON staking pool types, detected via get methods on pool contract. */
 enum class TonPoolType {
     NOMINATOR,
@@ -83,6 +92,20 @@ class TonManager(
     mnemonics: String,
     val walletVersion: WalletVersion = WalletVersion.W5
 ) : BaseCoinManager(), ITokenAndNFT, ITokenManager, IStakingManager, INFTManager {
+
+    companion object {
+        /**
+         * Validate TON address format (friendly, raw, or URL-safe).
+         * Friendly: 48-char base64 (e.g. "UQ...", "EQ...", "kQ...", "0Q...")
+         * Raw: "workchain:hex" (e.g. "0:abc...def")
+         */
+        fun isValidTonAddress(address: String): Boolean = try {
+            AddrStd.parse(address)
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
 
     private val logger = Logger.withTag("TonManager")
     private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
@@ -213,6 +236,33 @@ class TonManager(
             storeBit(true)          // has out_list ref (Maybe = present)
             storeRef(outListCell)
             storeBit(false)         // has_other_actions = false
+        }
+    }
+
+    /**
+     * Build W5 OutList chain for multiple transfers.
+     * Each node: OUT_ACTION_SEND_MSG_TAG(32) + sendMode(8) + ref(prev) + ref(msg)
+     */
+    private fun buildW5OutListCellMulti(transfers: List<WalletTransfer>, sendMode: Int = 3): Cell {
+        var list = CellBuilder.createCell {} // OutList 0 (empty)
+        for (transfer in transfers) {
+            val msgCell = CellRef(transfer.toMessageRelaxed(), MessageRelaxed.tlbCodec(AnyTlbConstructor)).cell
+            list = CellBuilder.createCell {
+                storeUInt(0x0ec3c86d, 32) // OUT_ACTION_SEND_MSG_TAG
+                storeUInt(sendMode, 8)
+                storeRef(list)    // prev OutList
+                storeRef(msgCell) // message
+            }
+        }
+        return list
+    }
+
+    private fun buildW5InnerRequestMulti(transfers: List<WalletTransfer>, sendMode: Int = 3): Cell {
+        val outListCell = buildW5OutListCellMulti(transfers, sendMode)
+        return CellBuilder.createCell {
+            storeBit(true)    // has out_list
+            storeRef(outListCell)
+            storeBit(false)   // has_other_actions = false
         }
     }
 
@@ -543,6 +593,8 @@ class TonManager(
         totalTonAmountNano: Long = 50_000_000L,
         memo: String? = null
     ): String {
+        require(isValidTonAddress(toAddress)) { "Invalid recipient address: $toAddress" }
+        require(isValidTonAddress(jettonMasterAddress)) { "Invalid Jetton master address: $jettonMasterAddress" }
         logger.i { "Signing Jetton transaction: $jettonAmountNano to $toAddress, seqno: $seqno" }
         val myJettonWallet = getJettonWalletAddress(getAddress(), jettonMasterAddress, coinNetwork)
             ?: throw Exception("Could not find Jetton Wallet")
@@ -578,6 +630,49 @@ class TonManager(
         }.also { logger.i { "Signed Jetton transaction BOC: $it" } }
     }
 
+    // ─── Bulk Transfer (W5 only) ────────────────────────────────────────
+
+    /**
+     * Sign a multi-recipient transfer in a single W5R1 transaction.
+     * @param destinations list of recipients (1–255)
+     * @param seqno current wallet seqno
+     * @return base64-encoded BOC ready for broadcast
+     */
+    fun signBulkTransfer(destinations: List<TonDestination>, seqno: Int): String {
+        require(destinations.isNotEmpty()) { "At least one destination required" }
+        require(destinations.size <= 255) { "Maximum 255 recipients, got ${destinations.size}" }
+        require(walletVersion == WalletVersion.W5) { "Bulk transfer requires W5 wallet" }
+        destinations.forEach { require(isValidTonAddress(it.address)) { "Invalid address: ${it.address}" } }
+
+        logger.i { "Signing bulk transfer: ${destinations.size} recipients, seqno=$seqno" }
+
+        val transfers = destinations.map { dest ->
+            val payload = if (dest.memo != null) {
+                CellBuilder.createCell {
+                    storeUInt(0, 32)
+                    storeBytes(dest.memo.encodeToByteArray())
+                }
+            } else Cell.empty()
+
+            WalletTransfer {
+                destination = AddrStd.parse(dest.address)
+                bounceable = dest.bounceable
+                coins = Coins(dest.amountNano)
+                messageData = MessageData.Raw(payload, null, null)
+                sendMode = dest.sendMode
+            }
+        }
+
+        val innerRequest = buildW5InnerRequestMulti(transfers)
+        val body = buildW5SignedBody(seqno, innerRequest)
+        val isTestnet = Config.shared.getNetwork() == Network.TESTNET
+        val stateInit = if (seqno == 0) buildW5StateInit(isTestnet) else null
+        val message = buildW5Message(body, stateInit)
+        val cell = buildCell { storeTlb(Message.Any, message) }
+        return Base64.Default.encode(BagOfCells(cell).toByteArray())
+            .also { logger.i { "Signed bulk transfer BOC length: ${it.length}" } }
+    }
+
     suspend fun getSeqno(coinNetwork: CoinNetwork): Int {
         val s = TonApiService.INSTANCE.getSeqno(coinNetwork, getAddress())
             ?: throw WalletError.NetworkError("Failed to retrieve seqno for ${getAddress()}")
@@ -591,6 +686,7 @@ class TonManager(
         seqno: Int,
         memo: String? = null
     ): String {
+        require(isValidTonAddress(toAddress)) { "Invalid TON address: $toAddress" }
         logger.i { "Signing TON transaction: $amountNano to $toAddress, seqno: $seqno, memo: $memo" }
         val payload = if (memo != null) {
             CellBuilder.createCell {
@@ -623,6 +719,8 @@ class TonManager(
         totalTonAmountNano: Long  = 100_000_000L,  // 0.1 TON total
         memo: String? = null
     ): String {
+        require(isValidTonAddress(toAddress)) { "Invalid recipient address: $toAddress" }
+        require(isValidTonAddress(nftAddress)) { "Invalid NFT address: $nftAddress" }
         logger.i { "Signing NFT transfer for $nftAddress to $toAddress" }
         val nftBody = CellBuilder.createCell {
             storeUInt(0x5fcc3d14, 32) // transfer op-code (TEP-62)
@@ -768,6 +866,75 @@ class TonManager(
         }
         logger.i { "Estimated fee: $fee TON" }
         return fee
+    }
+
+    /**
+     * Estimate fee with full breakdown: source fees (in_fwd, storage, gas, fwd) + destination fees per recipient.
+     */
+    suspend fun estimateFeeDetailed(coinNetwork: CoinNetwork, address: String, bodyBoc: String): TonFeeBreakdown? {
+        logger.i { "Estimating detailed fee for $address" }
+        val result = TonApiService.INSTANCE.estimateFeeDetailed(coinNetwork, address, bodyBoc) ?: return null
+
+        fun nanoToTon(nano: Long): Double = nano.toDouble() / 1_000_000_000.0
+        fun TonSourceFees.toEntry() = TonFeeBreakdown.TonFeeBreakdownEntry(
+            inFwdFee = nanoToTon(inFwdFee),
+            storageFee = nanoToTon(storageFee),
+            gasFee = nanoToTon(gasFee),
+            fwdFee = nanoToTon(fwdFee),
+            total = nanoToTon(total)
+        )
+
+        val src = result.sourceFees
+        val destEntries = result.destinationFees.map { it.toEntry() }
+        val totalSourceNano = src.total
+        val totalDestNano = result.destinationFees.sumOf { it.total }
+
+        return TonFeeBreakdown(
+            inFwdFee = nanoToTon(src.inFwdFee),
+            storageFee = nanoToTon(src.storageFee),
+            gasFee = nanoToTon(src.gasFee),
+            fwdFee = nanoToTon(src.fwdFee),
+            totalSourceFee = nanoToTon(totalSourceNano),
+            destinationFees = destEntries,
+            totalFee = nanoToTon(totalSourceNano + totalDestNano)
+        ).also { logger.i { "Detailed fee: source=${it.totalSourceFee}, dest=${destEntries.size} entries, total=${it.totalFee} TON" } }
+    }
+
+    /**
+     * Broadcast and poll until the transaction is confirmed on-chain.
+     * @param maxAttempts max polling attempts (default 12 × 5s = 60s)
+     * @param pollIntervalMs delay between polls in milliseconds
+     */
+    suspend fun transferWithConfirmation(
+        dataSigned: String,
+        coinNetwork: CoinNetwork,
+        maxAttempts: Int = 12,
+        pollIntervalMs: Long = 5000L
+    ): TransferResponseModel {
+        logger.i { "Broadcasting with confirmation | BOC length: ${dataSigned.length}" }
+        val msgHash = TonApiService.INSTANCE.sendBocReturnHash(coinNetwork, dataSigned)
+        if (msgHash == null) {
+            logger.e { "Broadcast failed — no message hash returned" }
+            return TransferResponseModel(success = false, error = "Failed to broadcast transaction", txHash = null)
+        }
+        logger.i { "Broadcast OK, polling for confirmation | msgHash=$msgHash" }
+
+        for (attempt in 1..maxAttempts) {
+            kotlinx.coroutines.delay(pollIntervalMs)
+            logger.d { "Confirmation poll attempt $attempt/$maxAttempts" }
+            val txs = TonApiService.INSTANCE.getTransactions(coinNetwork, getAddress(), limit = 5)
+            if (txs != null) {
+                for (tx in txs) {
+                    if (tx.in_msg?.hash == msgHash) {
+                        logger.i { "Transaction confirmed! txHash=${tx.transactionId.hash}" }
+                        return TransferResponseModel(success = true, error = null, txHash = tx.transactionId.hash)
+                    }
+                }
+            }
+        }
+
+        logger.w { "Confirmation timeout after ${maxAttempts * pollIntervalMs / 1000}s — tx may still be processing" }
+        return TransferResponseModel(success = true, error = "Confirmation timeout", txHash = "pending")
     }
 
     override suspend fun transfer(

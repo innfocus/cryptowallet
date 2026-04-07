@@ -223,10 +223,30 @@ Root DNS resolver: `Ef_SByTMM97KVRlaEFIqX_67pYI67FPRu_YBaAs7_pS48_p6`
 
 ## 10. Fee Estimation
 
+### Tổng fee (aggregate)
 ```kotlin
 val feeTon = tonManager.estimateFee(coinNetwork, address, bocBase64)
 // Returns Double in TON (nanoTON / 1e9)
-// Fee = inFwdFee + storageFee + gasFee + fwdFee
+
+// Qua CommonCoinsManager
+val result = ccm.estimateFee(NetworkName.TON, toAddress, amount)
+// result.fee = tổng fee (Double, TON)
+```
+
+### Fee breakdown chi tiết
+```kotlin
+// Qua TonManager
+val breakdown = tonManager.estimateFeeDetailed(coinNetwork, address, bocBase64)
+// breakdown.inFwdFee     — phí forward message vào (Double, TON)
+// breakdown.storageFee   — phí lưu trữ state (Double, TON)
+// breakdown.gasFee       — phí TVM computation (Double, TON)
+// breakdown.fwdFee       — phí forward message ra (Double, TON)
+// breakdown.totalSourceFee — tổng phí sender
+// breakdown.destinationFees — danh sách phí tại mỗi recipient (cho bulk transfer)
+// breakdown.totalFee     — tổng tất cả (source + destinations)
+
+// Qua CommonCoinsManager
+val breakdown = ccm.estimateTonFeeDetailed(toAddress, 1.5, memo = "Hello")
 ```
 
 ---
@@ -285,8 +305,22 @@ val ccm = CommonCoinsManager.shared
 val balance = ccm.getBalance(NetworkName.TON)
 val tokenBalance = ccm.getTokenBalance(NetworkName.TON, address, jettonMasterAddr)
 
+// ── Address Validation ──
+val isValid = ccm.isValidTonAddress("UQ...")  // true/false
+
 // ── Send TON ──
 val result = ccm.sendCoin(NetworkName.TON, toAddress, 1.5, memo = MemoData("Hello"))
+
+// ── Send TON with on-chain confirmation (polls until confirmed) ──
+val confirmed = ccm.sendCoinWithConfirmation(NetworkName.TON, toAddress, 1.5)
+// confirmed.txHash = real hash (not "pending") when confirmed
+
+// ── Bulk Transfer (W5 only, up to 255 recipients in 1 tx) ──
+val bulkResult = ccm.sendBulkTransfer(listOf(
+    TonDestination("UQ...addr1", 1_000_000_000L, memo = "Payment 1"),
+    TonDestination("UQ...addr2", 500_000_000L),
+    TonDestination("UQ...addr3", 2_000_000_000L, memo = "Payment 3"),
+))
 
 // ── Send Jetton (convenience) ──
 val result = ccm.sendJetton(
@@ -380,10 +414,27 @@ val address = mgr.getAddress()
 val tonBalance = mgr.getBalance(address, coinNetwork)
 val tokenBalance = mgr.getBalanceToken(address, contractAddr, coinNetwork, decimals = 6)
 
+// Address Validation
+val valid = TonManager.isValidTonAddress("UQ...")  // true/false
+
 // Transfer TON
 val seqno = mgr.getSeqno(coinNetwork)
 val boc = mgr.signTransaction(toAddress, amountNano, seqno, memo)
 val result = mgr.transfer(boc, coinNetwork)
+
+// Transfer TON with confirmation (polls until on-chain)
+val confirmed = mgr.transferWithConfirmation(boc, coinNetwork)
+// confirmed.txHash = real hash when confirmed
+
+// Bulk Transfer (W5 only, up to 255 recipients)
+val bulkBoc = mgr.signBulkTransfer(
+    listOf(
+        TonDestination("UQ...addr1", 1_000_000_000L),
+        TonDestination("UQ...addr2", 500_000_000L, memo = "Gift"),
+    ),
+    seqno = seqno
+)
+mgr.transfer(bulkBoc, coinNetwork)
 
 // Transfer Jetton
 val boc = mgr.signJettonTransaction(masterAddr, toAddr, amountNano, seqno, coinNetwork)
@@ -535,10 +586,115 @@ File: `commonTest/.../wallets/ton/TonManagerTest.kt`
 | BUG-1: Jetton balance decimal handling | ✅ Fixed |
 | BUG-2: getSeqno error handling (nullable) | ✅ Fixed |
 | BUG-3: Transaction expiry (validUntil = now+60s) | ✅ Fixed |
+| BUG-4: getSeqno không check exitCode trước khi parse stack | ✅ Fixed (2026-04-07) |
 | IMPROVE-1: Transaction history pagination (lt/hash) | ✅ Done |
 | IMPROVE-2: Unstake via Jetton burn | ✅ Done |
 | IMPROVE-3: Parsed Jetton transaction history | ✅ Done |
-| IMPROVE-4: W5R1 multi-transfer batching | ⏳ Planned |
-| IMPROVE-5: Transaction confirmation polling | ⏳ Planned |
+| IMPROVE-4: W5R1 multi-transfer batching | ✅ Done (2026-04-07) |
+| IMPROVE-5: Transaction confirmation polling | ✅ Done (2026-04-07) |
 | IMPROVE-6: Pool detection hardening | ⏳ Planned |
 | IMPROVE-7: On-chain Jetton metadata (layout 0x00) | ⏳ Planned |
+
+### So sánh với ton4j (reference: `/Users/thanhphat/GitHub/demo/ton4j-main`)
+
+#### Tính năng KMP có mà ton4j không có
+| Feature | Ghi chú |
+|---------|---------|
+| Staking (Nominator, Tonstakers, Bemo) | ton4j không có module staking |
+| DNS Resolution (forward + reverse) | Recursive resolution TEP-81, depth limit 5 |
+
+#### Tính năng ton4j có mà KMP cần bổ sung
+
+**Ưu tiên cao:**
+| Feature | ton4j method | KMP status | Ghi chú |
+|---------|-------------|------------|---------|
+| **Multi-transfer** (batch send) | `createBulkTransfer()` — lên đến 255 recipients/tx | ✅ `signBulkTransfer()` | Tiết kiệm fee khi gửi nhiều |
+| **Transaction confirmation** | `sendExternalMessageWithConfirmation()` | ✅ `transferWithConfirmation()` | Poll cho đến khi tx confirm |
+| **Address validation** | `Address(String)` — validate format trước khi gửi | ✅ `isValidTonAddress()` | Tránh mất tiền do sai address |
+
+**Ưu tiên trung bình:**
+| Feature | ton4j method | KMP status |
+|---------|-------------|------------|
+| Extension management | `manageExtensions()`, `getRawExtensions()` | ❌ Chưa có |
+| Internal signed messages | `prepareInternalMsg()` (prefix `0x73696E74`) | ❌ Chưa có |
+| Fee breakdown chi tiết | `sourceFees` + `destinationFees` riêng | ✅ `estimateFeeDetailed()` |
+| `waitForDeployment()` | Poll cho đến khi contract deployed | ❌ Chưa có |
+| `waitForBalanceChange()` | Poll cho đến khi balance thay đổi | ❌ Chưa có |
+
+#### Giải thích các tính năng ưu tiên trung bình
+
+##### Extension Management
+
+W5R1 wallet hỗ trợ **extensions** — là các smart contract bên ngoài được phép gửi message thay mặt wallet mà **không cần chữ ký chủ ví**. Cơ chế:
+
+```
+Wallet data cell:
+  is_signature_allowed: Bool    ← có cho phép ký bằng private key không
+  seqno: uint32
+  wallet_id: uint32
+  public_key: bits256
+  extensions: HashmapE 256 Int  ← danh sách contract address được phép điều khiển ví
+```
+
+**Use case:**
+- **Subscription payments:** Thêm contract thanh toán tự động vào extensions → contract đó có thể rút tiền định kỳ mà không cần user ký mỗi lần.
+- **Multi-sig:** Thêm multi-sig contract làm extension → cần N/M chữ ký từ contract đó thay vì private key.
+- **DeFi automation:** Bot/contract tự thực hiện swap, harvest rewards.
+
+**Thao tác:**
+- `addExtension(address)`: Thêm contract vào danh sách (gửi internal message với `ActionExtendedAddExtension`)
+- `removeExtension(address)`: Xóa extension
+- `getRawExtensions()`: Lấy danh sách extensions hiện tại từ on-chain data
+
+**Vì sao chưa cần:** App wallet thông thường không dùng extension. Chỉ cần khi tích hợp DeFi protocol hoặc subscription service.
+
+##### Internal Signed Messages
+
+W5R1 phân biệt 2 loại message theo prefix:
+
+| Prefix | Hex | Ý nghĩa | Ai gửi |
+|--------|-----|---------|--------|
+| `"sign"` | `0x7369676E` | **External** — user ký và gửi từ bên ngoài blockchain | User (qua app) |
+| `"sint"` | `0x73696E74` | **Internal** — gửi từ contract khác trên blockchain | Extension contract |
+
+**External** (đang dùng): User mở app → ký transaction bằng private key → gửi BOC đến validator → validator chạy `recv_external` trên wallet contract.
+
+**Internal**: Một extension contract đã được authorize gửi message on-chain đến wallet → wallet chạy `recv_internal` → verify sender nằm trong danh sách extensions → thực hiện action.
+
+```
+External flow:  App → signTransaction → sendBoc → Validator → Wallet.recv_external
+Internal flow:  Extension Contract → Wallet.recv_internal → verify extension → execute
+```
+
+**Vì sao chưa cần:** App wallet chỉ cần external messages. Internal signed messages là cho contract-to-contract communication, cần khi build DeFi integrations hoặc automated flows.
+
+##### Fee Breakdown Chi Tiết
+
+Hiện tại `estimateFee()` trả về **1 số duy nhất** (tổng fee). Toncenter API thực tế trả về breakdown:
+
+```json
+{
+  "source_fees": {
+    "in_fwd_fee": 1000000,   // phí forward message vào
+    "storage_fee": 100000,    // phí lưu trữ account state
+    "gas_fee": 3000000,       // phí thực thi TVM
+    "fwd_fee": 500000         // phí forward message ra
+  },
+  "destination_fees": [       // phí tại account đích (cho mỗi recipient)
+    { "in_fwd_fee": ..., "storage_fee": ..., "gas_fee": ..., "fwd_fee": ... }
+  ]
+}
+```
+
+| Fee | Ý nghĩa | Ai trả |
+|-----|---------|--------|
+| `in_fwd_fee` | Phí chuyển message vào contract | Sender |
+| `storage_fee` | Phí lưu trữ state (tỉ lệ với kích thước data) | Account owner |
+| `gas_fee` | Phí TVM computation (tỉ lệ với complexity) | Sender |
+| `fwd_fee` | Phí forward message ra ngoài (outgoing) | Sender |
+
+**Đã implement:** `estimateFeeDetailed()` trả về `TonFeeBreakdown` với source fees chi tiết + destination fees per recipient. Xem Section 10.
+
+**Sử dụng:**
+- `estimateFee()` — tổng fee (đủ dùng cho hầu hết use case)
+- `estimateFeeDetailed()` — breakdown chi tiết (cho UX nâng cao, tooltip hiển thị phí)

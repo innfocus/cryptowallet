@@ -201,6 +201,42 @@ viewModelScope.launch {
 }
 ```
 
+### 6.5 Address Validation
+
+```kotlin
+// Validate trước khi gửi — tránh mất tiền do sai address
+val isValid = ccm.isValidTonAddress("UQRecipient...")
+// hoặc: TonManager.isValidTonAddress("UQRecipient...")
+```
+
+### 6.6 Send với on-chain confirmation
+
+```kotlin
+viewModelScope.launch {
+    val result = ccm.sendCoinWithConfirmation(
+        coin = NetworkName.TON,
+        toAddress = "UQRecipient...",
+        amount = 1.5
+    )
+    // result.txHash = real hash (không phải "pending") khi đã confirm
+    // Timeout mặc định: 60s (12 lần poll × 5s)
+}
+```
+
+### 6.7 Bulk Transfer (gửi nhiều người nhận trong 1 tx)
+
+```kotlin
+viewModelScope.launch {
+    val result = ccm.sendBulkTransfer(listOf(
+        TonDestination("UQAddr1...", 1_000_000_000L, memo = "Payment 1"),
+        TonDestination("UQAddr2...", 500_000_000L),
+        TonDestination("UQAddr3...", 2_000_000_000L, memo = "Payment 3"),
+    ))
+    // Chỉ hỗ trợ W5 wallet. Tối đa 255 recipients/tx.
+    // Tiết kiệm fee so với gửi từng tx riêng.
+}
+```
+
 ---
 
 ## 7. Jetton (Token)
@@ -397,6 +433,7 @@ viewModelScope.launch {
 
 ## 11. Fee Estimation
 
+### 11.1 Tổng fee
 ```kotlin
 viewModelScope.launch {
     val fee = ccm.estimateFee(
@@ -405,6 +442,30 @@ viewModelScope.launch {
         toAddress = "UQRecipient..."
     )
     Log.d("TON", "Estimated fee: ${fee.fee} ${fee.unit}")
+}
+```
+
+### 11.2 Fee breakdown chi tiết
+
+```kotlin
+viewModelScope.launch {
+    val breakdown = ccm.estimateTonFeeDetailed(
+        toAddress = "UQRecipient...",
+        amount = 1.0
+    )
+    if (breakdown != null) {
+        Log.d("TON", """
+            Fee breakdown:
+              in_fwd_fee:  ${breakdown.inFwdFee} TON   (forward message vào)
+              storage_fee: ${breakdown.storageFee} TON  (lưu trữ state)
+              gas_fee:     ${breakdown.gasFee} TON      (TVM computation)
+              fwd_fee:     ${breakdown.fwdFee} TON      (forward message ra)
+              ─────────────────────────────
+              Source total: ${breakdown.totalSourceFee} TON
+              Dest fees:   ${breakdown.destinationFees.size} entries
+              TOTAL:       ${breakdown.totalFee} TON
+        """.trimIndent())
+    }
 }
 ```
 

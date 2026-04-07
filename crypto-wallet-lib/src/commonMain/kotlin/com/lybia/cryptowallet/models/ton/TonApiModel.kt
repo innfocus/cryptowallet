@@ -81,13 +81,15 @@ data class TonFeeResult(
     @SerialName("@type")
     val type: String,
     @SerialName("source_fees")
-    val sourceFees: TonSourceFees
+    val sourceFees: TonSourceFees,
+    @SerialName("destination_fees")
+    val destinationFees: List<TonSourceFees> = emptyList()
 )
 
 @Serializable
 data class TonSourceFees(
     @SerialName("@type")
-    val type: String,
+    val type: String? = null,
     @SerialName("in_fwd_fee")
     val inFwdFee: Long,
     @SerialName("storage_fee")
@@ -96,6 +98,46 @@ data class TonSourceFees(
     val gasFee: Long,
     @SerialName("fwd_fee")
     val fwdFee: Long
+) {
+    /** Total fee in nanoTON. */
+    val total: Long get() = inFwdFee + storageFee + gasFee + fwdFee
+}
+
+/**
+ * Detailed fee breakdown for TON transactions.
+ * All values in TON (not nanoTON).
+ */
+data class TonFeeBreakdown(
+    val inFwdFee: Double,
+    val storageFee: Double,
+    val gasFee: Double,
+    val fwdFee: Double,
+    val totalSourceFee: Double,
+    val destinationFees: List<TonFeeBreakdownEntry> = emptyList(),
+    val totalFee: Double
+) {
+    data class TonFeeBreakdownEntry(
+        val inFwdFee: Double,
+        val storageFee: Double,
+        val gasFee: Double,
+        val fwdFee: Double,
+        val total: Double
+    )
+}
+
+@Serializable
+data class TonSendBocReturnHashResponse(
+    val ok: Boolean,
+    val result: TonSendBocHashResult? = null,
+    val error: String? = null,
+    val code: Int? = null
+)
+
+@Serializable
+data class TonSendBocHashResult(
+    @SerialName("@type")
+    val type: String? = null,
+    val hash: String   // base64 message hash
 )
 
 @Serializable

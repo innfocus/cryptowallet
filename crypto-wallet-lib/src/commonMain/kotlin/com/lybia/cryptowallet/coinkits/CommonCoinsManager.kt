@@ -1038,6 +1038,58 @@ class CommonCoinsManager(
         }
     }
 
+    /**
+     * Validate a TON address format.
+     */
+    fun isValidTonAddress(address: String): Boolean = TonManager.isValidTonAddress(address)
+
+    /**
+     * Send TON with on-chain confirmation polling (waits until tx appears on-chain).
+     * @return SendResult with real txHash on confirmation, or "pending" on timeout.
+     */
+    suspend fun sendCoinWithConfirmation(
+        coin: NetworkName,
+        toAddress: String,
+        amount: Double,
+        memo: MemoData? = null
+    ): SendResult {
+        if (coin != NetworkName.TON) return SendResult("", false, "Confirmation only supported for TON")
+        return try {
+            val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            val seqno = tonManager.getSeqno(coinNetwork)
+            val amountNano = doubleToSmallestUnit(amount, 1_000_000_000L)
+            val memoStr = memo?.memo?.takeIf { it.isNotEmpty() }
+            val boc = tonManager.signTransaction(toAddress, amountNano, seqno, memoStr)
+            val result = tonManager.transferWithConfirmation(boc, coinNetwork)
+            SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to sendCoinWithConfirmation for TON" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
+    /**
+     * Send TON to multiple recipients in a single W5R1 transaction (up to 255).
+     */
+    suspend fun sendBulkTransfer(
+        destinations: List<com.lybia.cryptowallet.wallets.ton.TonDestination>
+    ): SendResult {
+        if (destinations.isEmpty()) return SendResult("", false, "No destinations provided")
+        if (destinations.size > 255) return SendResult("", false, "Maximum 255 recipients supported")
+        return try {
+            val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            val seqno = tonManager.getSeqno(coinNetwork)
+            val boc = tonManager.signBulkTransfer(destinations, seqno)
+            val result = tonManager.transfer(boc, coinNetwork)
+            SendResult(txHash = result.txHash ?: "", success = result.success, error = result.error)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to sendBulkTransfer" }
+            SendResult(txHash = "", success = false, error = e.message)
+        }
+    }
+
     // ── Unified sendCoin — dispatches per-chain ───────────────────────────
 
     /**
@@ -1557,6 +1609,31 @@ class CommonCoinsManager(
         } catch (e: Exception) {
             logger.e(e) { "Failed to estimate fee for $coin" }
             FeeEstimateResult(fee = 0.0, success = false, error = e.message)
+        }
+    }
+
+    /**
+     * Estimate TON fee with full breakdown (source: in_fwd, storage, gas, fwd + destination fees).
+     * @param toAddress Recipient address
+     * @param amount Amount in TON
+     * @param memo Optional memo
+     * @return TonFeeBreakdown or null on error
+     */
+    suspend fun estimateTonFeeDetailed(
+        toAddress: String,
+        amount: Double,
+        memo: String? = null
+    ): com.lybia.cryptowallet.models.ton.TonFeeBreakdown? {
+        return try {
+            val tonManager = getOrCreateManager(NetworkName.TON) as TonManager
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            val seqno = tonManager.getSeqno(coinNetwork)
+            val amountNano = doubleToSmallestUnit(amount, 1_000_000_000L)
+            val bocBase64 = tonManager.signTransaction(toAddress, amountNano, seqno, memo)
+            tonManager.estimateFeeDetailed(coinNetwork, tonManager.getAddress(), bocBase64)
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to estimate detailed TON fee" }
+            null
         }
     }
 

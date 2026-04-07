@@ -103,6 +103,45 @@ class TonApiService {
         }
     }
 
+    /**
+     * Estimate fee with full breakdown (source + destination fees).
+     * @return TonFeeResult with sourceFees and destinationFees, or null on error.
+     */
+    suspend fun estimateFeeDetailed(coin: CoinNetwork, address: String, body: String): TonFeeResult? {
+        logger.d { "estimateFeeDetailed: address=$address" }
+        return try {
+            val response = HttpClientService.INSTANCE.client.post(coin.getInfuraRpcUrl()) {
+                contentType(ContentType.Application.Json)
+                Config.shared.apiKeyToncenter?.let { header("X-API-Key", it) }
+                setBody(
+                    TonRpcRequest(
+                        method = "estimateFee",
+                        params = buildJsonObject {
+                            put("address", address)
+                            put("body", body)
+                            put("ignore_chksig", true)
+                        }
+                    )
+                )
+            }
+            if (response.status.value in 200..299) {
+                val res = response.body<TonFeeResponse>()
+                if (res.ok && res.result != null) {
+                    logger.v { "estimateFeeDetailed: source=${res.result.sourceFees.total}, destinations=${res.result.destinationFees.size}" }
+                    return res.result
+                } else {
+                    logger.e { "estimateFeeDetailed failed: ${res.error ?: "Unknown error"}" }
+                }
+            } else {
+                logger.e { "estimateFeeDetailed HTTP error: ${response.status}" }
+            }
+            null
+        } catch (e: Exception) {
+            logger.e(e) { "Error in estimateFeeDetailed" }
+            null
+        }
+    }
+
     suspend fun estimateFee(coin: CoinNetwork, address: String, body: String): Long? {
         logger.d { "estimateFee: address=$address" }
         return try {
@@ -240,6 +279,47 @@ class TonApiService {
             }
         } catch (e: Exception) {
             logger.e(e) { "Error in getNFTItems" }
+            null
+        }
+    }
+
+    /**
+     * Broadcast BOC and return the message hash (for confirmation polling).
+     * @return base64 message hash on success, null on failure.
+     */
+    suspend fun sendBocReturnHash(coin: CoinNetwork, bocBase64: String): String? {
+        val url = coin.getInfuraRpcUrl()
+        logger.d { "sendBocReturnHash → POST $url" }
+        return try {
+            val response = HttpClientService.INSTANCE.client.post(url) {
+                contentType(ContentType.Application.Json)
+                Config.shared.apiKeyToncenter?.let { header("X-API-Key", it) }
+                setBody(
+                    TonRpcRequest(
+                        method = "sendBocReturnHash",
+                        params = buildJsonObject {
+                            put("boc", bocBase64)
+                        }
+                    )
+                )
+            }
+            val rawBody = response.bodyAsText()
+            logger.d { "sendBocReturnHash ← HTTP ${response.status.value} | body: $rawBody" }
+
+            if (response.status.value in 200..299) {
+                val body = response.body<TonSendBocReturnHashResponse>()
+                if (body.ok && body.result != null) {
+                    logger.i { "sendBocReturnHash ✓ hash=${body.result.hash}" }
+                    return body.result.hash
+                } else {
+                    logger.e { "sendBocReturnHash ✗ error: ${body.error}" }
+                }
+            } else {
+                logger.e { "sendBocReturnHash ✗ HTTP error: ${response.status}" }
+            }
+            null
+        } catch (e: Exception) {
+            logger.e(e) { "sendBocReturnHash ✗ exception: ${e.message}" }
             null
         }
     }
