@@ -253,12 +253,13 @@ class TonApiService {
             }
 
             if (response.status.value in 200..299) {
-                val body = response.body<TonAddressInformationResponse>()
+                val body = response.body<TonGenericResponse>()
                 if (body.ok) {
                     logger.i { "sendBoc success" }
                     return "success"
                 } else {
                     logger.e { "sendBoc failed: ${body.error ?: "Unknown error"}" }
+                    return body.error
                 }
             } else {
                 logger.e { "sendBoc HTTP error: ${response.status}" }

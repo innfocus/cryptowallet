@@ -12,6 +12,13 @@ data class TonRpcRequest(
 )
 
 @Serializable
+data class TonGenericResponse(
+    val ok: Boolean,
+    val error: String? = null,
+    val code: Int? = null
+)
+
+@Serializable
 data class TonAddressInformationResponse(
     val ok: Boolean,
     val result: TonAddressInformation? = null,

@@ -781,7 +781,7 @@ class TonManager(
         } else {
             TransferResponseModel(
                 success = false,
-                error = "Failed to broadcast transaction",
+                error = result ?: "Failed to broadcast transaction",
                 txHash = null
             )
         }
