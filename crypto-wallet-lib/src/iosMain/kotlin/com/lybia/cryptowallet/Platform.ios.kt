@@ -1,6 +1,8 @@
 package com.lybia.cryptowallet
 
 import platform.UIKit.UIDevice
+import platform.Foundation.NSDate
+import platform.Foundation.timeIntervalSince1970
 
 class IOSPlatform: Platform {
     override val name: String = UIDevice.currentDevice.systemName() + " " + UIDevice.currentDevice.systemVersion
@@ -9,4 +11,4 @@ class IOSPlatform: Platform {
 actual fun getPlatform(): Platform = IOSPlatform()
 
 actual fun currentEpochSeconds(): Long =
-    platform.Foundation.NSDate.date().timeIntervalSince1970.toLong()
+    NSDate().timeIntervalSince1970().toLong()
