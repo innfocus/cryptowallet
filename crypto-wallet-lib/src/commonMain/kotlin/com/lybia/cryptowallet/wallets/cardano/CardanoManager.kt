@@ -309,12 +309,26 @@ class CardanoManager(
 
         val fromAddressBytes = addressToBytes(fromAddress)
         if (changeTokens > 0) {
+            // Multi-asset change: validate ADA meets minimum for the change output
+            val changeOutput = CardanoTransactionOutput(
+                addressBytes = fromAddressBytes,
+                lovelace = changeLovelace,
+                multiAssets = mapOf(policyIdBytes to mapOf(assetNameBytes to changeTokens))
+            )
+            val minAdaForChange = CardanoMinUtxo.calculateMinAda(changeOutput, COINS_PER_UTXO_BYTE)
+            if (changeLovelace < minAdaForChange) {
+                throw CardanoError.ApiError(
+                    statusCode = null,
+                    message = "Insufficient ADA for token change output: ${changeLovelace} lovelace available, ${minAdaForChange} required. Select UTXOs with more ADA."
+                )
+            }
             builder.addMultiAssetOutput(
                 fromAddressBytes,
                 changeLovelace,
                 mapOf(policyIdBytes to mapOf(assetNameBytes to changeTokens))
             )
-        } else if (changeLovelace > 0) {
+        } else if (changeLovelace >= CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
+            // ADA-only change: only add output if above minimum UTXO (absorb dust into effective fee)
             builder.addOutput(fromAddressBytes, changeLovelace)
         }
 
@@ -615,8 +629,17 @@ class CardanoManager(
                 )
             }
 
+            // Check if staking key is already registered to avoid double registration.
+            // getAccountInfo returns 404 (throws) when the key has never been registered.
+            val isAlreadyRegistered = try {
+                apiService.getAccountInfo(stakingAddress)
+                true
+            } catch (e: Exception) {
+                false
+            }
+
             val fee = STAKING_TX_FEE_LOVELACE
-            val deposit = STAKE_KEY_DEPOSIT_LOVELACE
+            val deposit = if (isAlreadyRegistered) 0L else STAKE_KEY_DEPOSIT_LOVELACE
             val requiredTotal = fee + deposit
             val totalAvailable = utxos.sumOf { it.lovelace }
 
@@ -647,8 +670,8 @@ class CardanoManager(
                 builder.addInput(utxo.txHash, utxo.index)
             }
 
-            // Change output
-            val change = collected - fee
+            // Change output: inputs = outputs + fee + deposit (ledger balance rule)
+            val change = collected - fee - deposit
             if (change > 0) {
                 val fromAddressBytes = addressToBytes(fromAddress)
                 builder.addOutput(fromAddressBytes, change)
@@ -657,8 +680,10 @@ class CardanoManager(
             builder.setFee(fee)
             builder.setTtl(ttl)
 
-            // Add stake registration + delegation certificates
-            builder.addCertificate(CardanoCertificate.StakeRegistration(stakingKeyHash))
+            // Only register stake key if not already registered (avoids double deposit)
+            if (!isAlreadyRegistered) {
+                builder.addCertificate(CardanoCertificate.StakeRegistration(stakingKeyHash))
+            }
             builder.addCertificate(CardanoCertificate.Delegation(stakingKeyHash, poolKeyHash))
 
             val body = builder.build()
