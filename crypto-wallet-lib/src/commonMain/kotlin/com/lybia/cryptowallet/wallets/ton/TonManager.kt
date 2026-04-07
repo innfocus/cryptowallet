@@ -249,7 +249,8 @@ class TonManager(
 
         val signature = BitString(privateKey.signToByteArray(signingBody.hash().toByteArray()))
 
-        // Final body = signingBody bits+refs + signature appended at tail
+        // W5R1 uses get_last_bits(512) / remove_last_bits(512) — signature at TAIL.
+        // Body layout: [signing body bits] [signing body refs] [signature 512 bits]
         return CellBuilder.createCell {
             storeBits(signingBody.bits)
             storeRefs(signingBody.refs)

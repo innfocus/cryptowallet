@@ -9,6 +9,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.test.Ignore
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class TonManagerTest {
 
@@ -179,83 +181,174 @@ class TonManagerTest {
      * Command:
      *   ./gradlew :crypto-wallet-lib:testDebugUnitTest --tests "*.TonManagerTest.testDiagnosticWalletVersion" -Pignore.skip=true
      */
+    // ── Helper: retry with delay to handle Toncenter 429 rate limits ──
+    private suspend fun <T> retryWithDelay(
+        maxRetries: Int = 3,
+        delayMs: Long = 2000,
+        block: suspend () -> T
+    ): T {
+        var lastException: Exception? = null
+        repeat(maxRetries) { attempt ->
+            try {
+                return block()
+            } catch (e: Exception) {
+                lastException = e
+                println("  Attempt ${attempt + 1} failed: ${e.message}")
+                if (attempt < maxRetries - 1) {
+                    println("  Retrying in ${delayMs}ms...")
+                    kotlinx.coroutines.delay(delayMs)
+                }
+            }
+        }
+        throw lastException!!
+    }
+
+    private fun setupMainnet() {
+        Config.shared.setNetwork(Network.MAINNET)
+        Config.shared.apiKeyToncenter = ""
+    }
+
+    @Test
+    @Ignore // Debug: verify on-chain code hash vs our W5R1 code
+    fun testDebugW5CodeHash() = runTest {
+        withContext(Dispatchers.Default) {
+            setupMainnet()
+            val tonManager = TonManager(testMnemonic, WalletVersion.W5)
+            val addr = tonManager.getAddress()
+            println("W5 Address: $addr")
+
+            // Our W5R1 code cell hash
+            @OptIn(kotlin.io.encoding.ExperimentalEncodingApi::class)
+            val w5Code = org.ton.boc.BagOfCells(
+                kotlin.io.encoding.Base64.decode(
+                    "te6cckECFAEAAoEAART/APSkE/S88sgLAQIBIAINAgFIAwQC3NAg10nBIJFbj2Mg1wsfIIIQ" +
+                    "ZXh0br0hghBzaW50vbCSXwPgghBleHRuuo60gCDXIQHQdNch+kAw+kT4KPpEMFi9kVvg7UTQ" +
+                    "gQFB1yH0BYMH9A5voTGRMOGAQNchcH/bPOAxINdJgQKAuZEw4HDiEA8CASAFDAIBIAYJAgFu" +
+                    "BwgAGa3OdqJoQCDrkOuF/8AAGa8d9qJoQBDrkOuFj8ACAUgKCwAXsyX7UTQcdch1wsfgABGy" +
+                    "YvtRNDXCgCAAGb5fD2omhAgKDrkPoCwBAvIOAR4g1wsfghBzaWduuvLgin8PAeaO8O2i7fshg" +
+                    "wjXIgKDCNcjIIAg1yHTH9Mf0x/tRNDSANMfINMf0//XCgAK+QFAzPkQmiiUXwrbMeHywIff" +
+                    "ArNQB7Dy0IRRJbry4IVQNrry4Ib4I7vy0IgikvgA3gGkf8jKAMsfAc8Wye1UIJL4D95w2zzY" +
+                    "EAP27aLt+wL0BCFukmwhjkwCIdc5MHCUIccAs44tAdcoIHYeQ2wg10nACPLgkyDXSsAC8uCT" +
+                    "INcdBscSwgBSMLDy0InXTNc5MAGk6GwShAe78uCT10rAAPLgk+1V4tIAAcAAkVvg69csCBQg" +
+                    "kXCWAdcsCBwS4lIQseMPINdKERITAJYB+kAB+kT4KPpEMFi68uCR7UTQgQFB1xj0BQSdf8jK" +
+                    "AEAEgwf0U/Lgi44UA4MH9Fvy4Iwi1woAIW4Bs7Dy0JDiyFADzxYS9ADJ7VQAcjDXLAgkji0h" +
+                    "8uCS0gDtRNDSAFETuvLQj1RQMJExnAGBAUDXIdcKAPLgjuLIygBYzxbJ7VST8sCN4gAQk1vb" +
+                    "MeHXTNC01sNe"
+                )
+            ).first()
+            val ourCodeHash = w5Code.hash().toByteArray().joinToString("") { "%02x".format(it) }
+            println("Our W5R1 code hash: $ourCodeHash")
+
+            // Query on-chain code hash via get_method
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            val body = com.lybia.cryptowallet.services.TonApiService.INSTANCE.runGetMethod(
+                coinNetwork, addr, "get_subwallet_id"
+            )
+            println("get_subwallet_id result: $body")
+
+            kotlinx.coroutines.delay(1500)
+
+            // Also check if it's a wallet by querying is_plugin_installed or seqno
+            val seqnoBody = com.lybia.cryptowallet.services.TonApiService.INSTANCE.runGetMethod(
+                coinNetwork, addr, "seqno"
+            )
+            println("seqno result: $seqnoBody")
+
+            kotlinx.coroutines.delay(1500)
+
+            // Check public key stored on-chain
+            val pkBody = com.lybia.cryptowallet.services.TonApiService.INSTANCE.runGetMethod(
+                coinNetwork, addr, "get_public_key"
+            )
+            println("get_public_key result: $pkBody")
+            println("Our public key: ${tonManager.publicKey.key.toByteArray().joinToString("") { "%02x".format(it) }}")
+        }
+    }
+
     @Test
     @Ignore // Live network — run manually
     fun testDiagnosticWalletVersion() = runTest {
-        Config.shared.setNetwork(Network.MAINNET)
-        val coinNetwork = CoinNetwork(NetworkName.TON)
+        // withContext(Dispatchers.Default) to use real time instead of virtual test time
+        withContext(Dispatchers.Default) {
+            setupMainnet()
+            val coinNetwork = CoinNetwork(NetworkName.TON)
 
-        val w4 = TonManager(testMnemonic, WalletVersion.W4)
-        val w5 = TonManager(testMnemonic, WalletVersion.W5)
+            val w4 = TonManager(testMnemonic, WalletVersion.W4)
+            val w5 = TonManager(testMnemonic, WalletVersion.W5)
 
-        val w4Addr = w4.getAddress()
-        val w5Addr = w5.getAddress()
-        println("W4 Address: $w4Addr")
-        println("W5 Address: $w5Addr")
+            val w4Addr = w4.getAddress()
+            val w5Addr = w5.getAddress()
+            println("W4 Address: $w4Addr")
+            println("W5 Address: $w5Addr")
 
-        val w4Balance = w4.getBalance(w4Addr, coinNetwork)
-        val w5Balance = w5.getBalance(w5Addr, coinNetwork)
-        println("W4 Balance: $w4Balance TON")
-        println("W5 Balance: $w5Balance TON")
+            val w4Balance = w4.getBalance(w4Addr, coinNetwork)
+            kotlinx.coroutines.delay(1500)
+            val w5Balance = w5.getBalance(w5Addr, coinNetwork)
+            println("W4 Balance: $w4Balance TON")
+            println("W5 Balance: $w5Balance TON")
 
-        // Check seqno to verify which wallet is deployed
-        val w4Seqno = try { w4.getSeqno(coinNetwork) } catch (e: Exception) { -1 }
-        val w5Seqno = try { w5.getSeqno(coinNetwork) } catch (e: Exception) { -1 }
-        println("W4 Seqno: $w4Seqno (deployed: ${w4Seqno >= 0})")
-        println("W5 Seqno: $w5Seqno (deployed: ${w5Seqno >= 0})")
+            kotlinx.coroutines.delay(1500)
+            val w4Seqno = try { w4.getSeqno(coinNetwork) } catch (e: Exception) { -1 }
+            kotlinx.coroutines.delay(1500)
+            val w5Seqno = try { w5.getSeqno(coinNetwork) } catch (e: Exception) { -1 }
+            println("W4 Seqno: $w4Seqno (deployed: ${w4Seqno >= 0})")
+            println("W5 Seqno: $w5Seqno (deployed: ${w5Seqno >= 0})")
 
-        // At least one should have balance
-        assertTrue(w4Balance > 0 || w5Balance > 0, "At least one wallet version should have funds")
+            assertTrue(w4Balance > 0 || w5Balance > 0, "At least one wallet version should have funds")
+        }
     }
 
     /**
-     * Send 1 TON on mainnet. Uses W5 (default).
-     * If W5 has no funds, switch to W4 by changing walletVersion below.
+     * Send 1 TON on mainnet. Detects W4/W5, sends from whichever has funds.
      *
      * ⚠️ REAL TRANSACTION — costs actual TON. Only run when intentionally testing.
      *
      * Command:
-     *   ./gradlew :crypto-wallet-lib:testDebugUnitTest --tests "*.TonManagerTest.testSendTonMainnet" -Pignore.skip=true
+     *   ./gradlew :crypto-wallet-lib:jvmTest --tests "*.TonManagerTest.testSendTonMainnet"
      */
     @Test
     @Ignore // Live network — REAL TRANSACTION, run manually only
     fun testSendTonMainnet() = runTest {
-        Config.shared.setNetwork(Network.MAINNET)
-        val coinNetwork = CoinNetwork(NetworkName.TON)
-        val toAddress = "UQDYtgK7Yiqn14Ii0TjVykIZdeA8MUGZ8ueUEfi-KG0UOh-o"
-        val amountNano = 1_000_000_000L // 1 TON
+        withContext(Dispatchers.Default) {
+            setupMainnet()
+            val coinNetwork = CoinNetwork(NetworkName.TON)
+            val toAddress = "UQDYtgK7Yiqn14Ii0TjVykIZdeA8MUGZ8ueUEfi-KG0UOh-o"
+            val amountNano = 1_000_000_000L // 1 TON
 
-        // ── Step 0: detect which wallet version has funds ──
-        val w4 = TonManager(testMnemonic, WalletVersion.W4)
-        val w5 = TonManager(testMnemonic, WalletVersion.W5)
+            // ── Step 0: detect which wallet version has funds ──
+            val w4 = TonManager(testMnemonic, WalletVersion.W4)
+            val w5 = TonManager(testMnemonic, WalletVersion.W5)
 
-        val w4Balance = w4.getBalance(w4.getAddress(), coinNetwork)
-        val w5Balance = w5.getBalance(w5.getAddress(), coinNetwork)
-        println("W4 [${w4.getAddress()}] balance: $w4Balance TON")
-        println("W5 [${w5.getAddress()}] balance: $w5Balance TON")
+            val w4Balance = w4.getBalance(w4.getAddress(), coinNetwork)
+            kotlinx.coroutines.delay(1500)
+            val w5Balance = w5.getBalance(w5.getAddress(), coinNetwork)
+            println("W4 [${w4.getAddress()}] balance: $w4Balance TON")
+            println("W5 [${w5.getAddress()}] balance: $w5Balance TON")
 
-        // Pick the version that has enough funds
-        val tonManager = when {
-            w5Balance >= 1.1 -> w5.also { println("Using W5") }
-            w4Balance >= 1.1 -> w4.also { println("Using W4 (W5 has insufficient funds)") }
-            else -> throw IllegalStateException(
-                "Neither W4 nor W5 has enough balance (need ≥1.1 TON). W4=$w4Balance, W5=$w5Balance"
-            )
+            val tonManager = when {
+                w5Balance >= 1.1 -> w5.also { println("Using W5") }
+                w4Balance >= 1.1 -> w4.also { println("Using W4 (W5 has insufficient funds)") }
+                else -> throw IllegalStateException(
+                    "Neither W4 nor W5 has enough balance (need ≥1.1 TON). W4=$w4Balance, W5=$w5Balance"
+                )
+            }
+
+            // ── Step 1: get seqno (with retry for rate limits) ──
+            kotlinx.coroutines.delay(1500)
+            val seqno = retryWithDelay { tonManager.getSeqno(coinNetwork) }
+            println("Seqno: $seqno")
+
+            // ── Step 2: sign transaction ──
+            val bocBase64 = tonManager.signTransaction(toAddress, amountNano, seqno)
+            println("Signed BOC length: ${bocBase64.length}")
+            assertTrue(bocBase64.isNotEmpty(), "BOC should not be empty")
+
+            // ── Step 3: broadcast ──
+            kotlinx.coroutines.delay(1500)
+            val result = retryWithDelay { tonManager.transfer(bocBase64, coinNetwork) }
+            println("Transfer result: success=${result.success}, txHash=${result.txHash}, error=${result.error}")
+            assertTrue(result.success, "Transfer should succeed, error: ${result.error}")
         }
-
-        // ── Step 1: get seqno ──
-        val seqno = tonManager.getSeqno(coinNetwork)
-        println("Seqno: $seqno")
-
-        // ── Step 2: sign transaction ──
-        val bocBase64 = tonManager.signTransaction(toAddress, amountNano, seqno)
-        println("Signed BOC length: ${bocBase64.length}")
-        assertTrue(bocBase64.isNotEmpty(), "BOC should not be empty")
-
-        // ── Step 3: broadcast ──
-        val result = tonManager.transfer(bocBase64, coinNetwork)
-        println("Transfer result: success=${result.success}, txHash=${result.txHash}, error=${result.error}")
-        assertTrue(result.success, "Transfer should succeed, error: ${result.error}")
     }
 
     @Test

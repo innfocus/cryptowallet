@@ -247,8 +247,30 @@ API key (optional, for rate limits): `Config.shared.apiKeyToncenter`
 | Error | Khi nào | Xử lý |
 |-------|---------|-------|
 | `WalletError.NetworkError` | API fail khi lấy seqno | Không cho ký transaction, thông báo user retry |
+| `exitCode=-13/-14` on `seqno` | Wallet chưa deploy | `getSeqno` trả về 0 → `signTransaction` include stateInit |
 | `WalletError.UnsupportedOperation` | Unstake Nominator / Unknown pool | Thông báo user |
 | `Exception("Could not find Jetton Wallet")` | Jetton wallet chưa deploy | Token chưa có balance |
+
+### Lưu ý quan trọng: `runGetMethod` exitCode
+
+Toncenter `runGetMethod` trả về `ok=true` ngay cả khi get method thất bại (exitCode != 0).
+Stack có thể chứa **garbage value** khi exitCode != 0.
+
+**Quy tắc:** Luôn check `exitCode == 0` trước khi parse stack value.
+
+```
+// API response khi wallet chưa deploy:
+{ "ok": true, "result": { "exit_code": -13, "stack": [["num", "0x14c97"]] } }
+//                                    ^^^                        ^^^^^^^^
+//                          method failed!              garbage — KHÔNG dùng!
+```
+
+| exitCode | Ý nghĩa |
+|----------|---------|
+| `0` | Thành công — parse stack bình thường |
+| `-13` | Account not initialized (chưa deploy) |
+| `-14` | Account not found |
+| Khác | Get method error — không parse stack |
 
 ---
 
@@ -495,22 +517,17 @@ File: `commonTest/.../wallets/ton/TonManagerTest.kt`
 | `testDiagnosticWalletVersion` | In W4/W5 address + balance + seqno — dùng để xác định wallet version nào đang giữ funds |
 | `testSendTonMainnet` | Gửi 1 TON trên mainnet — tự detect W4/W5, chọn version có funds |
 
-**Lệnh chạy:**
+**Lệnh chạy** (bỏ `@Ignore` trước khi chạy):
 ```bash
 # Diagnostic: xem wallet version nào có funds
 ./gradlew :crypto-wallet-lib:jvmTest --tests "*.TonManagerTest.testDiagnosticWalletVersion"
 
 # Gửi 1 TON thực (⚠️ tốn TON thật!)
 ./gradlew :crypto-wallet-lib:jvmTest --tests "*.TonManagerTest.testSendTonMainnet"
-```
 
-> **Lưu ý:**
-> - Cả hai test đều có `@Ignore` — cần bỏ `@Ignore` trước khi chạy, hoặc thêm flag skip ignore.
-> - `jvmTest` hiện có pre-existing compile errors ở các test file khác. Nếu gặp lỗi compile, chạy với iOS simulator target:
->   ```bash
->   ./gradlew :crypto-wallet-lib:iosSimulatorArm64Test --tests "*.TonManagerTest.testSendTonMainnet"
->   ```
-> - Nếu cả hai target đều lỗi compile, cần fix pre-existing errors trước hoặc tạm comment `@Ignore` và chạy riêng file test này.
+# Debug: verify code hash & public key on-chain
+./gradlew :crypto-wallet-lib:jvmTest --tests "*.TonManagerTest.testDebugW5CodeHash"
+```
 
 ### Phase 10: Audit Fixes (v2)
 | Task | Status |

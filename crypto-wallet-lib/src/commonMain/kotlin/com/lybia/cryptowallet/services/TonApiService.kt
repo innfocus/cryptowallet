@@ -189,7 +189,17 @@ class TonApiService {
 
     suspend fun getSeqno(coin: CoinNetwork, address: String): Int? {
         val body = runGetMethod(coin, address, "seqno")
-        if (body?.ok == true && body.result?.stack?.isNotEmpty() == true) {
+        val exitCode = body?.result?.exitCode
+
+        // exitCode must be 0 for a successful get-method execution.
+        // exitCode -13/-14 = account not deployed (seqno is 0).
+        // Any other exitCode or ok=false = error.
+        if (exitCode == -13 || exitCode == -14) {
+            logger.i { "Wallet not deployed (exitCode=$exitCode), seqno = 0" }
+            return 0
+        }
+
+        if (body?.ok == true && exitCode == 0 && body.result?.stack?.isNotEmpty() == true) {
             val element = body.result.stack[0]
             if (element.size >= 2) {
                 val value = element[1].toString().removeSurrounding("\"")
@@ -202,15 +212,12 @@ class TonApiService {
                     0
                 }
             }
-        } else if (body != null && !body.ok) {
-            // Wallet not yet deployed on-chain — seqno is 0
-            if (body.result?.exitCode == -13 || body.result?.exitCode == -14) {
-                logger.i { "Wallet not deployed, seqno = 0" }
-                return 0
-            }
-            logger.e { "getSeqno failed: $body" }
+        }
+
+        if (body != null) {
+            logger.e { "getSeqno failed: ok=${body.ok}, exitCode=$exitCode" }
         } else {
-            logger.e { "getSeqno failed: Unknown error (network or API issue)" }
+            logger.e { "getSeqno failed: no response (network or API issue)" }
         }
         return null
     }
