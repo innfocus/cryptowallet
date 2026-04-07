@@ -281,7 +281,7 @@ Config.shared.apiKeyOwlRacle    // OwlRacle API key
 
 | Feature | Standard | Muc do |
 |---------|----------|--------|
-| Transaction pagination | -- | SHOULD: History tra ve tat ca, khong phan trang |
+| Transaction pagination | Etherscan page/offset | ✅ Da implement (page-based, 1-based) |
 | ERC-1155 multi-token | ERC-1155 | COULD: Chua ho tro |
 | NFT metadata fetch | -- | SHOULD: Image/description chua duoc lay tu contract |
 | NFT transfer (ERC-721) | ERC-721 | SHOULD: `safeTransferFrom` ABI chua implement |

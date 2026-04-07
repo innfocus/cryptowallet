@@ -103,17 +103,43 @@ CoinsManager.shared.getBalance(ACTCoin.Ethereum, object : BalanceHandle {
 
 ## 5. Lịch sử giao dịch
 
+### 5.1 Không phân trang
+
 ```kotlin
 viewModelScope.launch {
-    // ETH transactions
     val txs = ccm.getTransactionHistory(NetworkName.ETHEREUM)
-
-    // Arbitrum transactions
-    val arbTxs = ccm.getTransactionHistory(NetworkName.ARBITRUM)
 }
 ```
 
-> **Lưu ý:** Hiện chưa hỗ trợ pagination cho Ethereum/Arbitrum. Trả về tất cả.
+### 5.2 Có phân trang (page-based)
+
+```kotlin
+viewModelScope.launch {
+    // Trang đầu — 20 giao dịch mới nhất
+    val page1 = ccm.getTransactionHistoryPaginated(
+        coin = NetworkName.ETHEREUM,
+        limit = 20
+    )
+
+    // Trang tiếp
+    if (page1.hasMore) {
+        val page2 = ccm.getTransactionHistoryPaginated(
+            coin = NetworkName.ETHEREUM,
+            limit = 20,
+            pageParam = page1.nextPageParam  // {"page": 2}
+        )
+    }
+
+    // Arbitrum — cùng pattern
+    val arbPage = ccm.getTransactionHistoryPaginated(
+        coin = NetworkName.ARBITRUM,
+        limit = 20
+    )
+}
+```
+
+> **Pagination model:** Page-based (1-indexed). `pageParam = {"page": Int}`. Max offset: 10,000/page.
+> **Sort:** Mới nhất trước (`desc`).
 
 ---
 
@@ -207,17 +233,30 @@ viewModelScope.launch {
 }
 ```
 
-### 7.2 Lịch sử giao dịch token
+### 7.2 Lịch sử giao dịch token (phân trang)
 
 ```kotlin
 viewModelScope.launch {
-    val history = ccm.getTransactionHistory(NetworkName.ETHEREUM)
-    // Hoặc qua EthereumManager trực tiếp:
-    val tokenTxs = ethManager.getTokenTransactionHistory(
-        address = myAddress,
-        contractAddress = "0xUSDT...",
-        coinNetwork = CoinNetwork(NetworkName.ETHEREUM)
+    // Trang đầu — ERC-20 token transactions
+    val page1 = ccm.getTokenTransactionHistoryPaginated(
+        coin = NetworkName.ETHEREUM,
+        policyId = "0xUSDT_ContractAddress...",  // ERC-20 contract address
+        assetName = "",                           // Không dùng cho ETH
+        limit = 20
     )
+    // page1.transactions: List<TransactionToken>
+    // page1.hasMore, page1.nextPageParam = {"page": 2}
+
+    // Trang tiếp
+    if (page1.hasMore) {
+        val page2 = ccm.getTokenTransactionHistoryPaginated(
+            coin = NetworkName.ETHEREUM,
+            policyId = "0xUSDT_ContractAddress...",
+            assetName = "",
+            limit = 20,
+            pageParam = page1.nextPageParam
+        )
+    }
 }
 ```
 

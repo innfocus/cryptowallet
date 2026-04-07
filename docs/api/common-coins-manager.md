@@ -95,8 +95,9 @@ Lấy lịch sử giao dịch có hỗ trợ phân trang.
 | Centrality | ✅ Page-based | `{"page": Int}` | Row mặc định 100 |
 | Cardano | ✅ Page-based | `{"page": Int}` (1-based) | Blockfrost `count`/`page`/`order`, max 100/page |
 | **TON** | ✅ Cursor-based | `{"lt": String, "hash": String}` | Logical time + hash cursor |
+| **Ethereum** | ✅ Page-based | `{"page": Int}` (1-based) | Etherscan `page`/`offset`, max 10000/page |
+| **Arbitrum** | ✅ Page-based | `{"page": Int}` (1-based) | Arbiscan `page`/`offset`, max 10000/page |
 | Bitcoin | ❌ | — | Trả về tất cả |
-| Ethereum | ❌ | — | Trả về tất cả |
 | Midnight | ❌ | — | Trả về tất cả |
 
 ### 2.8. getTokenBalance

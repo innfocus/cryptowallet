@@ -19,6 +19,7 @@ import com.lybia.cryptowallet.wallets.cardano.CardanoAddressType
 import com.lybia.cryptowallet.wallets.cardano.CardanoError
 import com.lybia.cryptowallet.wallets.centrality.CentralityManager
 import com.lybia.cryptowallet.models.ton.TonTransaction
+import com.lybia.cryptowallet.wallets.ethereum.EthereumManager
 import com.lybia.cryptowallet.wallets.ton.TonManager
 import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
 import com.lybia.cryptowallet.enums.ACTCoin
@@ -450,6 +451,23 @@ class CommonCoinsManager(
                     )
                 }
 
+                NetworkName.ETHEREUM, NetworkName.ARBITRUM -> {
+                    val ethManager = getOrCreateManager(coin) as EthereumManager
+                    val addr = address ?: ethManager.getAddress()
+                    val coinNetwork = CoinNetwork(coin)
+                    val page = (pageParam?.get("page") as? Number)?.toInt() ?: 1
+                    val offset = limit.coerceAtMost(10000)
+                    val (txs, hasMore) = ethManager.getTransactionHistoryPaginated(
+                        addr, coinNetwork, page, offset
+                    )
+                    TransactionHistoryResult(
+                        transactions = txs,
+                        hasMore = hasMore,
+                        nextPageParam = if (hasMore) mapOf("page" to (page + 1)) else null,
+                        success = true
+                    )
+                }
+
                 NetworkName.TON -> {
                     val tonManager = getOrCreateManager(coin) as TonManager
                     val addr = address ?: tonManager.getAddress()
@@ -552,11 +570,11 @@ class CommonCoinsManager(
     }
 
     /**
-     * Get token transaction history with pagination for Cardano native tokens.
+     * Get token transaction history with pagination.
      *
-     * @param coin Target chain (currently only CARDANO supported)
-     * @param policyId Policy ID of the native token (56-char hex)
-     * @param assetName Hex-encoded asset name
+     * @param coin Target chain
+     * @param policyId Policy ID (Cardano) / Jetton Master address (TON) / ERC-20 contract address (ETH, ARB)
+     * @param assetName Hex-encoded asset name (Cardano only, ignored for other chains)
      * @param limit Max number of transactions per page (max 100)
      * @param pageParam Pagination token from previous result's nextPageParam
      * @return TransactionHistoryResult with transactions and pagination info
@@ -570,6 +588,24 @@ class CommonCoinsManager(
     ): TransactionHistoryResult {
         return try {
             when (coin) {
+                NetworkName.ETHEREUM, NetworkName.ARBITRUM -> {
+                    val ethManager = getOrCreateManager(coin) as EthereumManager
+                    val addr = ethManager.getAddress()
+                    val coinNetwork = CoinNetwork(coin)
+                    val page = (pageParam?.get("page") as? Number)?.toInt() ?: 1
+                    val offset = limit.coerceAtMost(10000)
+                    // policyId = ERC-20 contract address
+                    val (txs, hasMore) = ethManager.getTokenTransactionHistoryPaginated(
+                        addr, policyId, coinNetwork, page, offset
+                    )
+                    TransactionHistoryResult(
+                        transactions = txs,
+                        hasMore = hasMore,
+                        nextPageParam = if (hasMore) mapOf("page" to (page + 1)) else null,
+                        success = true
+                    )
+                }
+
                 NetworkName.CARDANO -> {
                     val manager = getOrCreateManager(coin) as com.lybia.cryptowallet.wallets.cardano.CardanoManager
                     val page = (pageParam?.get("page") as? Number)?.toInt() ?: 1

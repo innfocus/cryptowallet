@@ -75,6 +75,53 @@ class EthereumManager(
         return response
     }
 
+    /**
+     * Paginated ETH transaction history.
+     * @param page 1-based page number
+     * @param offset Number of records per page (max 10000, recommended 20-100)
+     * @return Pair(transactions, hasMore)
+     */
+    suspend fun getTransactionHistoryPaginated(
+        address: String,
+        coinNetwork: CoinNetwork,
+        page: Int = 1,
+        offset: Int = 20
+    ): Pair<List<Transaction>, Boolean> {
+        val response = ExplorerRpcService.INSTANCE.getTransactionHistory(
+            coinNetwork, address, page, offset, sort = "desc"
+        )
+        val txs = if (response?.status == "1") {
+            response.result.filter { it.value != "0" }
+        } else {
+            emptyList()
+        }
+        return Pair(txs, txs.size >= offset)
+    }
+
+    /**
+     * Paginated ERC-20 token transaction history.
+     * @param page 1-based page number
+     * @param offset Number of records per page (max 10000, recommended 20-100)
+     * @return Pair(transactions, hasMore)
+     */
+    suspend fun getTokenTransactionHistoryPaginated(
+        address: String,
+        contractAddress: String,
+        coinNetwork: CoinNetwork,
+        page: Int = 1,
+        offset: Int = 20
+    ): Pair<List<TransactionToken>, Boolean> {
+        val response = ExplorerRpcService.INSTANCE.getTransactionHistoryToken(
+            coinNetwork, address, contractAddress, page, offset, sort = "desc"
+        )
+        val txs = if (response?.status == "1") {
+            response.result
+        } else {
+            emptyList()
+        }
+        return Pair(txs, txs.size >= offset)
+    }
+
     override suspend fun transfer(dataSigned: String, coinNetwork: CoinNetwork): TransferResponseModel {
         try {
             val result = InfuraRpcService.shared.sendSignedTransaction(coinNetwork, dataSigned)

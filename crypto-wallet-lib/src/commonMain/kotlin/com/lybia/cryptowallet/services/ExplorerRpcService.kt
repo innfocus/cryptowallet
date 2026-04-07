@@ -21,6 +21,20 @@ class ExplorerRpcService {
         coin: CoinNetwork,
         address: String,
     ): ExplorerModel<List<Transaction>>? {
+        return getTransactionHistory(coin, address, page = 1, offset = 10000)
+    }
+
+    /**
+     * Get ETH transaction history with pagination.
+     * Etherscan API: action=txlist with page (1-based) + offset (page size, max 10000).
+     */
+    suspend fun getTransactionHistory(
+        coin: CoinNetwork,
+        address: String,
+        page: Int = 1,
+        offset: Int = 10000,
+        sort: String = "desc"
+    ): ExplorerModel<List<Transaction>>? {
         val apiKey = Config.shared.apiKeyExplorer
         require(!apiKey.isNullOrEmpty()) { "API key Explorer is null" }
         try{
@@ -31,7 +45,9 @@ class ExplorerRpcService {
                     parameters.append("action", "txlist")
                     parameters.append("startblock", "0")
                     parameters.append("endblock", "99999999")
-                    parameters.append("sort", "asc")
+                    parameters.append("page", page.toString())
+                    parameters.append("offset", offset.toString())
+                    parameters.append("sort", sort)
                     parameters.append("apikey", apiKey)
                 }
 
@@ -97,7 +113,22 @@ class ExplorerRpcService {
         coin: CoinNetwork,
         address: String,
         contractAddress: String
-    ): ExplorerModel<List<TransactionToken>>?{
+    ): ExplorerModel<List<TransactionToken>>? {
+        return getTransactionHistoryToken(coin, address, contractAddress, page = 1, offset = 10000)
+    }
+
+    /**
+     * Get ERC-20 token transaction history with pagination.
+     * Etherscan API: action=tokentx with page (1-based) + offset (page size, max 10000).
+     */
+    suspend fun getTransactionHistoryToken(
+        coin: CoinNetwork,
+        address: String,
+        contractAddress: String,
+        page: Int = 1,
+        offset: Int = 10000,
+        sort: String = "desc"
+    ): ExplorerModel<List<TransactionToken>>? {
         val apiKey = Config.shared.apiKeyExplorer
         require(!apiKey.isNullOrEmpty()) { "API key Explorer is null" }
         try{
@@ -109,7 +140,9 @@ class ExplorerRpcService {
                     parameters.append("contractaddress", contractAddress)
                     parameters.append("startblock", "0")
                     parameters.append("endblock", "99999999")
-                    parameters.append("sort", "asc")
+                    parameters.append("page", page.toString())
+                    parameters.append("offset", offset.toString())
+                    parameters.append("sort", sort)
                     parameters.append("apikey", apiKey)
                 }
 

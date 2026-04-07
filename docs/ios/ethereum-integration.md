@@ -68,7 +68,29 @@ print("ARB ETH: \(arbBalance.balance)")
 
 ---
 
-## 5. Gửi ETH
+## 5. Lịch sử giao dịch (phân trang)
+
+```swift
+// Trang đầu
+let page1 = try await ccm.getTransactionHistoryPaginated(
+    coin: .ethereum,
+    limit: 20,
+    pageParam: nil
+)
+
+// Trang tiếp
+if page1.hasMore, let nextParam = page1.nextPageParam {
+    let page2 = try await ccm.getTransactionHistoryPaginated(
+        coin: .ethereum,
+        limit: 20,
+        pageParam: nextParam  // ["page": 2]
+    )
+}
+```
+
+---
+
+## 6. Gửi ETH
 
 ### 5.1 Cơ bản
 
@@ -120,9 +142,9 @@ let result = try await ethManager.sendEthBigInt(
 
 ---
 
-## 6. ERC-20 Token
+## 7. ERC-20 Token
 
-### 6.1 Balance
+### 7.1 Balance
 
 ```swift
 let result = try await ccm.getTokenBalance(
@@ -133,7 +155,20 @@ let result = try await ccm.getTokenBalance(
 print("USDT: \(result.balance)")
 ```
 
-### 6.2 Transfer
+### 7.2 Token Transaction History (phân trang)
+
+```swift
+let page1 = try await ccm.getTokenTransactionHistoryPaginated(
+    coin: .ethereum,
+    policyId: "0xUSDT_Contract...",  // ERC-20 contract address
+    assetName: "",
+    limit: 20
+)
+// page1.transactions: [TransactionToken]
+// page1.nextPageParam = ["page": 2]
+```
+
+### 7.3 Transfer
 
 ```swift
 let coinNetwork = CoinNetwork(name: .ethereum)
@@ -148,7 +183,7 @@ let result = try await ethManager.sendErc20TokenBigInt(
 
 ---
 
-## 7. NFT (ERC-721)
+## 8. NFT (ERC-721)
 
 ```swift
 // List
@@ -164,7 +199,7 @@ let result = try await ccm.transferNFT(
 
 ---
 
-## 8. Fee Estimation
+## 9. Fee Estimation
 
 ```swift
 let fee = try await ccm.estimateFee(
@@ -177,7 +212,7 @@ print("Fee: \(fee.fee) ETH, Gas: \(fee.gasLimit), Price: \(fee.gasPrice) gwei")
 
 ---
 
-## 9. Kotlin-Swift Type Mapping
+## 10. Kotlin-Swift Type Mapping
 
 | Kotlin | Swift | Ghi chú |
 |--------|-------|---------|
@@ -189,7 +224,7 @@ print("Fee: \(fee.fee) ETH, Gas: \(fee.gasLimit), Price: \(fee.gasPrice) gwei")
 
 ---
 
-## 10. Ethereum vs Arbitrum
+## 11. Ethereum vs Arbitrum
 
 | Thuộc tính | Ethereum | Arbitrum |
 |-----------|----------|---------|
@@ -201,7 +236,7 @@ print("Fee: \(fee.fee) ETH, Gas: \(fee.gasLimit), Price: \(fee.gasPrice) gwei")
 
 ---
 
-## 11. Network
+## 12. Network
 
 | Mục | Ethereum | Arbitrum |
 |---|---|---|
@@ -214,7 +249,7 @@ Config.shared.setNetwork(network: .testnet)  // Đổi sang Sepolia
 
 ---
 
-## 12. Lỗi thường gặp
+## 13. Lỗi thường gặp
 
 | Lỗi | Nguyên nhân | Cách fix |
 |---|---|---|
