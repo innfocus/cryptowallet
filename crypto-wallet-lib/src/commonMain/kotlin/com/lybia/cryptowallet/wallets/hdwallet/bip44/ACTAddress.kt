@@ -9,6 +9,7 @@ import com.lybia.cryptowallet.utils.dropFirst
 import com.lybia.cryptowallet.utils.fromHexToByteArray
 import com.lybia.cryptowallet.utils.suffix
 import com.lybia.cryptowallet.utils.toHexString
+import com.lybia.cryptowallet.utils.Bech32
 import com.lybia.cryptowallet.wallets.cardano.CardanoAddress
 import com.lybia.cryptowallet.wallets.hdwallet.bip32.ACTPublicKey
 import org.ton.block.AddrStd
@@ -63,9 +64,16 @@ class ACTAddress {
                     return addressStr!!.substring(network.addressPrefix().length).fromHexToByteArray()
                 }
                 ACTCoin.Cardano -> {
-                    return try {
-                        fr.acinq.bitcoin.Base58.decode(addressStr!!)
-                    } catch (_: Exception) { null }
+                    return if (CardanoAddress.isValidShelleyAddress(addressStr!!)) {
+                        try {
+                            val (_, data5bit) = Bech32.decode(addressStr!!)
+                            Bech32.convertBits(data5bit, 5, 8, false)
+                        } catch (_: Exception) { null }
+                    } else {
+                        try {
+                            fr.acinq.bitcoin.Base58.decode(addressStr!!)
+                        } catch (_: Exception) { null }
+                    }
                 }
                 ACTCoin.TON -> {
                     return try {
@@ -92,13 +100,27 @@ class ACTAddress {
                 network.addressPrefix() + ACTEIP55.encode(r)
             }
             ACTCoin.Cardano -> {
-                // For Cardano, raw() already returns the full Byron address bytes
                 if (publicKey != null) {
                     val chainCode = publicKey!!.chainCode ?: return ""
                     val pubBytes = publicKey!!.raw ?: return ""
                     CardanoAddress.createByronAddress(pubBytes, chainCode)
                 } else {
-                    fr.acinq.bitcoin.Base58.encode(r)
+                    // Shelley payload header nibble: 0x00 (base), 0x60 (enterprise), 0xE0 (reward)
+                    val header = r[0].toInt() and 0xFF
+                    val typeNibble = header and 0xF0
+                    if (typeNibble == 0x00 || typeNibble == 0x60 || typeNibble == 0xE0) {
+                        val isTestnet = (header and 0x0F) == 0x00
+                        val prefix = when {
+                            typeNibble == 0xE0 && isTestnet -> "stake_test"
+                            typeNibble == 0xE0 -> "stake"
+                            isTestnet -> "addr_test"
+                            else -> "addr"
+                        }
+                        val data5bit = Bech32.convertBits(r, 8, 5, true)
+                        Bech32.encode(prefix, data5bit)
+                    } else {
+                        fr.acinq.bitcoin.Base58.encode(r)
+                    }
                 }
             }
             ACTCoin.TON -> {
