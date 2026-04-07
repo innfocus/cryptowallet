@@ -279,7 +279,16 @@ class CardanoManager(
             multiAssets = mapOf(policyIdBytes to mapOf(assetNameBytes to amount))
         )
         val minAda = CardanoMinUtxo.calculateMinAda(dummyTokenOutput, COINS_PER_UTXO_BYTE)
-        val requiredAda = fee + minAda
+
+        // Estimate minAda for change output (worst case: has token change + other tokens)
+        val fromAddressBytes = addressToBytes(fromAddress)
+        val dummyChangeOutput = CardanoTransactionOutput(
+            addressBytes = fromAddressBytes,
+            lovelace = 2_000_000L,
+            multiAssets = mapOf(policyIdBytes to mapOf(assetNameBytes to 1L))
+        )
+        val estimatedMinAdaForChange = CardanoMinUtxo.calculateMinAda(dummyChangeOutput, COINS_PER_UTXO_BYTE)
+        val requiredAda = fee + minAda + estimatedMinAdaForChange
 
         val selectedUtxos = CardanoUtxoSelector.selectUtxos(
             utxos, policyId, assetName, amount, requiredAda
@@ -301,32 +310,49 @@ class CardanoManager(
             mapOf(policyIdBytes to mapOf(assetNameBytes to amount))
         )
 
-        // Change output
+        // Collect all native tokens from selected UTXOs for the change output
         val totalInputLovelace = selectedUtxos.sumOf { it.lovelace }
         val totalInputTokens = selectedUtxos.sumOf { it.tokenAmount(policyId, assetName) }
         val changeLovelace = totalInputLovelace - fee - minAda
         val changeTokens = totalInputTokens - amount
 
-        val fromAddressBytes = addressToBytes(fromAddress)
-        if (changeTokens > 0) {
-            // Multi-asset change: validate ADA meets minimum for the change output
+        // Gather other native tokens from selected UTXOs that must be returned via change
+        val otherTokensMap = mutableMapOf<String, MutableMap<String, Long>>()
+        for (utxo in selectedUtxos) {
+            for (token in utxo.nativeTokens) {
+                if (token.policyId == policyId && token.assetName == assetName) continue
+                val assetMap = otherTokensMap.getOrPut(token.policyId) { mutableMapOf() }
+                assetMap[token.assetName] = (assetMap[token.assetName] ?: 0L) + token.amount
+            }
+        }
+        val hasOtherTokens = otherTokensMap.isNotEmpty()
+
+        if (changeTokens > 0 || hasOtherTokens) {
+            // Build multi-asset map for change: target token change + other tokens
+            val changeAssets = mutableMapOf<ByteArray, Map<ByteArray, Long>>()
+            if (changeTokens > 0) {
+                changeAssets[policyIdBytes] = mapOf(assetNameBytes to changeTokens)
+            }
+            for ((otherPolicyId, assetMap) in otherTokensMap) {
+                val otherPolicyBytes = hexToBytes(otherPolicyId)
+                changeAssets[otherPolicyBytes] = assetMap.map { (name, amt) ->
+                    hexToBytes(name) to amt
+                }.toMap()
+            }
+
             val changeOutput = CardanoTransactionOutput(
                 addressBytes = fromAddressBytes,
                 lovelace = changeLovelace,
-                multiAssets = mapOf(policyIdBytes to mapOf(assetNameBytes to changeTokens))
+                multiAssets = changeAssets
             )
             val minAdaForChange = CardanoMinUtxo.calculateMinAda(changeOutput, COINS_PER_UTXO_BYTE)
             if (changeLovelace < minAdaForChange) {
-                throw CardanoError.ApiError(
-                    statusCode = null,
-                    message = "Insufficient ADA for token change output: ${changeLovelace} lovelace available, ${minAdaForChange} required. Select UTXOs with more ADA."
+                throw CardanoError.InsufficientAda(
+                    available = changeLovelace,
+                    required = minAdaForChange
                 )
             }
-            builder.addMultiAssetOutput(
-                fromAddressBytes,
-                changeLovelace,
-                mapOf(policyIdBytes to mapOf(assetNameBytes to changeTokens))
-            )
+            builder.addMultiAssetOutput(fromAddressBytes, changeLovelace, changeAssets)
         } else if (changeLovelace >= CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
             // ADA-only change: only add output if above minimum UTXO (absorb dust into effective fee)
             builder.addOutput(fromAddressBytes, changeLovelace)

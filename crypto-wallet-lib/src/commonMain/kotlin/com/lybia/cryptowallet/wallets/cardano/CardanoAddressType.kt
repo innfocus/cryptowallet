@@ -28,6 +28,11 @@ sealed class CardanoError(override val message: String) : Exception(message) {
         val required: Long
     ) : CardanoError("Insufficient tokens (policy=$policyId, asset=$assetName): available=$available, required=$required")
 
+    data class InsufficientAda(
+        val available: Long,
+        val required: Long
+    ) : CardanoError("Insufficient ADA: available=$available lovelace, required=$required lovelace")
+
     data class ApiError(
         val statusCode: Int?,
         override val message: String

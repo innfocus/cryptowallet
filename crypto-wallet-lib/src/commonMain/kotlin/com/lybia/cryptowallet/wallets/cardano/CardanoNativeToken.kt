@@ -211,6 +211,13 @@ object CardanoUtxoSelector {
             }
         }
 
+        if (collectedAda < requiredAda) {
+            throw CardanoError.InsufficientAda(
+                available = collectedAda,
+                required = requiredAda
+            )
+        }
+
         return selected
     }
 }
