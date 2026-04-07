@@ -70,7 +70,7 @@ echo ""
 
 # --- Buoc 1: Build XCFramework ---
 echo "[1/6] Building XCFramework (release)..."
-./gradlew ":crypto-wallet-lib:assemble${FRAMEWORK_NAME}ReleaseXCFramework" --no-configuration-cache
+./gradlew clean ":crypto-wallet-lib:assemble${FRAMEWORK_NAME}ReleaseXCFramework" --no-configuration-cache
 
 if [ ! -d "$XCFRAMEWORK_PATH" ]; then
     echo "ERROR: XCFramework khong tim thay tai: $XCFRAMEWORK_PATH"
