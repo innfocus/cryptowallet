@@ -1,61 +1,52 @@
 package com.lybia.cryptowallet.wallets.hdwallet.bip39
 
-import fr.acinq.bitcoin.MnemonicCode
+import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 
 /**
- * Language detection for BIP39 mnemonics.
- * Uses bitcoin-kmp's built-in English word list.
- * Japanese and Chinese are supported via embedded word lists from the original androidMain.
+ * Language for BIP-39 mnemonics.
+ *
+ * Backed by [Bip39Language], which holds the canonical 2048-word wordlists
+ * for all 10 official BIP-39 languages. Add a new language by adding it
+ * to [Bip39Language] — the entry here is just a thin façade kept for
+ * source compatibility with existing call-sites.
  */
-enum class ACTLanguages {
-    English {
-        override fun words(): Array<String> = englishWords
-        override fun nameLanguage() = "English"
-    },
-    Japanese {
-        override fun words(): Array<String> = japaneseWords
-        override fun nameLanguage() = "Japanese"
-    },
-    Chinese {
-        override fun words(): Array<String> = chineseWords
-        override fun nameLanguage() = "Chinese"
-    };
+enum class ACTLanguages(val bip39: Bip39Language, private val displayName: String) {
+    English(Bip39Language.ENGLISH, "English"),
+    Japanese(Bip39Language.JAPANESE, "Japanese"),
+    ChineseSimplified(Bip39Language.CHINESE_SIMPLIFIED, "Chinese (Simplified)"),
+    ChineseTraditional(Bip39Language.CHINESE_TRADITIONAL, "Chinese (Traditional)"),
+    French(Bip39Language.FRENCH, "French"),
+    Italian(Bip39Language.ITALIAN, "Italian"),
+    Spanish(Bip39Language.SPANISH, "Spanish"),
+    Korean(Bip39Language.KOREAN, "Korean"),
+    Czech(Bip39Language.CZECH, "Czech"),
+    Portuguese(Bip39Language.PORTUGUESE, "Portuguese");
 
-    abstract fun words(): Array<String>
-    abstract fun nameLanguage(): String
-
+    /**
+     * @deprecated Kept for source compatibility — Chinese Simplified is the default
+     * resolution of the legacy "Chinese" entry. New code should use [ChineseSimplified]
+     * or [ChineseTraditional] explicitly.
+     */
     companion object {
-        fun types(): Array<ACTLanguages> = arrayOf(English, Japanese, Chinese)
+        @Deprecated(
+            "Use ChineseSimplified or ChineseTraditional explicitly",
+            ReplaceWith("ACTLanguages.ChineseSimplified")
+        )
+        val Chinese: ACTLanguages get() = ChineseSimplified
+
+        fun types(): Array<ACTLanguages> = entries.toTypedArray()
 
         fun detectTypeWithWord(word: String): ACTLanguages? {
-            val formatted = word.trim().lowercase()
-            for (lang in types()) {
-                if (lang.words().contains(formatted)) return lang
-            }
-            return null
+            val formatted = word.trim()
+            return entries.firstOrNull { formatted in it.bip39.wordSet }
         }
 
         fun detectTypeWithMnemonic(mnemonic: String): ACTLanguages? {
-            val langs = mutableListOf<ACTLanguages>()
-            mnemonic.split(" ").forEach { w ->
-                val word = w.trim().lowercase()
-                val lang = detectTypeWithWord(word)
-                if (langs.size < 2 && word.isNotEmpty() && lang != null && !langs.contains(lang)) {
-                    langs.add(lang)
-                }
-            }
-            return if (langs.size == 1) langs[0] else null
+            val detected = Bip39Language.detect(mnemonic) ?: return null
+            return entries.firstOrNull { it.bip39 == detected }
         }
-
-        // English word list from BIP39 specification (2048 words)
-        private val englishWords: Array<String> by lazy {
-            // Use bitcoin-kmp's built-in English word list
-            MnemonicCode.englishWordlist.toTypedArray()
-        }
-
-        // Placeholder — Japanese and Chinese word lists would be embedded here.
-        // For now, use English as fallback since the project primarily uses English mnemonics.
-        private val japaneseWords: Array<String> by lazy { englishWords }
-        private val chineseWords: Array<String> by lazy { englishWords }
     }
+
+    fun words(): Array<String> = bip39.wordlist.toTypedArray()
+    fun nameLanguage(): String = displayName
 }

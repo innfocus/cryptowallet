@@ -1,7 +1,7 @@
 package com.lybia.cryptowallet.wallets.cardano
 
 import com.lybia.cryptowallet.utils.ACTCrypto
-import fr.acinq.bitcoin.MnemonicCode
+import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 
 /**
  * Icarus key derivation (CIP-0003 / ed25519-bip32 V2).
@@ -38,32 +38,56 @@ internal object IcarusKeyDerivation {
     /**
      * Derive Icarus master extended key from a BIP-39 mnemonic word list.
      *
-     * @param mnemonicWords BIP-39 mnemonic words (12/15/18/21/24 words)
+     * The language is auto-detected from the words via [Bip39Language.detect].
+     * All 10 BIP-39 languages (English, Japanese, Chinese Simplified/Traditional,
+     * French, Italian, Spanish, Korean, Czech, Portuguese) are supported.
+     *
+     * @param mnemonicWords BIP-39 mnemonic words (12/15/18/21/24 words) in any supported language
      * @return Pair(extKey[64], chainCode[32])
+     * @throws IllegalArgumentException if the mnemonic does not match any supported wordlist
      */
     fun masterKeyFromMnemonic(mnemonicWords: List<String>): Pair<ByteArray, ByteArray> {
         val entropy = mnemonicToEntropy(mnemonicWords)
         return masterKeyFromEntropy(entropy)
     }
 
-    // Lazy-initialized wordlist lookup — avoids re-creating a 2048-entry HashMap on every call
-    private val WORD_MAP: Map<String, Int> by lazy {
-        MnemonicCode.englishWordlist.mapIndexed { i, w -> w to i }.toMap()
+    /**
+     * Derive Icarus master extended key from a mnemonic when the caller already
+     * knows the language (skips auto-detection).
+     */
+    fun masterKeyFromMnemonic(
+        mnemonicWords: List<String>,
+        language: Bip39Language
+    ): Pair<ByteArray, ByteArray> {
+        val entropy = mnemonicToEntropy(mnemonicWords, language)
+        return masterKeyFromEntropy(entropy)
     }
 
     /**
      * BIP-39 mnemonic → raw entropy bytes.
      *
-     * bitcoin-kmp's MnemonicCode does not expose this, so we derive it here
-     * using the english wordlist that is already bundled in MnemonicCode.
+     * Detects the wordlist language automatically. Supports all 10 BIP-39
+     * languages — required because Cardano Icarus PBKDF2's the entropy itself,
+     * not the BIP-39 seed, so the wordlist must be known to reverse-lookup
+     * each word's index.
      */
     private fun mnemonicToEntropy(words: List<String>): ByteArray {
-        require(words.all { it in WORD_MAP }) { "Mnemonic contains unknown words" }
+        val language = Bip39Language.detect(words)
+            ?: throw IllegalArgumentException(
+                "Mnemonic contains unknown words — none of the ${Bip39Language.entries.size} " +
+                    "supported BIP-39 wordlists matched all words"
+            )
+        return mnemonicToEntropy(words, language)
+    }
+
+    private fun mnemonicToEntropy(words: List<String>, language: Bip39Language): ByteArray {
         require(words.size % 3 == 0) { "Mnemonic word count (${words.size}) must be a multiple of 3" }
+        val wordIndex = language.wordIndex
 
         // Each word encodes 11 bits
         val allBits = words.flatMap { word ->
-            val idx = WORD_MAP.getValue(word)
+            val idx = wordIndex[word.trim()]
+                ?: throw IllegalArgumentException("Word '$word' is not in the ${language.code} BIP-39 wordlist")
             (10 downTo 0).map { bit -> (idx shr bit) and 1 != 0 }
         }
 
