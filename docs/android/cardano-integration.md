@@ -31,7 +31,7 @@ import com.lybia.cryptowallet.enums.Network
 // Chọn network
 Config.shared.setNetwork(Network.MAINNET) // hoặc Network.TESTNET
 
-// Set mnemonic (BIP-39, 12 hoặc 24 từ)
+// Set mnemonic (BIP-39, 12/15/18/21/24 từ — bất kỳ ngôn ngữ BIP-39 nào)
 CoinsManager.shared.updateMnemonic("your mnemonic words ...")
 ```
 
@@ -48,6 +48,45 @@ val cardanoManager = CardanoManager(mnemonic)
 // Key derivation được cache tự động — PBKDF2-4096 chỉ chạy 1 lần.
 // Gọi clearCachedKeys() khi wallet bị lock hoặc không còn cần:
 cardanoManager.clearCachedKeys()
+```
+
+### 2.3 Mnemonic đa ngôn ngữ
+
+CardanoManager hỗ trợ **mọi mnemonic BIP-39** trong 10 ngôn ngữ chính thức: English, Japanese, Chinese Simplified, Chinese Traditional, French, Italian, Spanish, Korean, Czech, Portuguese. Ngôn ngữ được tự động phát hiện — không cần truyền tham số.
+
+```kotlin
+import com.lybia.cryptowallet.wallets.bip39.Bip39Language
+import com.lybia.cryptowallet.wallets.bip39.Mnemonics
+import com.lybia.cryptowallet.wallets.bip39.MNEMONIC_SIZE
+
+// Tạo seed phrase mới theo ngôn ngữ
+val englishWords = Mnemonics.generateRandomSeed(MNEMONIC_SIZE.WORDS_24)                       // mặc định English
+val japaneseWords = Mnemonics.generateRandomSeed(MNEMONIC_SIZE.WORDS_24, Bip39Language.JAPANESE)
+val koreanWords  = Mnemonics.generateRandomSeed(MNEMONIC_SIZE.WORDS_12, Bip39Language.KOREAN)
+
+// Mnemonic Japanese conventionally dùng U+3000 ideographic space
+val japaneseMnemonic = japaneseWords.joinToString("\u3000")
+val cardanoJa = CardanoManager(japaneseMnemonic)
+val addressJa = cardanoJa.getAddress()  // hoạt động bình thường
+
+// Validate (kiểm tra checksum) — auto-detect ngôn ngữ
+Mnemonics.validateSeedWord(japaneseMnemonic)
+```
+
+**Giới hạn ngôn ngữ ở startup** (tuỳ chọn — chỉ ảnh hưởng auto-detect, không cấm gọi explicit):
+
+```kotlin
+import com.lybia.cryptowallet.wallets.bip39.Bip39Language
+
+class MyApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        // Ví chỉ hỗ trợ EN + JA → loại các wordlist còn lại khỏi auto-detect
+        Bip39Language.setEnabledLanguages(
+            listOf(Bip39Language.ENGLISH, Bip39Language.JAPANESE)
+        )
+    }
+}
 ```
 
 ---

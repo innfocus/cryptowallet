@@ -241,7 +241,20 @@ return Base58.encode(CBOR.encode(byronAddr))
 
 `fr.acinq.bitcoin.MnemonicCode` chỉ expose `toSeed()` và `toMnemonics()`. Không có `toEntropy()`.
 
-→ `IcarusKeyDerivation.mnemonicToEntropy()` implement lại BIP-39 reverse bằng `MnemonicCode.englishWordlist` (đã có sẵn trong thư viện). Cần test kỹ với 12/15/24 word mnemonics.
+→ `IcarusKeyDerivation.mnemonicToEntropy()` implement lại BIP-39 reverse và **hỗ trợ cả 10 ngôn ngữ BIP-39** (English, Japanese, Chinese Simplified/Traditional, French, Italian, Spanish, Korean, Czech, Portuguese) thông qua registry `com.lybia.cryptowallet.wallets.bip39.Bip39Language`.
+
+**Auto-detection:** `Bip39Language.detect(words)` dùng pre-filter Unicode script (Hiragana → Japanese, Hangul → Korean, CJK → Chinese, Latin → English/French/...) để chỉ load wordlist cùng script với mnemonic input. Cold-start cho mnemonic English chỉ load 1 wordlist (~10ms), warm <1µs.
+
+**Override khi caller đã biết ngôn ngữ:**
+```kotlin
+IcarusKeyDerivation.masterKeyFromMnemonic(words, Bip39Language.JAPANESE)
+```
+
+**Giới hạn ngôn ngữ ở app startup** (nếu muốn lock-down vì bảo mật/hiệu năng):
+```kotlin
+Bip39Language.setEnabledLanguages(listOf(Bip39Language.ENGLISH, Bip39Language.JAPANESE))
+```
+Setting này chỉ ảnh hưởng auto-detect; gọi explicit với enum value vẫn dùng được mọi ngôn ngữ.
 
 ### 3.2 Ed25519 point multiplication performance
 

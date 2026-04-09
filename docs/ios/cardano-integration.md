@@ -42,7 +42,7 @@ import crypto_wallet_lib
 // Chọn network
 Config.shared.setNetwork(network: .mainnet) // hoặc .testnet
 
-// Khởi tạo với mnemonic (BIP-39, 12 hoặc 24 từ)
+// Khởi tạo với mnemonic (BIP-39, 12/15/18/21/24 từ — bất kỳ ngôn ngữ BIP-39 nào)
 let mnemonic = "your mnemonic words ..."
 let manager = CommonCoinsManager(mnemonic: mnemonic)
 ```
@@ -55,6 +55,34 @@ let cardanoManager = CardanoManager(mnemonicPhrase: "your mnemonic words ...")
 // Key derivation được cache tự động — PBKDF2-4096 chỉ chạy 1 lần.
 // Gọi clearCachedKeys() khi wallet bị lock:
 // cardanoManager.clearCachedKeys()
+```
+
+### 3.3 Mnemonic đa ngôn ngữ
+
+CardanoManager hỗ trợ **mọi mnemonic BIP-39** trong 10 ngôn ngữ chính thức: English, Japanese, Chinese Simplified, Chinese Traditional, French, Italian, Spanish, Korean, Czech, Portuguese. Ngôn ngữ được tự động phát hiện — không cần truyền tham số.
+
+```swift
+// Tạo seed phrase mới theo ngôn ngữ
+let englishWords  = Mnemonics.shared.generateRandomSeed(wordSize: .words24)
+let japaneseWords = Mnemonics.shared.generateRandomSeed(wordSize: .words24, language: .japanese)
+let koreanWords   = Mnemonics.shared.generateRandomSeed(wordSize: .words12, language: .korean)
+
+// Mnemonic Japanese conventionally dùng U+3000 ideographic space
+let japaneseMnemonic = japaneseWords.joined(separator: "\u{3000}")
+let cardanoJa = CardanoManager(mnemonicPhrase: japaneseMnemonic)
+let addressJa = cardanoJa.getAddress()  // hoạt động bình thường
+
+// Validate (kiểm tra checksum) — auto-detect ngôn ngữ
+try Mnemonics.shared.validateSeedWord(seed: japaneseMnemonic)
+```
+
+**Giới hạn ngôn ngữ ở startup** (tuỳ chọn — chỉ ảnh hưởng auto-detect, không cấm gọi explicit):
+
+```swift
+// AppDelegate.application(_:didFinishLaunchingWithOptions:)
+Bip39Language.companion.setEnabledLanguages(
+    languages: [Bip39Language.english, Bip39Language.japanese]
+)
 ```
 
 ---
