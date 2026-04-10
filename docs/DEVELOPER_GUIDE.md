@@ -142,7 +142,35 @@ scope.launch {
 // KHÔNG dùng GlobalScope
 ```
 
-### 4.4 Transaction Signing
+### 4.4 Mnemonic Normalization (NFKD)
+
+**Tất cả mnemonic truyền vào library phải được NFKD normalize trước khi dùng.** Đây là yêu cầu bắt buộc của BIP-39 spec và là nguyên nhân gây bug address lệch giữa iOS và Android với seed tiếng Nhật (dakuten như げ, べ, で có 2 dạng Unicode: composed NFC `U+3052` vs decomposed NFD `U+3051 U+3099`).
+
+- Entry point chính — `CommonCoinsManager` constructor — đã tự động normalize. Team mobile **không cần** tự NFKD trước khi gọi.
+- Khi viết chain manager mới nhận `mnemonic: String` trực tiếp, **phải** normalize ngay field declaration:
+  ```kotlin
+  class FooManager(mnemonic: String) {
+      private val mnemonic: String = mnemonic.nfkd()  // hoặc
+      private val words = Bip39Language.splitMnemonic(mnemonic.nfkd())
+  }
+  ```
+- Khi gọi `MnemonicCode.toSeed()` (bitcoin-kmp) hoặc `ACTBIP39.deterministicSeedString()` trực tiếp, mnemonic **và passphrase** đều phải NFKD:
+  ```kotlin
+  MnemonicCode.toSeed(Bip39Language.splitMnemonic(mnemonic.nfkd()), passphrase.nfkd())
+  ```
+- API: `com.lybia.cryptowallet.utils.nfkd` — expect/actual dùng `java.text.Normalizer` (Android/JVM) và `NSString.decomposedStringWithCompatibilityMapping` (iOS). NFKD là idempotent nên gọi nhiều lần an toàn.
+- Regression test: `JapaneseMnemonicNfkdTest` — kiểm tra NFC và NFD cùng 1 mnemonic Nhật phải ra cùng seed và cùng Bitcoin address. Nếu thêm chain mới, thêm test tương tự.
+
+**Sai lầm cần tránh:**
+```kotlin
+// SAI: MnemonicCode.toSeed trực tiếp mà không NFKD
+val seed = MnemonicCode.toSeed(words, "")  // hỏng với mnemonic CJK qua iOS
+
+// SAI: giữ mnemonic raw trong field rồi dùng về sau
+class FooManager(private val mnemonic: String)  // NFC/NFD lệch sẽ bug
+```
+
+### 4.5 Transaction Signing
 ```kotlin
 // ĐÚNG: validUntil có expiry
 validUntil = if (seqno == 0) Int.MAX_VALUE else defaultValidUntil()
