@@ -9,7 +9,7 @@ import com.lybia.cryptowallet.utils.toBitsString
 import com.lybia.cryptowallet.utils.toHexString
 import com.lybia.cryptowallet.utils.nfkd
 import com.lybia.cryptowallet.utils.normalized
-import fr.acinq.bitcoin.MnemonicCode
+import com.lybia.cryptowallet.utils.bip39MnemonicToSeed
 import kotlin.random.Random
 
 class ACTBIP39Exception(message: String) : Exception(message)
@@ -96,16 +96,15 @@ class ACTBIP39 {
         }
 
         /**
-         * Generate deterministic seed from mnemonic using BIP39 standard PBKDF2-HMAC-SHA512.
-         * Uses bitcoin-kmp's MnemonicCode.toSeed() which implements the BIP39 standard.
+         * Generate a deterministic BIP-39 seed (hex-encoded) from a mnemonic.
+         * Delegates to [bip39MnemonicToSeed], which implements PBKDF2-HMAC-SHA512
+         * on raw bytes and therefore works correctly for every BIP-39 language
+         * — see `utils/Pbkdf2HmacSha512.kt` for why bitcoin-kmp's
+         * `MnemonicCode.toSeed` cannot be used here.
          */
         @Throws(ACTBIP39Exception::class)
-        fun deterministicSeedString(mnemonic: String, passphrase: String = ""): String {
-            // BIP-39 mandates NFKD on both mnemonic and passphrase before PBKDF2.
-            val words = Bip39Language.splitMnemonic(mnemonic.nfkd())
-            val seed = MnemonicCode.toSeed(words, passphrase.nfkd())
-            return seed.toHexString()
-        }
+        fun deterministicSeedString(mnemonic: String, passphrase: String = ""): String =
+            bip39MnemonicToSeed(mnemonic, passphrase).toHexString()
 
         @Throws(ACTBIP39Exception::class)
         fun generateMnemonic(strength: Int, language: ACTLanguages): String {

@@ -391,4 +391,30 @@ class TonManagerTest {
         assertTrue(boc.isNotEmpty(), "W5 signed BOC (seqno=0, includes stateInit) should not be empty")
         println("W5 signTransaction BOC (seqno=0): $boc")
     }
+
+    /**
+     * Locked test vector for a 12-word Japanese BIP-39 mnemonic.
+     *
+     * Expected address was computed against the BIP-39 reference pipeline
+     * (NFKD → PBKDF2-HMAC-SHA512 → SLIP-0010 Ed25519 m/44'/607'/0' → W5R1)
+     * and cross-verified with iOS ton-swift. This test guards against the
+     * bitcoin-kmp JVM `Pbkdf2.withHmacSha512` regression where non-ASCII
+     * passwords were mangled by a CharArray round-trip — see
+     * `utils/Pbkdf2HmacSha512.kt`. Before the fix this test produced
+     * `UQAE7M55WHB0f-Bqo_ImrWQ60HAkTdA0MYDyf5ev-LeBakZE`.
+     */
+    @Test
+    fun testGetAddressJapaneseBip39() {
+        Config.shared.setNetwork(Network.MAINNET)
+        val jpMnemonic =
+            "ちいき\u3000とくてん\u3000せけん\u3000はにかむ\u3000うなずく\u3000ほたて\u3000" +
+            "いみん\u3000きぞん\u3000ききて\u3000むのう\u3000そがい\u3000へいせつ"
+
+        val address = TonManager(jpMnemonic, WalletVersion.W5).getAddress()
+        assertEquals(
+            "UQDDn3oV7vjoyP_vIGj70-ppxYYK-0QifddQtuJS_RiXA4Hx",
+            address,
+            "Japanese BIP-39 mnemonic must derive the BIP-39-spec W5R1 address"
+        )
+    }
 }

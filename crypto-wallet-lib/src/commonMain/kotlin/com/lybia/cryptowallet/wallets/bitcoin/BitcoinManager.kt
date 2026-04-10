@@ -8,21 +8,21 @@ import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.models.bitcoin.BitcoinTransactionModel
 import com.lybia.cryptowallet.services.BitcoinApiService
 import com.lybia.cryptowallet.services.EsploraApiService
-import com.lybia.cryptowallet.utils.nfkd
-import com.lybia.cryptowallet.wallets.bip39.Bip39Language
+import com.lybia.cryptowallet.utils.bip39MnemonicToSeed
 import fr.acinq.bitcoin.Bitcoin
 import fr.acinq.bitcoin.Chain
 import fr.acinq.bitcoin.Crypto
 import fr.acinq.bitcoin.DeterministicWallet
 import fr.acinq.bitcoin.KeyPath
-import fr.acinq.bitcoin.MnemonicCode
 import fr.acinq.bitcoin.PrivateKey
 import fr.acinq.secp256k1.Hex
 import fr.acinq.secp256k1.Secp256k1
 
 class BitcoinManager(mnemonics: String) : BaseCoinManager() {
-    // NFKD normalize before PBKDF2 — required by BIP-39 for CJK mnemonics.
-    private val seed = MnemonicCode.toSeed(Bip39Language.splitMnemonic(mnemonics.nfkd()), "")
+    // bip39MnemonicToSeed handles NFKD + PBKDF2-HMAC-SHA512 on raw bytes,
+    // producing the correct seed for every BIP-39 language (see
+    // utils/Pbkdf2HmacSha512.kt for why we do not call MnemonicCode.toSeed).
+    private val seed = bip39MnemonicToSeed(mnemonics)
     private val master = DeterministicWallet.generate(seed)
     private var walletAddress: String? = null
     private var keyPath: KeyPath? = null

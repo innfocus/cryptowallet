@@ -24,7 +24,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.ton.cell.buildCell
 import co.touchlab.kermit.Logger
 import fr.acinq.bitcoin.Crypto
-import fr.acinq.bitcoin.MnemonicCode
+import com.lybia.cryptowallet.utils.bip39MnemonicToSeed
 import org.ton.bitstring.BitString
 import org.ton.tlb.CellRef
 import org.ton.tlb.constructor.AnyTlbConstructor
@@ -124,8 +124,11 @@ class TonManager(
         }
         else -> {
             // BIP39 mnemonic (12-word) — SLIP-0010 ED25519, path m/44'/607'/0'
-            // Used by Tonkeeper and hardware wallets
-            val bip39Seed = MnemonicCode.toSeed(mnemonicList, "")
+            // Used by Tonkeeper and hardware wallets.
+            // Note: uses our local bip39MnemonicToSeed instead of
+            // fr.acinq.bitcoin.MnemonicCode.toSeed because the latter's JVM
+            // actual mangles non-ASCII passwords — see Pbkdf2HmacSha512.kt.
+            val bip39Seed = bip39MnemonicToSeed(mnemonicList)
             val privateKeyBytes = slip10DeriveEd25519(bip39Seed, intArrayOf(
                 0x80000000.toInt() or 44,
                 0x80000000.toInt() or 607,

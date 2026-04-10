@@ -5,10 +5,9 @@ import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.base.BaseCoinManager
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.MidnightApiService
+import com.lybia.cryptowallet.utils.bip39MnemonicToSeed
 import com.lybia.cryptowallet.utils.nfkd
-import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 import com.lybia.cryptowallet.wallets.cardano.Ed25519
-import fr.acinq.bitcoin.MnemonicCode
 
 /**
  * Main Midnight wallet manager.
@@ -106,8 +105,7 @@ class MidnightManager(
         }
 
         // Derive signing key and sign the transaction
-        val words = Bip39Language.splitMnemonic(mnemonic)
-        val seed = MnemonicCode.toSeed(words, "")
+        val seed = bip39MnemonicToSeed(mnemonic)
         val (privateKey, _) = MidnightAddress.slip10DeriveEd25519(seed, intArrayOf(
             hardenedIndex(1852),
             hardenedIndex(1815),
