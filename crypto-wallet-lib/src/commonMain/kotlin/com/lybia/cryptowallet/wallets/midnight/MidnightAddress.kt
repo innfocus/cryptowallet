@@ -1,5 +1,6 @@
 package com.lybia.cryptowallet.wallets.midnight
 
+import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 import com.lybia.cryptowallet.utils.Bech32
 import com.lybia.cryptowallet.utils.Blake2b
 import com.lybia.cryptowallet.wallets.cardano.Ed25519
@@ -25,7 +26,7 @@ object MidnightAddress {
      * @return Bech32-encoded Midnight address with "midnight" prefix
      */
     fun fromMnemonic(mnemonic: String): String {
-        val words = mnemonic.split(" ").filter { it.isNotEmpty() }
+        val words = Bip39Language.splitMnemonic(mnemonic)
         val seed = MnemonicCode.toSeed(words, "")
         val (privateKey, _) = slip10DeriveEd25519(seed, intArrayOf(
             hardenedIndex(1852),

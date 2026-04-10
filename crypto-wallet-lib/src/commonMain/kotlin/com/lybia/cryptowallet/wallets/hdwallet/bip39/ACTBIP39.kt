@@ -1,5 +1,6 @@
 package com.lybia.cryptowallet.wallets.hdwallet.bip39
 
+import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 import com.lybia.cryptowallet.utils.fromHexToByteArray
 import com.lybia.cryptowallet.utils.prefix
 import com.lybia.cryptowallet.utils.sha256
@@ -98,7 +99,7 @@ class ACTBIP39 {
          */
         @Throws(ACTBIP39Exception::class)
         fun deterministicSeedString(mnemonic: String, passphrase: String = ""): String {
-            val words = mnemonic.split(" ").filter { it.isNotEmpty() }
+            val words = Bip39Language.splitMnemonic(mnemonic)
             val seed = MnemonicCode.toSeed(words, passphrase)
             return seed.toHexString()
         }
@@ -115,7 +116,7 @@ class ACTBIP39 {
 
         data class Result(val words: List<String>, val isValid: Boolean)
         private fun splitMnemonicWords(mnemonic: String): Result {
-            val words = mnemonic.split(" ")
+            val words = Bip39Language.splitMnemonic(mnemonic)
             val ms = words.size
             if (ms % 3 != 0 || ms < 12 || ms > 24) {
                 return Result(listOf(), false)

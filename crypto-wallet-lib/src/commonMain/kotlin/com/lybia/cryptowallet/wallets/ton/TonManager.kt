@@ -31,6 +31,7 @@ import org.ton.tlb.constructor.AnyTlbConstructor
 import com.lybia.cryptowallet.base.INFTManager
 import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.enums.ACTCoin
+import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 import com.lybia.cryptowallet.currentEpochSeconds
 import com.lybia.cryptowallet.errors.WalletError
 import com.lybia.cryptowallet.models.NFTItem
@@ -108,7 +109,7 @@ class TonManager(
     }
 
     private val logger = Logger.withTag("TonManager")
-    private val mnemonicList = mnemonics.split(" ").filter { it.isNotEmpty() }
+    private val mnemonicList = Bip39Language.splitMnemonic(mnemonics)
 
     private val privateKey: PrivateKeyEd25519 = when (mnemonicList.size) {
         24 -> {

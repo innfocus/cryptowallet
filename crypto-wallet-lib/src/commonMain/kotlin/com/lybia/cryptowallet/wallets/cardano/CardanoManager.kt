@@ -10,6 +10,7 @@ import com.lybia.cryptowallet.enums.Network
 import com.lybia.cryptowallet.errors.StakingError
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.CardanoApiService
+import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
@@ -30,7 +31,7 @@ class CardanoManager(
 ) : BaseCoinManager(), IStakingManager {
 
     private val logger = Logger.withTag("CardanoManager")
-    private val mnemonicWords = mnemonic.split(" ").filter { it.isNotEmpty() }
+    private val mnemonicWords = Bip39Language.splitMnemonic(mnemonic)
 
     // ── Key cache — eliminates redundant PBKDF2 and derivation across operations ──
     // See docs/architecture/cardano-crypto-performance.md (Phần B) for design rationale.

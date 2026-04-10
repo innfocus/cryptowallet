@@ -8,6 +8,7 @@ import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.models.bitcoin.BitcoinTransactionModel
 import com.lybia.cryptowallet.services.BitcoinApiService
 import com.lybia.cryptowallet.services.EsploraApiService
+import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 import fr.acinq.bitcoin.Base58
 import fr.acinq.bitcoin.Bitcoin
 import fr.acinq.bitcoin.Chain
@@ -21,7 +22,7 @@ import fr.acinq.secp256k1.Hex
 import fr.acinq.secp256k1.Secp256k1
 
 class BitcoinManager(mnemonics: String) : BaseCoinManager() {
-    private val seed = MnemonicCode.toSeed(mnemonics, "")
+    private val seed = MnemonicCode.toSeed(Bip39Language.splitMnemonic(mnemonics), "")
     private val master = DeterministicWallet.generate(seed)
     private var walletAddress: String? = null
     private var keyPath: KeyPath? = null
