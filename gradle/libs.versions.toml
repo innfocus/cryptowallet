@@ -1,6 +1,6 @@
 [versions]
 androidGradlePlugin = "9.1.0"
-bignum = "0.3.8"
+bignum = "0.3.10"
 bitcoinKmp = "0.30.0"
 cbor = "0.9"
 krypto = "4.0.10"
