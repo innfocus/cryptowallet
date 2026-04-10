@@ -31,6 +31,7 @@ import org.ton.tlb.constructor.AnyTlbConstructor
 import com.lybia.cryptowallet.base.INFTManager
 import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.enums.ACTCoin
+import com.lybia.cryptowallet.utils.nfkd
 import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 import com.lybia.cryptowallet.currentEpochSeconds
 import com.lybia.cryptowallet.errors.WalletError
@@ -109,7 +110,11 @@ class TonManager(
     }
 
     private val logger = Logger.withTag("TonManager")
-    private val mnemonicList = Bip39Language.splitMnemonic(mnemonics)
+    // NFKD normalize to keep CJK mnemonics (esp. Japanese dakuten such as げ, べ, で)
+    // byte-identical across iOS (may deliver NFD) and Android (NFC). BIP-39 spec
+    // requires NFKD before PBKDF2; NFKD is idempotent so calling it here when
+    // CommonCoinsManager already normalized is safe.
+    private val mnemonicList = Bip39Language.splitMnemonic(mnemonics.nfkd())
 
     private val privateKey: PrivateKeyEd25519 = when (mnemonicList.size) {
         24 -> {

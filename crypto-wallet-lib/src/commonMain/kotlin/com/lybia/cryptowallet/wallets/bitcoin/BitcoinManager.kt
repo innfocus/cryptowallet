@@ -8,8 +8,8 @@ import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.models.bitcoin.BitcoinTransactionModel
 import com.lybia.cryptowallet.services.BitcoinApiService
 import com.lybia.cryptowallet.services.EsploraApiService
+import com.lybia.cryptowallet.utils.nfkd
 import com.lybia.cryptowallet.wallets.bip39.Bip39Language
-import fr.acinq.bitcoin.Base58
 import fr.acinq.bitcoin.Bitcoin
 import fr.acinq.bitcoin.Chain
 import fr.acinq.bitcoin.Crypto
@@ -17,12 +17,12 @@ import fr.acinq.bitcoin.DeterministicWallet
 import fr.acinq.bitcoin.KeyPath
 import fr.acinq.bitcoin.MnemonicCode
 import fr.acinq.bitcoin.PrivateKey
-import fr.acinq.bitcoin.Transaction
 import fr.acinq.secp256k1.Hex
 import fr.acinq.secp256k1.Secp256k1
 
 class BitcoinManager(mnemonics: String) : BaseCoinManager() {
-    private val seed = MnemonicCode.toSeed(Bip39Language.splitMnemonic(mnemonics), "")
+    // NFKD normalize before PBKDF2 — required by BIP-39 for CJK mnemonics.
+    private val seed = MnemonicCode.toSeed(Bip39Language.splitMnemonic(mnemonics.nfkd()), "")
     private val master = DeterministicWallet.generate(seed)
     private var walletAddress: String? = null
     private var keyPath: KeyPath? = null

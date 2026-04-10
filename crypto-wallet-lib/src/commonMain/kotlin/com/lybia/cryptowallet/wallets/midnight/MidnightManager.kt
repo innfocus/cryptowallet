@@ -5,9 +5,9 @@ import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.base.BaseCoinManager
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.MidnightApiService
+import com.lybia.cryptowallet.utils.nfkd
 import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 import com.lybia.cryptowallet.wallets.cardano.Ed25519
-import fr.acinq.bitcoin.Crypto
 import fr.acinq.bitcoin.MnemonicCode
 
 /**
@@ -20,11 +20,14 @@ import fr.acinq.bitcoin.MnemonicCode
  * @param apiService Optional [MidnightApiService] for dependency injection / testing
  */
 class MidnightManager(
-    private val mnemonic: String,
+    mnemonic: String,
     private val apiService: MidnightApiService = MidnightApiService(
         baseUrl = "https://midnight-testnet.api.midnight.network/api/v0"
     )
 ) : BaseCoinManager() {
+    // NFKD normalize once so every downstream derivation (address, signing,
+    // MidnightAddress.fromMnemonic) sees the canonical BIP-39 form.
+    private val mnemonic: String = mnemonic.nfkd()
 
     private val logger = Logger.withTag("MidnightManager")
 

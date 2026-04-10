@@ -7,6 +7,7 @@ import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.CentralityApiService
 import com.lybia.cryptowallet.utils.ACTCrypto
 import com.lybia.cryptowallet.utils.fromHexToByteArray
+import com.lybia.cryptowallet.utils.nfkd
 import com.lybia.cryptowallet.utils.toHexString
 import com.lybia.cryptowallet.wallets.centrality.model.*
 import com.lybia.cryptowallet.wallets.hdwallet.bip39.ACTBIP39
@@ -16,9 +17,11 @@ import com.lybia.cryptowallet.wallets.hdwallet.bip39.ACTBIP39
  * Implements IWalletManager, replaces CentralityNetwork singleton.
  */
 class CentralityManager(
-    private val mnemonic: String,
+    mnemonic: String,
     private val apiService: CentralityApiService = CentralityApiService()
 ) : IWalletManager {
+    // NFKD normalize so CJK mnemonics produce consistent seeds cross-platform.
+    private val mnemonic: String = mnemonic.nfkd()
 
     private val logger = Logger.withTag("CentralityManager")
     private var cachedAddress: CentralityAddress? = null

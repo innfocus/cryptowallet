@@ -40,13 +40,15 @@ fun String.fromHexToByteArray(): ByteArray {
 }
 
 /**
- * NFKD normalization — pure Kotlin approximation.
- * For BIP39 English mnemonics this is identity (ASCII only).
+ * NFKD normalization to UTF-8 bytes.
+ *
+ * Required by BIP-39 before PBKDF2 — without this, CJK mnemonics (esp.
+ * Japanese with dakuten like げ, べ, で) break cross-platform because iOS
+ * and Android may deliver the same characters in different normalization
+ * forms (NFC vs NFD). Uses the platform NFKD implementation via
+ * [String.nfkd] expect/actual.
  */
-fun String.normalized(): ByteArray {
-    // For English BIP39 words, NFKD is identity. For CJK, this is a simplification.
-    return this.encodeToByteArray()
-}
+fun String.normalized(): ByteArray = this.nfkd().encodeToByteArray()
 
 // ── ByteArray extensions ───────────────────────────────────────────
 

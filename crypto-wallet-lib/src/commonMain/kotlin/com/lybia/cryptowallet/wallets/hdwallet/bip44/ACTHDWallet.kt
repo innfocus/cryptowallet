@@ -5,7 +5,7 @@ import com.lybia.cryptowallet.enums.Algorithm
 import com.lybia.cryptowallet.enums.Change
 import com.lybia.cryptowallet.utils.ACTCrypto
 import com.lybia.cryptowallet.utils.fromHexToByteArray
-import com.lybia.cryptowallet.utils.toHexString
+import com.lybia.cryptowallet.utils.nfkd
 import com.lybia.cryptowallet.wallets.hdwallet.bip32.ACTBIP32Error
 import com.lybia.cryptowallet.wallets.hdwallet.bip32.ACTBIP32Exception
 import com.lybia.cryptowallet.wallets.hdwallet.bip32.ACTDerivationNode
@@ -22,11 +22,15 @@ class ACTHDWallet @Throws(ACTBIP39Exception::class) constructor(mnemonic: String
     private val language: ACTLanguages
 
     init {
-        val seedString = ACTBIP39.deterministicSeedString(mnemonic)
-        val entropyString = ACTBIP39.entropyString(mnemonic, true)
+        // BIP-39 mandates NFKD on the mnemonic string before any wordlist
+        // lookup or PBKDF2 — CJK mnemonics break otherwise when the host
+        // platform delivers NFC vs NFD (e.g. Japanese げ as U+3052 vs U+3051+U+3099).
+        val normalized = mnemonic.nfkd()
+        val seedString = ACTBIP39.deterministicSeedString(normalized)
+        val entropyString = ACTBIP39.entropyString(normalized, true)
         this.seed = seedString.fromHexToByteArray()
         this.entropy = entropyString.fromHexToByteArray()
-        this.language = ACTLanguages.detectTypeWithMnemonic(mnemonic)!!
+        this.language = ACTLanguages.detectTypeWithMnemonic(normalized)!!
     }
 
     fun calculateSeed(network: ACTNetwork): ByteArray {

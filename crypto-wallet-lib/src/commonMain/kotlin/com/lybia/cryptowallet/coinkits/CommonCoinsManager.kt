@@ -1,6 +1,5 @@
 package com.lybia.cryptowallet.coinkits
 
-import kotlin.math.pow
 import co.touchlab.kermit.Logger
 import com.lybia.cryptowallet.CoinNetwork
 import com.lybia.cryptowallet.base.IBridgeManager
@@ -9,24 +8,23 @@ import com.lybia.cryptowallet.base.INFTManager
 import com.lybia.cryptowallet.base.IStakingManager
 import com.lybia.cryptowallet.base.ITokenManager
 import com.lybia.cryptowallet.base.IWalletManager
+import com.lybia.cryptowallet.coinkits.CommonCoinsManager.Companion.FEE_MULTIPLIER
+import com.lybia.cryptowallet.coinkits.CommonCoinsManager.Companion.initialize
+import com.lybia.cryptowallet.enums.ACTCoin
 import com.lybia.cryptowallet.enums.NetworkName
 import com.lybia.cryptowallet.errors.WalletError
-import com.lybia.cryptowallet.wallets.bridge.BridgeManagerFactory
-import com.lybia.cryptowallet.models.NFTItem
-import com.lybia.cryptowallet.models.TransferResponseModel
-import com.lybia.cryptowallet.wallets.cardano.CardanoAddress
-import com.lybia.cryptowallet.wallets.cardano.CardanoAddressType
-import com.lybia.cryptowallet.wallets.cardano.CardanoError
-import com.lybia.cryptowallet.wallets.centrality.CentralityManager
-import com.lybia.cryptowallet.models.ton.TonTransaction
-import com.lybia.cryptowallet.wallets.ethereum.EthereumManager
-import com.lybia.cryptowallet.wallets.ton.TonManager
-import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
-import com.lybia.cryptowallet.enums.ACTCoin
-import com.lybia.cryptowallet.models.FeeEstimate
 import com.lybia.cryptowallet.models.FeeEstimateParams
 import com.lybia.cryptowallet.models.MemoData
-import kotlin.concurrent.Volatile
+import com.lybia.cryptowallet.models.NFTItem
+import com.lybia.cryptowallet.utils.nfkd
+import com.lybia.cryptowallet.wallets.bitcoin.BitcoinManager
+import com.lybia.cryptowallet.wallets.bridge.BridgeManagerFactory
+import com.lybia.cryptowallet.wallets.cardano.CardanoAddress
+import com.lybia.cryptowallet.wallets.cardano.CardanoAddressType
+import com.lybia.cryptowallet.wallets.centrality.CentralityManager
+import com.lybia.cryptowallet.wallets.ethereum.EthereumManager
+import com.lybia.cryptowallet.wallets.ton.TonManager
+import kotlin.math.pow
 
 /**
  * Result wrapper for balance queries.
@@ -85,10 +83,22 @@ internal fun doubleToSmallestUnit(amount: Double, factor: Long): Long {
  * Delegates to chain-specific managers created via [ChainManagerFactory].
  * Supports lazy manager creation — managers are only instantiated when first accessed.
  */
-class CommonCoinsManager(
+class CommonCoinsManager private constructor(
     private val mnemonic: String,
-    private val configs: Map<NetworkName, ChainConfig> = emptyMap()
+    private val configs: Map<NetworkName, ChainConfig>,
+    @Suppress("UNUSED_PARAMETER") normalized: Unit
 ) {
+    /**
+     * Public constructor — applies BIP-39 mandatory NFKD normalization to
+     * the mnemonic so that CJK (especially Japanese with dakuten characters
+     * like げ, べ, で) produces identical seeds on iOS and Android regardless
+     * of whether the host platform delivered the string in NFC or NFD form.
+     */
+    constructor(
+        mnemonic: String,
+        configs: Map<NetworkName, ChainConfig> = emptyMap()
+    ) : this(mnemonic.nfkd().trim(), configs, Unit)
+
     private val logger = Logger.withTag("CommonCoinsManager")
     private val managers = mutableMapOf<NetworkName, IWalletManager>()
 
@@ -163,16 +173,17 @@ class CommonCoinsManager(
         cardanoApiService: com.lybia.cryptowallet.services.CardanoApiService?,
         midnightApiService: com.lybia.cryptowallet.services.MidnightApiService? = null
     ) : this(mnemonic) {
-        // Pre-populate managers with injected services
+        // Use the normalized field (not the raw param) so child managers see
+        // the same NFKD form as lazy-created managers via ChainManagerFactory.
         if (cardanoApiService != null) {
             managers[NetworkName.CARDANO] = com.lybia.cryptowallet.wallets.cardano.CardanoManager(
-                mnemonic = mnemonic,
+                mnemonic = this.mnemonic,
                 apiService = cardanoApiService
             )
         }
         if (midnightApiService != null) {
             managers[NetworkName.MIDNIGHT] = com.lybia.cryptowallet.wallets.midnight.MidnightManager(
-                mnemonic = mnemonic,
+                mnemonic = this.mnemonic,
                 apiService = midnightApiService
             )
         }

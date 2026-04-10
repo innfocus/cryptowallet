@@ -7,6 +7,7 @@ import com.lybia.cryptowallet.utils.sha256
 import com.lybia.cryptowallet.utils.suffix
 import com.lybia.cryptowallet.utils.toBitsString
 import com.lybia.cryptowallet.utils.toHexString
+import com.lybia.cryptowallet.utils.nfkd
 import com.lybia.cryptowallet.utils.normalized
 import fr.acinq.bitcoin.MnemonicCode
 import kotlin.random.Random
@@ -47,9 +48,10 @@ class ACTBIP39 {
 
         @Throws(ACTBIP39Exception::class)
         fun entropyString(mnemonic: String, skipValidate: Boolean = false): String {
-            val language = ACTLanguages.detectTypeWithMnemonic(mnemonic)
+            val normalizedMnemonic = mnemonic.nfkd()
+            val language = ACTLanguages.detectTypeWithMnemonic(normalizedMnemonic)
                 ?: throw ACTBIP39Exception(ACTBIP39Error.UnableToCreateEntropy.message)
-            val mnemonicSlice = splitMnemonicWords(mnemonic)
+            val mnemonicSlice = splitMnemonicWords(normalizedMnemonic)
             if (!mnemonicSlice.isValid) {
                 throw ACTBIP39Exception(ACTBIP39Error.InvalidStrength.message)
             }
@@ -99,8 +101,9 @@ class ACTBIP39 {
          */
         @Throws(ACTBIP39Exception::class)
         fun deterministicSeedString(mnemonic: String, passphrase: String = ""): String {
-            val words = Bip39Language.splitMnemonic(mnemonic)
-            val seed = MnemonicCode.toSeed(words, passphrase)
+            // BIP-39 mandates NFKD on both mnemonic and passphrase before PBKDF2.
+            val words = Bip39Language.splitMnemonic(mnemonic.nfkd())
+            val seed = MnemonicCode.toSeed(words, passphrase.nfkd())
             return seed.toHexString()
         }
 
@@ -116,7 +119,9 @@ class ACTBIP39 {
 
         data class Result(val words: List<String>, val isValid: Boolean)
         private fun splitMnemonicWords(mnemonic: String): Result {
-            val words = Bip39Language.splitMnemonic(mnemonic)
+            // NFKD first so CJK wordlist lookups (words() indexOf) match the
+            // canonical BIP-39 form shipped in the wordlist resources.
+            val words = Bip39Language.splitMnemonic(mnemonic.nfkd())
             val ms = words.size
             if (ms % 3 != 0 || ms < 12 || ms > 24) {
                 return Result(listOf(), false)
