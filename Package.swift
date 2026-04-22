@@ -9,8 +9,8 @@ let package = Package(
    targets: [
       .binaryTarget(
          name: "crypto-wallet-lib",
-         url: "https://github.com/innfocus/cryptowallet/releases/download/v1.2.10/crypto_wallet_lib.xcframework.zip",
-         checksum: "fc3c117c6382bac311a128e9312894685dc149c9d8aaa3447eeaf5bac133285b"
+         url: "https://github.com/innfocus/cryptowallet/releases/download/v1.2.11/crypto_wallet_lib.xcframework.zip",
+         checksum: "3d55d43c22b211066b22ea7e7909a292b5f3e456e8694d96654e9939a70a28c9"
       )
    ]
 )
