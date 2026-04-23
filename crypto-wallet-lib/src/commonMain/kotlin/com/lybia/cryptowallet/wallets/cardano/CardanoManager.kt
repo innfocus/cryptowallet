@@ -448,71 +448,86 @@ class CardanoManager(
             }
         }
 
-        // Phase 3: Build transaction
+        // Phase 3: Build transaction (once; shared across fee iterations)
         val currentBlock = apiService.getCurrentBlock()
         val ttl = currentBlock.slot + 7200 // ~2 hours
-
-        val builder = CardanoTransactionBuilder()
-        for (utxo in selectedUtxos) {
-            builder.addInput(utxo.txHash, utxo.index)
-        }
-
-        // Token output to recipient
-        builder.addMultiAssetOutput(
-            toAddressBytes,
-            minAda,
-            mapOf(policyIdBytes to mapOf(assetNameBytes to amount))
-        )
-
-        // Change output
-        val totalInputLovelace = selectedUtxos.sumOf { it.lovelace }
-        val changeLovelace = totalInputLovelace - fee - minAda
-        val hasChangeTokens = changeTokensMap.isNotEmpty()
-
-        if (hasChangeTokens) {
-            val changeAssets = changeMapToBytes(changeTokensMap)
-            val changeOutput = CardanoTransactionOutput(
-                addressBytes = fromAddressBytes,
-                lovelace = changeLovelace,
-                multiAssets = changeAssets
-            )
-            val minAdaForChange = CardanoMinUtxo.calculateMinAda(changeOutput, COINS_PER_UTXO_BYTE)
-            if (changeLovelace < minAdaForChange) {
-                throw CardanoError.InsufficientAda(
-                    available = changeLovelace,
-                    required = minAdaForChange
-                )
-            }
-            builder.addMultiAssetOutput(fromAddressBytes, changeLovelace, changeAssets)
-        } else if (changeLovelace >= CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
-            // ADA-only change: only add output if above minimum UTXO (absorb dust into effective fee)
-            builder.addOutput(fromAddressBytes, changeLovelace)
-        }
-
-        builder.setFee(fee)
-        builder.setTtl(ttl)
-
-        // Cardano ledger rule: sum(inputs.lovelace) = sum(outputs.lovelace) + fee
-        val totalOutputLovelace = minAda +
-            (if (hasChangeTokens || changeLovelace >= CardanoTransactionBuilder.MIN_UTXO_LOVELACE) changeLovelace else 0L)
-        val consumed = totalOutputLovelace + fee
-        check(totalInputLovelace >= consumed) {
-            "Value not conserved: inputs=$totalInputLovelace, outputs+fee=$consumed"
-        }
-
-        val body = builder.build()
-
-        // Sign with Icarus ed25519-bip32
         val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0)
-        val txHash = body.getHash()
-        val signature = Ed25519Icarus.sign(paymentExtKey, txHash)
+        val totalInputLovelace = selectedUtxos.sumOf { it.lovelace }
+        val hasChangeTokens = changeTokensMap.isNotEmpty()
+        val changeAssets = if (hasChangeTokens) changeMapToBytes(changeTokensMap) else null
 
-        val witnessSet = CardanoWitnessBuilder()
-            .addVKeyWitness(paymentPub, signature)
-            .build()
+        fun attempt(feeAttempt: Long): CardanoSignedTransaction {
+            val builder = CardanoTransactionBuilder()
+            for (utxo in selectedUtxos) {
+                builder.addInput(utxo.txHash, utxo.index)
+            }
+            builder.addMultiAssetOutput(
+                toAddressBytes,
+                minAda,
+                mapOf(policyIdBytes to mapOf(assetNameBytes to amount))
+            )
 
-        val signedTx = CardanoSignedTransaction(body, witnessSet)
-        return apiService.submitTransaction(signedTx.serialize())
+            val changeLovelace = totalInputLovelace - feeAttempt - minAda
+
+            if (hasChangeTokens) {
+                val assets = changeAssets!!
+                val changeOutput = CardanoTransactionOutput(
+                    addressBytes = fromAddressBytes,
+                    lovelace = changeLovelace,
+                    multiAssets = assets
+                )
+                val minAdaForChange = CardanoMinUtxo.calculateMinAda(changeOutput, COINS_PER_UTXO_BYTE)
+                if (changeLovelace < minAdaForChange) {
+                    throw CardanoError.InsufficientAda(
+                        available = changeLovelace,
+                        required = minAdaForChange
+                    )
+                }
+                builder.addMultiAssetOutput(fromAddressBytes, changeLovelace, assets)
+            } else if (changeLovelace >= CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
+                builder.addOutput(fromAddressBytes, changeLovelace)
+            }
+
+            builder.setFee(feeAttempt)
+            builder.setTtl(ttl)
+
+            // Cardano ledger rule: sum(inputs.lovelace) = sum(outputs.lovelace) + fee
+            val totalOutputLovelace = minAda +
+                (if (hasChangeTokens || changeLovelace >= CardanoTransactionBuilder.MIN_UTXO_LOVELACE) changeLovelace else 0L)
+            val consumed = totalOutputLovelace + feeAttempt
+            check(totalInputLovelace >= consumed) {
+                "Value not conserved: inputs=$totalInputLovelace, outputs+fee=$consumed"
+            }
+
+            val body = builder.build()
+            val txHash = body.getHash()
+            val signature = Ed25519Icarus.sign(paymentExtKey, txHash)
+            val witnessSet = CardanoWitnessBuilder()
+                .addVKeyWitness(paymentPub, signature)
+                .build()
+            return CardanoSignedTransaction(body, witnessSet)
+        }
+
+        var currentFee = fee
+        repeat(FEE_RETRY_LIMIT) {
+            val signedTx = attempt(currentFee)
+            val txSize = signedTx.serialize().size
+            val minFee = computeMinFee(txSize)
+            if (signedTx.body.fee >= minFee) {
+                if (txSize > CardanoTransactionBuilder.MAX_TX_SIZE_BYTES) {
+                    throw CardanoError.ApiError(
+                        statusCode = null,
+                        message = "Transaction too large: $txSize bytes (max ${CardanoTransactionBuilder.MAX_TX_SIZE_BYTES})"
+                    )
+                }
+                return apiService.submitTransaction(signedTx.serialize())
+            }
+            currentFee = minFee
+        }
+        throw CardanoError.ApiError(
+            statusCode = null,
+            message = "Failed to converge on minimum Cardano fee after $FEE_RETRY_LIMIT attempts"
+        )
     }
 
     // ── Transaction building & signing (Task 6.4) ───────────────────────────
@@ -535,6 +550,9 @@ class CardanoManager(
         val hasServiceFee = !serviceAddress.isNullOrBlank() && serviceFeeLovelace > 0
         logger.d { "buildAndSignTransaction: $amount lovelace to $toAddress, fee=$fee, serviceFee=$serviceFeeLovelace, hasServiceFee=$hasServiceFee" }
         val fromAddress = getAddress()
+        val fromAddressBytes = addressToBytes(fromAddress)
+        val toAddressBytes = addressToBytes(toAddress)
+        val serviceAddressBytes = if (hasServiceFee) addressToBytes(serviceAddress!!) else null
 
         // Fetch UTXOs — parse native tokens to preserve them in change output
         val apiUtxos = apiService.getUtxos(listOf(fromAddress))
@@ -559,152 +577,162 @@ class CardanoManager(
             )
         }
 
-        // UTXO selection: prefer UTXOs without native tokens to avoid multi-asset change.
-        // Sort: token-free UTXOs first (by lovelace desc), then token-bearing (by lovelace desc).
+        // Get current slot for TTL (once; stable across fee iterations)
+        val currentBlock = apiService.getCurrentBlock()
+        val ttl = currentBlock.slot + 7200
+
+        // Derive payment key once; signing is deterministic wrt body hash, so re-signing
+        // with the same key on a rebuilt body produces a fresh, valid witness.
+        val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0)
+
         val serviceFeeTotal = if (hasServiceFee) serviceFeeLovelace else 0L
-        val requiredTotal = amount + fee + serviceFeeTotal
         val sorted = utxos.sortedWith(
             compareBy<CardanoUtxo> { it.nativeTokens.isNotEmpty() }
                 .thenByDescending { it.lovelace }
         )
-        val selected = mutableListOf<CardanoUtxo>()
-        var collected = 0L
-        for (utxo in sorted) {
-            if (collected >= requiredTotal) break
-            selected.add(utxo)
-            collected += utxo.lovelace
-        }
 
-        // Gather native tokens from selected UTXOs that must be returned via change
-        val changeTokensMap = mutableMapOf<String, MutableMap<String, Long>>()
-        for (utxo in selected) {
-            for (token in utxo.nativeTokens) {
-                val assetMap = changeTokensMap.getOrPut(token.policyId) { mutableMapOf() }
-                assetMap[token.assetName] = (assetMap[token.assetName] ?: 0L) + token.amount
-            }
-        }
-        val hasChangeTokens = changeTokensMap.isNotEmpty()
+        // Build & sign once with the supplied fee. Returns the signed tx; the fee actually
+        // encoded in the body may differ from the requested fee due to dust absorption.
+        suspend fun attempt(feeAttempt: Long): CardanoSignedTransaction {
+            val requiredTotal = amount + feeAttempt + serviceFeeTotal
 
-        // If change carries native tokens, we need extra ADA for the multi-asset change output minUTxO
-        val fromAddressBytes = addressToBytes(fromAddress)
-        var minAdaForChange = 0L
-        if (hasChangeTokens) {
-            val changeAssets = changeTokensMap.map { (pid, assets) ->
-                hexToBytes(pid) to assets.map { (name, amt) -> hexToBytes(name) to amt }.toMap()
-            }.toMap()
-            val dummyChangeOutput = CardanoTransactionOutput(
-                addressBytes = fromAddressBytes,
-                lovelace = 2_000_000L,
-                multiAssets = changeAssets
-            )
-            minAdaForChange = CardanoMinUtxo.calculateMinAda(dummyChangeOutput, COINS_PER_UTXO_BYTE)
-        }
-
-        // Ensure we have enough ADA including minAda for multi-asset change
-        val requiredWithChange = requiredTotal + minAdaForChange
-        if (collected < requiredWithChange) {
-            // Try to add more UTXOs
-            val remaining = sorted.filter { it !in selected }.sortedByDescending { it.lovelace }
-            for (utxo in remaining) {
-                if (collected >= requiredWithChange) break
+            // UTXO selection: prefer UTXOs without native tokens to avoid multi-asset change.
+            val selected = mutableListOf<CardanoUtxo>()
+            var collected = 0L
+            for (utxo in sorted) {
+                if (collected >= requiredTotal) break
                 selected.add(utxo)
                 collected += utxo.lovelace
-                // Re-gather tokens from newly added UTXOs
+            }
+
+            // Gather native tokens from selected UTXOs that must be returned via change
+            val changeTokensMap = mutableMapOf<String, MutableMap<String, Long>>()
+            for (utxo in selected) {
                 for (token in utxo.nativeTokens) {
                     val assetMap = changeTokensMap.getOrPut(token.policyId) { mutableMapOf() }
                     assetMap[token.assetName] = (assetMap[token.assetName] ?: 0L) + token.amount
                 }
             }
-        }
 
-        if (collected < requiredTotal) {
-            throw CardanoError.InsufficientAda(
-                available = collected,
-                required = requiredTotal
-            )
-        }
+            // If change carries native tokens, we need extra ADA for the multi-asset change output minUTxO
+            var minAdaForChange = 0L
+            if (changeTokensMap.isNotEmpty()) {
+                val changeAssets = changeTokensMap.map { (pid, assets) ->
+                    hexToBytes(pid) to assets.map { (name, amt) -> hexToBytes(name) to amt }.toMap()
+                }.toMap()
+                val dummyChangeOutput = CardanoTransactionOutput(
+                    addressBytes = fromAddressBytes,
+                    lovelace = 2_000_000L,
+                    multiAssets = changeAssets
+                )
+                minAdaForChange = CardanoMinUtxo.calculateMinAda(dummyChangeOutput, COINS_PER_UTXO_BYTE)
+            }
 
-        // Get current slot for TTL
-        val currentBlock = apiService.getCurrentBlock()
-        val ttl = currentBlock.slot + 7200
+            val requiredWithChange = requiredTotal + minAdaForChange
+            if (collected < requiredWithChange) {
+                val remaining = sorted.filter { it !in selected }.sortedByDescending { it.lovelace }
+                for (utxo in remaining) {
+                    if (collected >= requiredWithChange) break
+                    selected.add(utxo)
+                    collected += utxo.lovelace
+                    for (token in utxo.nativeTokens) {
+                        val assetMap = changeTokensMap.getOrPut(token.policyId) { mutableMapOf() }
+                        assetMap[token.assetName] = (assetMap[token.assetName] ?: 0L) + token.amount
+                    }
+                }
+            }
 
-        // Build transaction body
-        val builder = CardanoTransactionBuilder()
-        for (utxo in selected) {
-            builder.addInput(utxo.txHash, utxo.index)
-        }
-
-        val toAddressBytes = addressToBytes(toAddress)
-        builder.addOutput(toAddressBytes, amount)
-
-        // Service fee output
-        if (hasServiceFee) {
-            val serviceAddressBytes = addressToBytes(serviceAddress!!)
-            builder.addOutput(serviceAddressBytes, serviceFeeLovelace)
-        }
-
-        // Change output
-        val rawChange = collected - amount - fee - serviceFeeTotal
-        val hasTokenChange = changeTokensMap.isNotEmpty()
-
-        if (hasTokenChange) {
-            // Multi-asset change: must include all native tokens from selected UTXOs
-            val changeAssets = changeTokensMap.map { (pid, assets) ->
-                hexToBytes(pid) to assets.map { (name, amt) -> hexToBytes(name) to amt }.toMap()
-            }.toMap()
-            val changeOutput = CardanoTransactionOutput(
-                addressBytes = fromAddressBytes,
-                lovelace = rawChange,
-                multiAssets = changeAssets
-            )
-            val actualMinAdaForChange = CardanoMinUtxo.calculateMinAda(changeOutput, COINS_PER_UTXO_BYTE)
-            if (rawChange < actualMinAdaForChange) {
+            if (collected < requiredTotal) {
                 throw CardanoError.InsufficientAda(
-                    available = rawChange,
-                    required = actualMinAdaForChange
+                    available = collected,
+                    required = requiredTotal
                 )
             }
-            builder.addMultiAssetOutput(fromAddressBytes, rawChange, changeAssets)
-            builder.setFee(fee)
-        } else {
-            // ADA-only change: dust (<1 ADA) is absorbed into fee
-            val effectiveFee: Long
-            val actualChange: Long
-            if (rawChange > 0L && rawChange < CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
-                effectiveFee = fee + rawChange
-                actualChange = 0L
+
+            val builder = CardanoTransactionBuilder()
+            for (utxo in selected) {
+                builder.addInput(utxo.txHash, utxo.index)
+            }
+            builder.addOutput(toAddressBytes, amount)
+            if (hasServiceFee) {
+                builder.addOutput(serviceAddressBytes!!, serviceFeeLovelace)
+            }
+
+            val rawChange = collected - amount - feeAttempt - serviceFeeTotal
+            val hasTokenChange = changeTokensMap.isNotEmpty()
+
+            if (hasTokenChange) {
+                val changeAssets = changeTokensMap.map { (pid, assets) ->
+                    hexToBytes(pid) to assets.map { (name, amt) -> hexToBytes(name) to amt }.toMap()
+                }.toMap()
+                val changeOutput = CardanoTransactionOutput(
+                    addressBytes = fromAddressBytes,
+                    lovelace = rawChange,
+                    multiAssets = changeAssets
+                )
+                val actualMinAdaForChange = CardanoMinUtxo.calculateMinAda(changeOutput, COINS_PER_UTXO_BYTE)
+                if (rawChange < actualMinAdaForChange) {
+                    throw CardanoError.InsufficientAda(
+                        available = rawChange,
+                        required = actualMinAdaForChange
+                    )
+                }
+                builder.addMultiAssetOutput(fromAddressBytes, rawChange, changeAssets)
+                builder.setFee(feeAttempt)
             } else {
-                effectiveFee = fee
-                actualChange = rawChange
+                // ADA-only change: dust (<1 ADA) is absorbed into fee
+                val effectiveFee: Long
+                val actualChange: Long
+                if (rawChange > 0L && rawChange < CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
+                    effectiveFee = feeAttempt + rawChange
+                    actualChange = 0L
+                } else {
+                    effectiveFee = feeAttempt
+                    actualChange = rawChange
+                }
+                if (actualChange > 0L) {
+                    builder.addOutput(fromAddressBytes, actualChange)
+                }
+                builder.setFee(effectiveFee)
             }
-            if (actualChange > 0L) {
-                builder.addOutput(fromAddressBytes, actualChange)
-            }
-            builder.setFee(effectiveFee)
+
+            builder.setTtl(ttl)
+
+            val body = builder.build()
+            val txHash = body.getHash()
+            val signature = Ed25519Icarus.sign(paymentExtKey, txHash)
+            val witnessSet = CardanoWitnessBuilder()
+                .addVKeyWitness(paymentPub, signature)
+                .build()
+            return CardanoSignedTransaction(body, witnessSet)
         }
 
-        builder.setTtl(ttl)
-
-        val body = builder.build()
-
-        // Sign with Icarus ed25519-bip32 — kL as scalar directly (NOT RFC 8032)
-        val (paymentPub, _, paymentExtKey) = deriveShelleyPaymentKey(0, 0)
-        val txHash = body.getHash()
-        val signature = Ed25519Icarus.sign(paymentExtKey, txHash)
-
-        val witnessSet = CardanoWitnessBuilder()
-            .addVKeyWitness(paymentPub, signature)
-            .build()
-
-        val signedTx = CardanoSignedTransaction(body, witnessSet)
-        val txBytes = signedTx.serialize()
-        if (txBytes.size > CardanoTransactionBuilder.MAX_TX_SIZE_BYTES) {
-            throw CardanoError.ApiError(
-                statusCode = null,
-                message = "Transaction too large: ${txBytes.size} bytes (max ${CardanoTransactionBuilder.MAX_TX_SIZE_BYTES})"
-            )
+        // Fee convergence loop: rebuild with the protocol-required minimum fee if the
+        // caller's fee is below it. Normally converges in 1–2 iterations because only
+        // the change-output lovelace and fee integer encoding width shift.
+        var currentFee = fee
+        repeat(FEE_RETRY_LIMIT) {
+            val signedTx = attempt(currentFee)
+            val txSize = signedTx.serialize().size
+            val minFee = computeMinFee(txSize)
+            val encodedFee = signedTx.body.fee
+            if (encodedFee >= minFee) {
+                if (txSize > CardanoTransactionBuilder.MAX_TX_SIZE_BYTES) {
+                    throw CardanoError.ApiError(
+                        statusCode = null,
+                        message = "Transaction too large: $txSize bytes (max ${CardanoTransactionBuilder.MAX_TX_SIZE_BYTES})"
+                    )
+                }
+                logger.d { "buildAndSignTransaction: fee converged — size=$txSize, minFee=$minFee, encodedFee=$encodedFee" }
+                return signedTx
+            }
+            logger.d { "buildAndSignTransaction: fee too small (size=$txSize, minFee=$minFee, encodedFee=$encodedFee) — retrying with fee=$minFee" }
+            currentFee = minFee
         }
-        return signedTx
+        throw CardanoError.ApiError(
+            statusCode = null,
+            message = "Failed to converge on minimum Cardano fee after $FEE_RETRY_LIMIT attempts"
+        )
     }
 
     // ── Byron Transaction (Bug #5-#8 fix) ──────────────────────────────────
@@ -740,6 +768,9 @@ class CardanoManager(
         // Derive Byron key at m/44'/1815'/0'/0/fromIndex
         val (pubKey32, chainCode32, extKey64) = deriveByronKey(fromIndex)
         val fromAddress = CardanoAddress.createByronAddress(pubKey32, chainCode32)
+        val fromAddressBytes = addressToBytes(fromAddress)
+        val toAddressBytes = addressToBytes(toAddress)
+        val serviceAddressBytes = if (hasServiceFee) addressToBytes(serviceAddress!!) else null
 
         // Fetch UTXOs for the Byron address
         val apiUtxos = apiService.getUtxos(listOf(fromAddress))
@@ -750,82 +781,87 @@ class CardanoManager(
             CardanoUtxo(txHash = apiUtxo.txHash, index = apiUtxo.txIndex, lovelace = lovelace)
         }
 
-        // UTXO selection
-        val serviceFeeTotal = if (hasServiceFee) serviceFeeLovelace else 0L
-        val requiredTotal = amount + fee + serviceFeeTotal
-        val sorted = utxos.sortedByDescending { it.lovelace }
-        val selected = mutableListOf<CardanoUtxo>()
-        var collected = 0L
-        for (utxo in sorted) {
-            if (collected >= requiredTotal) break
-            selected.add(utxo)
-            collected += utxo.lovelace
-        }
-        if (collected < requiredTotal) {
-            throw CardanoError.ApiError(
-                statusCode = null,
-                message = "Insufficient ADA: available=$collected, required=$requiredTotal"
-            )
-        }
-
-        // Get TTL
+        // Get TTL (once; stable across fee iterations)
         val currentBlock = apiService.getCurrentBlock()
         val ttl = currentBlock.slot + 7200
 
-        // Build transaction body
-        val builder = CardanoTransactionBuilder()
-        for (utxo in selected) {
-            builder.addInput(utxo.txHash, utxo.index)
+        val serviceFeeTotal = if (hasServiceFee) serviceFeeLovelace else 0L
+        val sorted = utxos.sortedByDescending { it.lovelace }
+
+        suspend fun attempt(feeAttempt: Long): CardanoSignedTransaction {
+            val requiredTotal = amount + feeAttempt + serviceFeeTotal
+            val selected = mutableListOf<CardanoUtxo>()
+            var collected = 0L
+            for (utxo in sorted) {
+                if (collected >= requiredTotal) break
+                selected.add(utxo)
+                collected += utxo.lovelace
+            }
+            if (collected < requiredTotal) {
+                throw CardanoError.ApiError(
+                    statusCode = null,
+                    message = "Insufficient ADA: available=$collected, required=$requiredTotal"
+                )
+            }
+
+            val builder = CardanoTransactionBuilder()
+            for (utxo in selected) {
+                builder.addInput(utxo.txHash, utxo.index)
+            }
+            builder.addOutput(toAddressBytes, amount)
+            if (hasServiceFee) {
+                builder.addOutput(serviceAddressBytes!!, serviceFeeLovelace)
+            }
+
+            // Change output: dust (<1 ADA) is absorbed into fee to keep output above MIN_UTXO
+            val rawChange = collected - amount - feeAttempt - serviceFeeTotal
+            val effectiveFee: Long
+            val actualChange: Long
+            if (rawChange > 0L && rawChange < CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
+                effectiveFee = feeAttempt + rawChange
+                actualChange = 0L
+            } else {
+                effectiveFee = feeAttempt
+                actualChange = rawChange
+            }
+            if (actualChange > 0L) {
+                builder.addOutput(fromAddressBytes, actualChange)
+            }
+
+            builder.setFee(effectiveFee)
+            builder.setTtl(ttl)
+
+            val body = builder.build()
+            val txHash = body.getHash()
+            val signature = Ed25519Icarus.sign(extKey64, txHash)
+            val attributes = byteArrayOf(0xa0.toByte())
+            val witnessSet = CardanoWitnessBuilder()
+                .addBootstrapWitness(pubKey32, signature, chainCode32, attributes)
+                .build()
+            return CardanoSignedTransaction(body, witnessSet)
         }
 
-        val toAddressBytes = addressToBytes(toAddress)
-        builder.addOutput(toAddressBytes, amount)
-
-        if (hasServiceFee) {
-            val serviceAddressBytes = addressToBytes(serviceAddress!!)
-            builder.addOutput(serviceAddressBytes, serviceFeeLovelace)
+        var currentFee = fee
+        repeat(FEE_RETRY_LIMIT) {
+            val signedTx = attempt(currentFee)
+            val txSize = signedTx.serialize().size
+            val minFee = computeMinFee(txSize)
+            val encodedFee = signedTx.body.fee
+            if (encodedFee >= minFee) {
+                if (txSize > CardanoTransactionBuilder.MAX_TX_SIZE_BYTES) {
+                    throw CardanoError.ApiError(
+                        statusCode = null,
+                        message = "Transaction too large: $txSize bytes (max ${CardanoTransactionBuilder.MAX_TX_SIZE_BYTES})"
+                    )
+                }
+                return signedTx
+            }
+            currentFee = minFee
         }
-
-        // Change output: dust (<1 ADA) is absorbed into fee to keep output above MIN_UTXO
-        val rawChange = collected - amount - fee - serviceFeeTotal
-        val effectiveFee: Long
-        val actualChange: Long
-        if (rawChange > 0L && rawChange < CardanoTransactionBuilder.MIN_UTXO_LOVELACE) {
-            effectiveFee = fee + rawChange  // absorb dust into fee
-            actualChange = 0L
-        } else {
-            effectiveFee = fee
-            actualChange = rawChange
-        }
-        if (actualChange > 0L) {
-            val fromAddressBytes = addressToBytes(fromAddress)
-            builder.addOutput(fromAddressBytes, actualChange)
-        }
-
-        builder.setFee(effectiveFee)
-        builder.setTtl(ttl)
-
-        val body = builder.build()
-
-        // Sign using Icarus ed25519-bip32 — NOT standard RFC 8032
-        val txHash = body.getHash()
-        val signature = Ed25519Icarus.sign(extKey64, txHash)
-
-        // Bootstrap witness: [pubKey32, sig64, chainCode32, 0xa0 (CBOR empty map)]
-        val attributes = byteArrayOf(0xa0.toByte())
-        val witnessSet = CardanoWitnessBuilder()
-            .addBootstrapWitness(pubKey32, signature, chainCode32, attributes)
-            .build()
-
-        val signedTx = CardanoSignedTransaction(body, witnessSet)
-        val txBytes = signedTx.serialize()
-        if (txBytes.size > CardanoTransactionBuilder.MAX_TX_SIZE_BYTES) {
-            throw CardanoError.ApiError(
-                statusCode = null,
-                message = "Transaction too large: ${txBytes.size} bytes (max ${CardanoTransactionBuilder.MAX_TX_SIZE_BYTES})"
-            )
-        }
-        return signedTx
+        throw CardanoError.ApiError(
+            statusCode = null,
+            message = "Failed to converge on minimum Cardano fee after $FEE_RETRY_LIMIT attempts"
+        )
     }
 
     // ── IStakingManager implementation ──────────────────────────────────
@@ -1103,6 +1139,29 @@ class CardanoManager(
          * Formula: max(1 ADA, (160 + outputSize) * COINS_PER_UTXO_BYTE)
          */
         internal const val COINS_PER_UTXO_BYTE = 4310L
+
+        /** Protocol parameter: fee per byte of serialized signed tx (current mainnet/testnet). */
+        internal const val MIN_FEE_A = 44L
+
+        /** Protocol parameter: constant fee component (current mainnet/testnet). */
+        internal const val MIN_FEE_B = 155_381L
+
+        /**
+         * Extra lovelace added on top of the computed minFee to absorb rounding noise
+         * (fee integer encoding width can shift tx size by 1–2 bytes across iterations)
+         * and small protocol-parameter drifts. 0.01 ADA — negligible cost, big cushion.
+         */
+        internal const val FEE_SAFETY_BUFFER = 10_000L
+
+        /** Max iterations when converging on the minimum fee (protocol fee-point iteration). */
+        private const val FEE_RETRY_LIMIT = 3
+
+        /**
+         * Compute the minimum fee the ledger will accept for a signed tx of the given size.
+         * Formula: MIN_FEE_A * txBytes + MIN_FEE_B + FEE_SAFETY_BUFFER.
+         */
+        internal fun computeMinFee(signedTxSize: Int): Long =
+            MIN_FEE_A * signedTxSize + MIN_FEE_B + FEE_SAFETY_BUFFER
 
         /**
          * Estimated fee for staking transactions (~400-byte tx).
