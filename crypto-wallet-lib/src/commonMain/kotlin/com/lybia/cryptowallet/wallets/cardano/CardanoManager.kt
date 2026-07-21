@@ -11,6 +11,7 @@ import com.lybia.cryptowallet.errors.StakingError
 import com.lybia.cryptowallet.models.TransferResponseModel
 import com.lybia.cryptowallet.services.CardanoApiService
 import com.lybia.cryptowallet.utils.nfkd
+import com.lybia.cryptowallet.utils.toHexString
 import com.lybia.cryptowallet.wallets.bip39.Bip39Language
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
@@ -211,6 +212,23 @@ class CardanoManager(
 
         val isTestnet = Config.shared.getNetwork() == Network.TESTNET
         return CardanoAddress.createRewardAddress(stakingKeyHash, isTestnet)
+    }
+
+    /**
+     * Export the Icarus master extended private key as hex
+     * (`kL(32) || kR(32) || chainCode(32)` = 96 bytes, lowercase, no prefix).
+     *
+     * This is the exact value the legacy backend `api/v4/ada/generate` endpoint
+     * returns in its `privateKey` field. Callers moving Shelley/stake address
+     * generation on-device can use it to keep an existing server-side staking
+     * flow working unchanged.
+     *
+     * ⚠️ This is the wallet ROOT key — treat as highly sensitive. Prefer the
+     * on-device staking APIs ([IStakingManager]) over sending this to a backend.
+     */
+    fun exportMasterPrivateKeyHex(): String {
+        val (ext, cc) = getMasterKey()
+        return (ext + cc).toHexString()
     }
 
     // ── BaseCoinManager overrides (Task 6.1) ────────────────────────────────
