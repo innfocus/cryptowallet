@@ -389,6 +389,101 @@ class CardanoManagerTest {
     }
 
     @Test
+    fun buildAndSignTransactionReportsTotalsWhenTokenChangeLacksMinAda() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val tokenUnit = "b".repeat(56) + "48454c4c4f"
+        val client = routingMockClient { url ->
+            when {
+                url.contains("/utxos") -> """[{"tx_hash":"${"a".repeat(64)}","tx_index":0,"amount":[{"unit":"lovelace","quantity":"40340032"},{"unit":"$tokenUnit","quantity":"1"}]}]""" to HttpStatusCode.OK
+                url.contains("/blocks/latest") -> """{"epoch":400,"slot":100000,"hash":"blockhash","height":9000000}""" to HttpStatusCode.OK
+                else -> "Not Found" to HttpStatusCode.NotFound
+            }
+        }
+        val manager = createManager(client)
+        // Spends all ADA but 1 lovelace, leaving nothing to carry the token back as change.
+        val error = assertFailsWith<CardanoError.InsufficientAda> {
+            manager.buildAndSignTransaction(
+                toAddress = manager.getAddress(),
+                amount = 33_918_130L,
+                fee = 200_000L,
+                serviceAddress = manager.getAddress(),
+                serviceFeeLovelace = 6_221_901L
+            )
+        }
+        assertEquals(40_340_032L, error.available)
+        assertTrue(error.required > 40_340_031L + 1_000_000L, "required must include token change min ADA, got ${error.required}")
+        client.close()
+    }
+
+    // ── getSpendableBalance ────────────────────────────────────────────────
+
+    @Test
+    fun getSpendableBalanceReservesMinAdaForTokens() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val tokenUnit = "b".repeat(56) + "48454c4c4f"
+        val client = routingMockClient { url ->
+            when {
+                url.contains("/utxos") -> """[
+                    {"tx_hash":"${"a".repeat(64)}","tx_index":0,"amount":[{"unit":"lovelace","quantity":"10000000"}]},
+                    {"tx_hash":"${"c".repeat(64)}","tx_index":1,"amount":[{"unit":"lovelace","quantity":"3000000"},{"unit":"$tokenUnit","quantity":"500"}]}
+                ]""" to HttpStatusCode.OK
+                else -> "Not Found" to HttpStatusCode.NotFound
+            }
+        }
+        val manager = createManager(client)
+        val balance = manager.getSpendableBalance()
+
+        assertEquals(13_000_000L, balance.totalLovelace)
+        assertEquals(2, balance.utxoCount)
+        assertTrue(balance.tokenLockedLovelace >= 1_000_000L, "token change min ADA, got ${balance.tokenLockedLovelace}")
+        assertEquals(balance.totalLovelace - balance.tokenLockedLovelace, balance.spendableLovelace)
+        assertTrue(balance.estimatedMaxSendFeeLovelace in 170_000L..300_000L, "fee estimate, got ${balance.estimatedMaxSendFeeLovelace}")
+        client.close()
+    }
+
+    @Test
+    fun getSpendableBalanceFeeCoversSpendAllTransaction() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val utxoJson = (0 until 60).joinToString(",", "[", "]") { i ->
+            val hash = i.toString(16).padStart(64, '0')
+            """{"tx_hash":"$hash","tx_index":0,"amount":[{"unit":"lovelace","quantity":"2000000"}]}"""
+        }
+        val client = routingMockClient { url ->
+            when {
+                url.contains("/utxos") -> utxoJson to HttpStatusCode.OK
+                url.contains("/blocks/latest") -> """{"epoch":400,"slot":100000,"hash":"blockhash","height":9000000}""" to HttpStatusCode.OK
+                else -> "Not Found" to HttpStatusCode.NotFound
+            }
+        }
+        val manager = createManager(client)
+        val balance = manager.getSpendableBalance()
+        assertEquals(0L, balance.tokenLockedLovelace)
+
+        // "Send max" with the estimated fee must build without InsufficientAda.
+        val serviceFee = 1_000_000L
+        val maxAmount = balance.spendableLovelace - balance.estimatedMaxSendFeeLovelace - serviceFee
+        val signedTx = manager.buildAndSignTransaction(
+            toAddress = manager.getAddress(),
+            amount = maxAmount,
+            fee = 200_000L,
+            serviceAddress = manager.getAddress(),
+            serviceFeeLovelace = serviceFee
+        )
+        assertEquals(60, signedTx.body.inputs.size)
+        assertTrue(signedTx.body.fee <= balance.estimatedMaxSendFeeLovelace)
+        client.close()
+    }
+
+    @Test
+    fun getSpendableBalanceIsZeroWithoutUtxos() = runTest {
+        Config.shared.setNetwork(Network.MAINNET)
+        val client = jsonMockClient("[]")
+        val balance = createManager(client).getSpendableBalance()
+        assertEquals(CardanoSpendableBalance(0L, 0L, 0L, 0), balance)
+        client.close()
+    }
+
+    @Test
     fun getChainIdReturnsCorrectNetwork() = runTest {
         Config.shared.setNetwork(Network.MAINNET)
         val client = jsonMockClient("[]")

@@ -17,6 +17,26 @@ import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 
 /**
+ * ADA that can actually be spent from the wallet's payment address.
+ *
+ * @property totalLovelace Sum of lovelace across every UTXO at the payment address.
+ * @property tokenLockedLovelace Minimum ADA that must stay with the wallet's native tokens in the
+ *   change output (0 when the address holds no tokens).
+ * @property estimatedMaxSendFeeLovelace Protocol minimum network fee for a transaction that spends
+ *   every UTXO (recipient + service-fee + change outputs), i.e. the fee a "send max" will need.
+ * @property utxoCount Number of UTXOs at the payment address.
+ */
+data class CardanoSpendableBalance(
+    val totalLovelace: Long,
+    val tokenLockedLovelace: Long,
+    val estimatedMaxSendFeeLovelace: Long,
+    val utxoCount: Int
+) {
+    /** Lovelace available for amount + fees once the token change output is funded. */
+    val spendableLovelace: Long get() = maxOf(0L, totalLovelace - tokenLockedLovelace)
+}
+
+/**
  * Main Cardano wallet manager.
  *
  * Extends [BaseCoinManager] and provides Shelley/Byron address generation (CIP-1852),
@@ -548,6 +568,106 @@ class CardanoManager(
         )
     }
 
+    // ── Spendable balance ───────────────────────────────────────────────────
+
+    /**
+     * Fetch every UTXO at [address], parsing lovelace and native tokens.
+     */
+    private suspend fun fetchUtxos(address: String): List<CardanoUtxo> =
+        apiService.getUtxos(listOf(address)).map { apiUtxo ->
+            val lovelace = apiUtxo.amount
+                .filter { it.unit == "lovelace" }
+                .sumOf { it.quantity.toLongOrNull() ?: 0L }
+            val nativeTokens = apiUtxo.amount
+                .filter { it.unit != "lovelace" }
+                .map { amt ->
+                    CardanoNativeToken(
+                        policyId = amt.unit.take(56),
+                        assetName = amt.unit.drop(56),
+                        amount = amt.quantity.toLongOrNull() ?: 0L
+                    )
+                }
+            CardanoUtxo(
+                txHash = apiUtxo.txHash,
+                index = apiUtxo.txIndex,
+                lovelace = lovelace,
+                nativeTokens = nativeTokens
+            )
+        }
+
+    /**
+     * ADA the wallet can spend through [buildAndSignTransaction], which only draws inputs from
+     * the payment address (Shelley account 0 / index 0).
+     *
+     * Use this — not the stake-account `controlled_amount` from Blockfrost `/accounts/{stake}` —
+     * to compute a "send max" amount: `controlled_amount` also counts unwithdrawn staking rewards
+     * and funds on other addresses, neither of which can be spent here. It also reserves the
+     * minimum ADA that has to accompany native tokens in the change output.
+     */
+    suspend fun getSpendableBalance(): CardanoSpendableBalance {
+        val fromAddress = getAddress()
+        val utxos = fetchUtxos(fromAddress)
+        if (utxos.isEmpty()) {
+            return CardanoSpendableBalance(0L, 0L, 0L, 0)
+        }
+        val fromAddressBytes = addressToBytes(fromAddress)
+        val totalLovelace = utxos.sumOf { it.lovelace }
+
+        // Aggregate by hex first: ByteArray map keys compare by identity.
+        val tokensByHex = mutableMapOf<String, MutableMap<String, Long>>()
+        for (token in utxos.flatMap { it.nativeTokens }) {
+            val assetMap = tokensByHex.getOrPut(token.policyId) { mutableMapOf() }
+            assetMap[token.assetName] = (assetMap[token.assetName] ?: 0L) + token.amount
+        }
+        val tokenAssets = tokensByHex.map { (pid, assets) ->
+            hexToBytes(pid) to assets.map { (name, amt) -> hexToBytes(name) to amt }.toMap()
+        }.toMap()
+
+        // Sized with the full balance as the change lovelace, which can only over-estimate.
+        val tokenLockedLovelace = if (tokenAssets.isEmpty()) 0L else CardanoMinUtxo.calculateMinAda(
+            CardanoTransactionOutput(fromAddressBytes, totalLovelace, tokenAssets),
+            COINS_PER_UTXO_BYTE
+        )
+
+        return CardanoSpendableBalance(
+            totalLovelace = totalLovelace,
+            tokenLockedLovelace = tokenLockedLovelace,
+            estimatedMaxSendFeeLovelace = estimateSpendAllFee(utxos, fromAddressBytes, tokenAssets, totalLovelace),
+            utxoCount = utxos.size
+        )
+    }
+
+    /**
+     * Minimum fee for a tx spending all [utxos] with recipient, service-fee and change outputs.
+     * Placeholder values are chosen so each CBOR field is at least as wide as the real one.
+     */
+    private fun estimateSpendAllFee(
+        utxos: List<CardanoUtxo>,
+        fromAddressBytes: ByteArray,
+        tokenAssets: Map<ByteArray, Map<ByteArray, Long>>,
+        totalLovelace: Long
+    ): Long {
+        val placeholderLovelace = maxOf(totalLovelace, CardanoTransactionBuilder.MIN_UTXO_LOVELACE)
+        val builder = CardanoTransactionBuilder()
+        for (utxo in utxos) {
+            builder.addInput(utxo.txHash, utxo.index)
+        }
+        builder.addOutput(fromAddressBytes, placeholderLovelace) // recipient
+        builder.addOutput(fromAddressBytes, placeholderLovelace) // service fee
+        if (tokenAssets.isNotEmpty()) {
+            builder.addMultiAssetOutput(fromAddressBytes, placeholderLovelace, tokenAssets)
+        } else {
+            builder.addOutput(fromAddressBytes, placeholderLovelace)
+        }
+        builder.setFee(ESTIMATE_PLACEHOLDER_FEE)
+        builder.setTtl(ESTIMATE_PLACEHOLDER_TTL)
+        val witnessSet = CardanoWitnessBuilder()
+            .addVKeyWitness(ByteArray(32), ByteArray(64))
+            .build()
+        val txSize = CardanoSignedTransaction(builder.build(), witnessSet).serialize().size
+        return computeMinFee(txSize + ESTIMATE_ADDRESS_MARGIN_BYTES)
+    }
+
     // ── Transaction building & signing (Task 6.4) ───────────────────────────
 
     /**
@@ -573,27 +693,7 @@ class CardanoManager(
         val serviceAddressBytes = if (hasServiceFee) addressToBytes(serviceAddress!!) else null
 
         // Fetch UTXOs — parse native tokens to preserve them in change output
-        val apiUtxos = apiService.getUtxos(listOf(fromAddress))
-        val utxos = apiUtxos.map { apiUtxo ->
-            val lovelace = apiUtxo.amount
-                .filter { it.unit == "lovelace" }
-                .sumOf { it.quantity.toLongOrNull() ?: 0L }
-            val nativeTokens = apiUtxo.amount
-                .filter { it.unit != "lovelace" }
-                .map { amt ->
-                    CardanoNativeToken(
-                        policyId = amt.unit.take(56),
-                        assetName = amt.unit.drop(56),
-                        amount = amt.quantity.toLongOrNull() ?: 0L
-                    )
-                }
-            CardanoUtxo(
-                txHash = apiUtxo.txHash,
-                index = apiUtxo.txIndex,
-                lovelace = lovelace,
-                nativeTokens = nativeTokens
-            )
-        }
+        val utxos = fetchUtxos(fromAddress)
 
         // Get current slot for TTL (once; stable across fee iterations)
         val currentBlock = apiService.getCurrentBlock()
@@ -690,9 +790,11 @@ class CardanoManager(
                 )
                 val actualMinAdaForChange = CardanoMinUtxo.calculateMinAda(changeOutput, COINS_PER_UTXO_BYTE)
                 if (rawChange < actualMinAdaForChange) {
+                    // Native tokens must be returned with at least minUTxO ADA, so that ADA is
+                    // part of what this send requires — report totals, not the leftover change.
                     throw CardanoError.InsufficientAda(
-                        available = rawChange,
-                        required = actualMinAdaForChange
+                        available = collected,
+                        required = requiredTotal + actualMinAdaForChange
                     )
                 }
                 builder.addMultiAssetOutput(fromAddressBytes, rawChange, changeAssets)
@@ -1170,6 +1272,18 @@ class CardanoManager(
          * and small protocol-parameter drifts. 0.01 ADA — negligible cost, big cushion.
          */
         internal const val FEE_SAFETY_BUFFER = 10_000L
+
+        /** Fee placeholder for size estimation: a 5-byte CBOR uint, as wide as any real fee. */
+        private const val ESTIMATE_PLACEHOLDER_FEE = 1_000_000_000L
+
+        /** TTL placeholder for size estimation: a 5-byte CBOR uint, as wide as a real slot. */
+        private const val ESTIMATE_PLACEHOLDER_TTL = 4_000_000_000L
+
+        /**
+         * Extra bytes on top of the estimated tx size: the placeholder outputs use the wallet's
+         * own base address, while a recipient (e.g. a Byron address) can be longer.
+         */
+        private const val ESTIMATE_ADDRESS_MARGIN_BYTES = 100
 
         /** Max iterations when converging on the minimum fee (protocol fee-point iteration). */
         private const val FEE_RETRY_LIMIT = 3

@@ -51,6 +51,15 @@ class CardanoApiService(
      * If apiKey is provided, uses Blockfrost. Otherwise, falls back to Koios (free, no key).
      */
     companion object {
+        /** Blockfrost hard-caps list endpoints at 100 rows per page. */
+        internal const val BLOCKFROST_UTXO_PAGE_SIZE = 100
+
+        /** Koios (PostgREST) returns at most 1000 rows per response. */
+        internal const val KOIOS_UTXO_PAGE_SIZE = 1000
+
+        /** Upper bound on pages fetched per address, guarding against a misbehaving backend. */
+        internal const val MAX_UTXO_PAGES = 100
+
         fun createWithFallback(
             blockfrostUrl: String,
             koiosUrl: String,
@@ -115,9 +124,12 @@ class CardanoApiService(
     }
 
     /**
-     * Get UTXOs for a list of addresses.
-     * Blockfrost: GET /addresses/{address}/utxos
-     * Koios: POST /address_utxos with body {"_addresses": [...]}
+     * Get all UTXOs for a list of addresses, following pagination until exhausted.
+     * Blockfrost: GET /addresses/{address}/utxos?count=100&page={n} (max 100 rows per page)
+     * Koios: POST /address_utxos?offset={n}&limit=1000 with body {"_addresses": [...]}
+     *
+     * Without paging, wallets holding more UTXOs than one page were silently truncated,
+     * so the spendable balance was under-reported and sends failed with InsufficientAda.
      */
     suspend fun getUtxos(addresses: List<String>): List<CardanoApiUtxo> {
         logger.d { "getUtxos: ${addresses.size} addresses (provider=$provider)" }
@@ -126,12 +138,22 @@ class CardanoApiService(
                 val body = buildJsonObject {
                     putJsonArray("_addresses") { addresses.forEach { add(it) } }
                 }
-                val koiosUtxos = safeRequest<List<KoiosUtxo>> {
-                    post("$baseUrl/address_utxos") {
-                        applyAuth()
-                        contentType(ContentType.Application.Json)
-                        setBody(body.toString())
+                val koiosUtxos = mutableListOf<KoiosUtxo>()
+                for (pageIndex in 0 until MAX_UTXO_PAGES) {
+                    val offset = pageIndex * KOIOS_UTXO_PAGE_SIZE
+                    val page = safeRequest<List<KoiosUtxo>> {
+                        post("$baseUrl/address_utxos") {
+                            applyAuth()
+                            contentType(ContentType.Application.Json)
+                            setBody(body.toString())
+                            url {
+                                parameters.append("offset", offset.toString())
+                                parameters.append("limit", KOIOS_UTXO_PAGE_SIZE.toString())
+                            }
+                        }
                     }
+                    koiosUtxos.addAll(page)
+                    if (page.size < KOIOS_UTXO_PAGE_SIZE) break
                 }
                 // Convert Koios format to Blockfrost-compatible format
                 koiosUtxos.map { ku ->
@@ -154,10 +176,19 @@ class CardanoApiService(
             else -> {
                 val allUtxos = mutableListOf<CardanoApiUtxo>()
                 for (address in addresses) {
-                    val utxos = safeRequest<List<CardanoApiUtxo>> {
-                        get("$baseUrl/addresses/$address/utxos") { applyAuth() }
+                    for (page in 1..MAX_UTXO_PAGES) {
+                        val utxos = safeRequest<List<CardanoApiUtxo>> {
+                            get("$baseUrl/addresses/$address/utxos") {
+                                applyAuth()
+                                url {
+                                    parameters.append("count", BLOCKFROST_UTXO_PAGE_SIZE.toString())
+                                    parameters.append("page", page.toString())
+                                }
+                            }
+                        }
+                        allUtxos.addAll(utxos)
+                        if (utxos.size < BLOCKFROST_UTXO_PAGE_SIZE) break
                     }
-                    allUtxos.addAll(utxos)
                 }
                 allUtxos
             }

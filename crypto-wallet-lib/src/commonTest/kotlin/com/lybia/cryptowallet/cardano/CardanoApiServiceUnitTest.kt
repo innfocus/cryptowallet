@@ -54,6 +54,52 @@ class CardanoApiServiceUnitTest {
         client.close()
     }
 
+    @Test
+    fun getUtxosBlockfrostFollowsPagination() = runTest {
+        val requestedPages = mutableListOf<String?>()
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler { request ->
+                    val page = request.url.parameters["page"]
+                    requestedPages.add(page)
+                    assertEquals("100", request.url.parameters["count"])
+                    val size = if (page == "1") 100 else 1
+                    val body = (0 until size).joinToString(",", "[", "]") { i ->
+                        """{"tx_hash":"p${page}_$i","tx_index":$i,"amount":[{"unit":"lovelace","quantity":"1000000"}]}"""
+                    }
+                    respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                }
+            }
+        }
+        val result = service(client).getUtxos(listOf("addr1_test"))
+        assertEquals(101, result.size)
+        assertEquals(listOf<String?>("1", "2"), requestedPages)
+        client.close()
+    }
+
+    @Test
+    fun getUtxosKoiosFollowsPagination() = runTest {
+        val requestedOffsets = mutableListOf<String?>()
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler { request ->
+                    val offset = request.url.parameters["offset"]
+                    requestedOffsets.add(offset)
+                    assertEquals("1000", request.url.parameters["limit"])
+                    val size = if (offset == "0") 1000 else 5
+                    val body = (0 until size).joinToString(",", "[", "]") { i ->
+                        """{"tx_hash":"o${offset}_$i","tx_index":$i,"value":"1000000"}"""
+                    }
+                    respond(body, HttpStatusCode.OK, headersOf(HttpHeaders.ContentType, "application/json"))
+                }
+            }
+        }
+        val result = service(client, CardanoApiProvider.KOIOS).getUtxos(listOf("addr1_test"))
+        assertEquals(1005, result.size)
+        assertEquals(listOf<String?>("0", "1000"), requestedOffsets)
+        client.close()
+    }
+
     // ---- getTransactionHistory ----
 
     @Test
