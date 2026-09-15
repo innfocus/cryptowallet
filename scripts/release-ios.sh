@@ -10,9 +10,9 @@ set -euo pipefail
 #   1. Build XCFramework (release) bang Gradle
 #   2. Zip XCFramework
 #   3. Tinh SHA256 checksum
-#   4. Tao GitHub Release + upload zip
-#   5. Cap nhat Package.swift voi url va checksum moi
-#   6. Commit & push Package.swift
+#   4. Cap nhat Package.swift voi url va checksum moi
+#   5. Commit & push Package.swift
+#   6. Tao GitHub Release (tag tai commit Package.swift) + upload zip
 #
 # Yeu cau:
 #   - GitHub CLI (gh): brew install gh && gh auth login
@@ -94,27 +94,10 @@ echo "[3/6] Tinh SHA256 checksum..."
 CHECKSUM=$(swift package compute-checksum "$ZIP_PATH")
 echo "   -> ${CHECKSUM}"
 
-# --- Buoc 4: Tao GitHub Release ---
-echo "[4/6] Tao GitHub Release ${TAG}..."
-
-# Kiem tra tag da ton tai chua
-if gh release view "$TAG" &>/dev/null; then
-    echo "   -> Release ${TAG} da ton tai. Xoa va tao lai..."
-    gh release delete "$TAG" --yes --cleanup-tag
-fi
-
-gh release create "$TAG" \
-    "$ZIP_PATH" \
-    --title "Release ${TAG}" \
-    --notes "iOS XCFramework release ${VERSION}" \
-    --latest
-
+# --- Buoc 4: Cap nhat Package.swift ---
+# URL cua release asset co dinh theo tag, nen co the ghi vao Package.swift truoc khi tao release.
 DOWNLOAD_URL="https://github.com/${GITHUB_REPO}/releases/download/${TAG}/${ZIP_NAME}"
-echo "   -> Upload thanh cong!"
-echo "   -> URL: ${DOWNLOAD_URL}"
-
-# --- Buoc 5: Cap nhat Package.swift ---
-echo "[5/6] Cap nhat Package.swift..."
+echo "[4/6] Cap nhat Package.swift..."
 cat > Package.swift << SWIFT
 // swift-tools-version:5.3
 import PackageDescription
@@ -135,8 +118,8 @@ let package = Package(
 SWIFT
 echo "   -> Package.swift da duoc cap nhat!"
 
-# --- Buoc 6: Commit & Push ---
-echo "[6/6] Commit va push Package.swift..."
+# --- Buoc 5: Commit & Push ---
+echo "[5/6] Commit va push Package.swift..."
 git add Package.swift
 if git diff --cached --quiet Package.swift; then
     echo "   -> Package.swift khong thay doi, bo qua commit."
@@ -145,6 +128,27 @@ else
     git push
     echo "   -> Da push len remote!"
 fi
+
+# --- Buoc 6: Tao GitHub Release ---
+# Tag phai tro vao commit co Package.swift moi: SPM doc Package.swift tai commit cua tag.
+RELEASE_COMMIT=$(git rev-parse HEAD)
+echo "[6/6] Tao GitHub Release ${TAG} tai ${RELEASE_COMMIT}..."
+
+# Kiem tra tag da ton tai chua
+if gh release view "$TAG" &>/dev/null; then
+    echo "   -> Release ${TAG} da ton tai. Xoa va tao lai..."
+    gh release delete "$TAG" --yes --cleanup-tag
+fi
+
+gh release create "$TAG" \
+    "$ZIP_PATH" \
+    --target "$RELEASE_COMMIT" \
+    --title "Release ${TAG}" \
+    --notes "iOS XCFramework release ${VERSION}" \
+    --latest
+
+echo "   -> Upload thanh cong!"
+echo "   -> URL: ${DOWNLOAD_URL}"
 
 # --- Don dep file zip local ---
 rm -f "$ZIP_PATH"
