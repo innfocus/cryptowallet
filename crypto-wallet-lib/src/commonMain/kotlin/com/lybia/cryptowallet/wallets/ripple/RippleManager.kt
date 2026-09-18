@@ -43,8 +43,12 @@ class RippleManager(
         const val XRP_DROPS_PER_UNIT = 1_000_000.0
         /** Default fee in drops (12 drops = 0.000012 XRP) */
         const val DEFAULT_FEE_DROPS = 12L
-        /** Base reserve required for an XRP account (10 XRP) */
-        const val BASE_RESERVE_DROPS = 10_000_000L
+        /**
+         * Base reserve an XRP account must keep (1 XRP).
+         * The XRPL lowered it from 10 XRP to 1 XRP in 2024; validating against the old value
+         * rejected sends the network accepts, e.g. "send max" from a wallet under 10 XRP of change.
+         */
+        const val BASE_RESERVE_DROPS = 1_000_000L
         /**
          * LastLedgerSequence offset from current ledger index.
          * 75 ledgers ≈ 5 minutes — matches code cũ, safe during network congestion.
@@ -209,7 +213,7 @@ class RippleManager(
                     false,
                     "Insufficient funds: balance=${balanceDrops / XRP_DROPS_PER_UNIT} XRP, " +
                             "required=${requiredDrops / XRP_DROPS_PER_UNIT} XRP " +
-                            "(amount + fee + 10 XRP reserve)",
+                            "(amount + fee + ${BASE_RESERVE_DROPS / XRP_DROPS_PER_UNIT} XRP reserve)",
                     null
                 )
             }

@@ -512,7 +512,7 @@ class XrpTransactionSignerTest {
 
     @Test
     fun baseReserveDrops_is10Xrp() {
-        assertEquals(10_000_000L, RippleManager.BASE_RESERVE_DROPS, "Base reserve should be 10 XRP (10,000,000 drops)")
+        assertEquals(1_000_000L, RippleManager.BASE_RESERVE_DROPS, "Base reserve should be 1 XRP (1,000,000 drops)")
     }
 
     // ── Helpers ─────────────────────────────────────────────────────
